@@ -1401,6 +1401,67 @@ header:not(.header-expanded) .header-nav-btn-icon {
   padding: 0 2px;
 }
 
+/* Combo mode */
+
+.combo-view-btns {
+  display: flex;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.combo-view-btns .toggle-btn {
+  flex: none;
+  padding: 5px 10px;
+  font-size: 11px;
+  border-radius: 0;
+}
+
+.combo-view-btns .toggle-btn:first-child {
+  border-radius: 4px 0 0 4px;
+  border-right: none;
+}
+
+.combo-view-btns .toggle-btn:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.combo-child-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: #888;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+  text-transform: uppercase;
+  font-family: "Bender", Arial, sans-serif;
+}
+
+.combo-status-row {
+  text-align: center;
+  padding: 24px 12px;
+  color: #666;
+  font-size: 13px;
+}
+
+.combo-status-row.combo-error {
+  color: #f44336;
+}
+
+.combo-capped-notice td {
+  font-size: 11px;
+  color: #888;
+  text-align: center;
+  padding: 4px 12px;
+  background: #141414;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.combo-price-sum {
+  font-size: 9px;
+  color: #888;
+  margin-right: 3px;
+  font-weight: 700;
+}
+
 /* =========================
    VALUE COLORS
 ========================= */

@@ -44,6 +44,7 @@ window.EFTForge.state = {
 
     // Attachment table
     attachmentSort: { key: "recoil", direction: "asc" },
+    comboSort:      { key: "recoil", direction: "asc" },
     lastProcessedItems: [],
     lastParentNode:     null,
     lastSlot:           null,
@@ -84,4 +85,10 @@ window.EFTForge.state = {
 
     // Attachment ratings (item_id -> { likes, dislikes, user_vote })
     ratingsCache: {},
+
+    // Combo recommender
+    comboMode:         false,
+    lastComboItems:    [],
+    lastComboWasCapped: false,
+    combosCache:       {},
 };

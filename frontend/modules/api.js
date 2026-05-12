@@ -89,6 +89,23 @@ async function batchProcessCandidates(payload) {
     return res.json();
 }
 
+async function comboBatchProcess(payload) {
+    const res = await _post("/build/combo-batch-process", payload);
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    return res.json();
+}
+
+async function comboFull(payload, signal) {
+    const res = await fetch(`${_base()}/build/combo-full`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(payload),
+        signal,
+    });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    return res.json();
+}
+
 async function fetchFleaPrices(itemIds, gameMode = "regular") {
     const query = `{ items(ids: ${JSON.stringify(itemIds)}, gameMode: ${gameMode}) { id avg24hPrice } }`;
     const res = await fetch("https://api.tarkov.dev/graphql", {
@@ -240,4 +257,4 @@ async function fetchStatChangelog() {
     return res.json();
 }
 
-EFTForge.api = { fetchTraders, fetchGuns, fetchGunInit, fetchAmmo, fetchItemSlots, fetchSlotAllowedItems, calculateBuild, validateBuild, batchProcessCandidates, fetchFleaPrices, fetchBulkRatings, postVote, deleteVote, fetchBulkBuildRatings, postBuildVote, deleteBuildVote, publishBuild, fetchPublicBuilds, recordBuildLoad, unlistBuild, fetchBanStatus, fetchNotifications, fetchAnnouncements, fetchLeaderboardBuilds, fetchLeaderboardAttachments, fetchStatChangelog };
+EFTForge.api = { fetchTraders, fetchGuns, fetchGunInit, fetchAmmo, fetchItemSlots, fetchSlotAllowedItems, calculateBuild, validateBuild, batchProcessCandidates, comboBatchProcess, comboFull, fetchFleaPrices, fetchBulkRatings, postVote, deleteVote, fetchBulkBuildRatings, postBuildVote, deleteBuildVote, publishBuild, fetchPublicBuilds, recordBuildLoad, unlistBuild, fetchBanStatus, fetchNotifications, fetchAnnouncements, fetchLeaderboardBuilds, fetchLeaderboardAttachments, fetchStatChangelog };

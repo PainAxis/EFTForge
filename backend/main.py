@@ -389,6 +389,24 @@ def _compute_stats(base_item, current_ids: list, items_map: dict,
     }
 
 
+def _dedup_by_stats(combos: list) -> list:
+    """Keep one combo per unique stat fingerprint (recoil, ergo, EED, weight).
+    Removes color-variant duplicates and any other items with identical stat contributions."""
+    seen: dict = {}
+    result: list = []
+    for combo in combos:
+        fp = (
+            round(combo.get("recoil_vertical") or 0, 1),
+            round(combo.get("total_ergo") or 0, 1),
+            round(combo.get("evo_ergo_delta") or 0, 2),
+            round(combo.get("total_weight") or 0, 3),
+        )
+        if fp not in seen:
+            seen[fp] = True
+            result.append(combo)
+    return result
+
+
 def _check_conflicts(candidate, candidate_id: str, installed_set: set,
                      installed_items_map: dict, slots_by_item: dict,
                      slot_id: str, lang: str) -> dict:
@@ -866,6 +884,381 @@ def batch_process(
         })
 
     return {"base": base_stats, "candidates": results}
+
+
+@app.post("/build/combo-batch-process")
+def combo_batch_process(
+    base_item_id: str = Body(...),
+    installed_ids: List[str] = Body(...),
+    combos: List[dict] = Body(...),
+    lang: str = Body(default="en"),
+    strength_level: int = Body(default=10),
+    equip_ergo_modifier: float = Body(default=0.0),
+    db: Session = Depends(get_db),
+):
+    if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
+        raise HTTPException(status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}")
+    if not (EQUIP_ERGO_MIN <= equip_ergo_modifier <= EQUIP_ERGO_MAX):
+        raise HTTPException(status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}")
+
+    base_item = db.query(Item).filter(Item.id == base_item_id).first()
+    if not base_item:
+        raise HTTPException(status_code=404, detail="Base item not found")
+
+    all_needed_ids = set(installed_ids)
+    for combo in combos:
+        all_needed_ids.update(combo.get("add_ids", []))
+
+    items_map = {
+        item.id: item
+        for item in db.query(Item).filter(Item.id.in_(all_needed_ids)).all()
+    }
+    items_map[base_item_id] = base_item
+
+    base_stats = _compute_stats(base_item, installed_ids, items_map, strength_level, equip_ergo_modifier)
+
+    results = []
+    for combo in combos:
+        add_ids = combo.get("add_ids", [])
+        sim_stats = _compute_stats(base_item, list(installed_ids) + add_ids, items_map, strength_level, equip_ergo_modifier)
+        results.append({"cid": combo.get("cid"), **sim_stats})
+
+    return {"base": base_stats, "combos": results}
+
+
+# ---------------------------------------------------
+# Combo Full (single-request combo recommender)
+# ---------------------------------------------------
+
+_COMBO_FULL_CACHE: dict = {}
+_COMBO_FULL_CACHE_LOCK = threading.Lock()
+_COMBO_FULL_CACHE_MAX = 500
+
+
+@app.post("/build/combo-full")
+def combo_full(
+    base_item_id: str = Body(...),
+    installed_ids: List[str] = Body(...),
+    root_slot_id: str = Body(...),
+    lang: str = Body(default="en"),
+    strength_level: int = Body(default=10),
+    equip_ergo_modifier: float = Body(default=0.0),
+    exclude_child_slot_names: List[str] = Body(default=[]),
+    db: Session = Depends(get_db),
+):
+    if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
+        raise HTTPException(status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}")
+    if not (EQUIP_ERGO_MIN <= equip_ergo_modifier <= EQUIP_ERGO_MAX):
+        raise HTTPException(status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}")
+
+    _cache_key = (
+        base_item_id,
+        tuple(sorted(installed_ids)),
+        root_slot_id,
+        lang,
+        strength_level,
+        round(equip_ergo_modifier, 6),
+        frozenset(exclude_child_slot_names),
+    )
+    with _COMBO_FULL_CACHE_LOCK:
+        cached = _COMBO_FULL_CACHE.get(_cache_key)
+    if cached is not None:
+        return cached
+
+    # 1. Base item
+    base_item = db.query(Item).filter(Item.id == base_item_id).first()
+    if not base_item:
+        raise HTTPException(status_code=404, detail="Base item not found")
+
+    # 2. Pre-load installed items and their slots (for conflict checks)
+    installed_set_base = set(installed_ids) | {base_item_id}
+    installed_items_list = db.query(Item).filter(Item.id.in_(installed_set_base)).all() if installed_ids else []
+    items_map = {item.id: item for item in installed_items_list}
+    items_map[base_item_id] = base_item
+
+    installed_slots = db.query(Slot).filter(Slot.parent_item_id.in_(installed_set_base)).all()
+    slots_by_item: dict = {iid: [] for iid in installed_set_base}
+    for s in installed_slots:
+        slots_by_item[s.parent_item_id].append(s)
+
+    # 3. Load parent candidates for root slot + their items in one join
+    root_allowed_rows = (
+        db.query(Item)
+        .join(SlotAllowedItem, SlotAllowedItem.allowed_item_id == Item.id)
+        .filter(SlotAllowedItem.slot_id == root_slot_id)
+        .all()
+    )
+    for item in root_allowed_rows:
+        items_map[item.id] = item
+
+    # 4. Check parents for external conflicts against the base installed set only.
+    # All parents are kept - externally conflicting ones are included but marked.
+    base_only_items_map = {iid: items_map[iid] for iid in installed_set_base if iid in items_map}
+    all_parents = list(root_allowed_rows)
+    parent_external_conflict: dict = {}
+    for candidate in all_parents:
+        r = _check_conflicts(
+            candidate, candidate.id,
+            installed_set_base, base_only_items_map,
+            slots_by_item, root_slot_id, lang,
+        )
+        if not r["valid"]:
+            parent_external_conflict[candidate.id] = r
+
+    base_stats = _compute_stats(base_item, installed_ids, items_map, strength_level, equip_ergo_modifier)
+
+    if not all_parents:
+        return {"base": base_stats, "combos": []}
+
+    all_parent_ids = [p.id for p in all_parents]
+
+    # 5. Load child slots for all parents
+    all_child_slots = db.query(Slot).filter(Slot.parent_item_id.in_(all_parent_ids)).all()
+
+    # Determine which child slots have allowed items (one count query)
+    all_child_slot_ids = [s.id for s in all_child_slots]
+    slot_has_items: set = set()
+    if all_child_slot_ids:
+        counts = (
+            db.query(SlotAllowedItem.slot_id)
+            .filter(SlotAllowedItem.slot_id.in_(all_child_slot_ids))
+            .distinct()
+            .all()
+        )
+        slot_has_items = {row[0] for row in counts}
+
+    _EXCLUDED_SLOT_NAMES = frozenset(["Scope", "Tactical", "Front Sight", "Rear Sight"])
+    exclude_names = set(exclude_child_slot_names) | _EXCLUDED_SLOT_NAMES
+    child_slots_by_parent: dict = {}
+    for s in all_child_slots:
+        if s.id in slot_has_items and s.slot_name not in exclude_names:
+            child_slots_by_parent.setdefault(s.parent_item_id, []).append(s)
+
+    # 6. Load all child candidate items for all active child slots
+    active_child_slot_ids = [s.id for slots in child_slots_by_parent.values() for s in slots]
+    child_items_by_slot: dict = {}
+    if active_child_slot_ids:
+        child_allowed_rows = (
+            db.query(SlotAllowedItem.slot_id, Item)
+            .join(Item, SlotAllowedItem.allowed_item_id == Item.id)
+            .filter(SlotAllowedItem.slot_id.in_(active_child_slot_ids))
+            .all()
+        )
+        for slot_id_col, item in child_allowed_rows:
+            child_items_by_slot.setdefault(slot_id_col, []).append(item)
+            items_map[item.id] = item
+
+    # Stat-relevance filter: drop child slots where no item changes recoil or ergo.
+    # Eliminates tactical lights, lasers, etc. that cause combinatorial explosion.
+    child_items_by_slot = {
+        sid: items for sid, items in child_items_by_slot.items()
+        if any((i.recoil_modifier or 0) != 0 or (i.ergonomics_modifier or 0) != 0 for i in items)
+    }
+    child_slots_by_parent = {
+        pid: [s for s in slots if s.id in child_items_by_slot]
+        for pid, slots in child_slots_by_parent.items()
+    }
+
+    # Deduplicate child slots with identical allowed item sets per parent.
+    # e.g. a handguard with 4 identical Mount rails expands to the same combos regardless
+    # of which rail holds the item - only one representative slot is needed.
+    deduped_child_slots_by_parent: dict = {}
+    for pid, slots in child_slots_by_parent.items():
+        seen_item_sets: set = set()
+        deduped: list = []
+        for s in slots:
+            items_key = frozenset(i.id for i in child_items_by_slot.get(s.id, []))
+            if items_key and items_key not in seen_item_sets:
+                seen_item_sets.add(items_key)
+                deduped.append(s)
+        deduped_child_slots_by_parent[pid] = deduped
+    child_slots_by_parent = deduped_child_slots_by_parent
+
+    print(f"[combo-full] root_slot={root_slot_id} all_parents={len(all_parents)} conflicting={len(parent_external_conflict)}")
+    for pid, slots in child_slots_by_parent.items():
+        parent_name = next((p.name or p.id for p in all_parents if p.id == pid), pid)
+        slot_details = [(s.slot_name, len(child_items_by_slot.get(s.id, []))) for s in slots]
+        print(f"  parent={parent_name!r} child_slots={slot_details}")
+
+    # 7. Load slots for all parent + child items (needed for slot-conflict checks during expansion)
+    all_combo_item_ids = set(all_parent_ids) | {
+        item.id for items in child_items_by_slot.values() for item in items
+    }
+    if all_combo_item_ids:
+        combo_item_slots = db.query(Slot).filter(Slot.parent_item_id.in_(all_combo_item_ids)).all()
+        for s in combo_item_slots:
+            slots_by_item.setdefault(s.parent_item_id, []).append(s)
+
+    # Filter items in Mount slots: only keep mounts that have at least one non-excluded child
+    # slot (i.e., they can accept foregrips). Tac-device-only and bipod-only mounts are excluded.
+    _mount_child_exclude = exclude_names | frozenset(["Bipod"])
+    for pid, slots in list(child_slots_by_parent.items()):
+        for s in slots:
+            if s.slot_name != "Mount":
+                continue
+            items = child_items_by_slot.get(s.id, [])
+            filtered = [
+                item for item in items
+                if any(cs.slot_name not in _mount_child_exclude for cs in slots_by_item.get(item.id, []))
+            ]
+            child_items_by_slot[s.id] = filtered
+    child_slots_by_parent = {
+        pid: [s for s in slots if child_items_by_slot.get(s.id)]
+        for pid, slots in child_slots_by_parent.items()
+    }
+
+    # Release the DB connection now - all data is loaded into memory.
+    # The expansion below is CPU-only and can run for several seconds on large trees;
+    # holding the connection that whole time would block every other DB request.
+    db.close()
+
+    # 8. Helper to serialize an item for the response
+    def _ser(item):
+        return {
+            "id":                   item.id,
+            "name":                 _item_name(item, lang),
+            "short_name":           _item_short_name(item, lang),
+            "weight":               item.weight,
+            "ergonomics_modifier":  item.ergonomics_modifier,
+            "recoil_modifier":      item.recoil_modifier,
+            "accuracy_modifier":    item.accuracy_modifier,
+            "center_of_impact":     item.center_of_impact,
+            "deviation_curve":      item.deviation_curve,
+            "deviation_max":        item.deviation_max,
+            "sighting_range":       item.sighting_range,
+            "icon_link":            item.icon_link,
+            "conflicting_item_ids": item.conflicting_item_ids,
+            "conflicting_slot_ids": item.conflicting_slot_ids,
+            "magazine_capacity":    item.magazine_capacity,
+            "caliber":              item.caliber,
+            "is_weapon":            item.is_weapon,
+            "trader_price":         item.trader_price,
+            "trader_price_rub":     item.trader_price_rub,
+            "trader_currency":      item.trader_currency,
+            "trader_vendor":        item.trader_vendor,
+            "trader_min_level":     item.trader_min_level,
+            "task_unlock_id":       item.task_unlock_id,
+            "task_unlock_name":     item.task_unlock_name,
+            "task_unlock_name_zh":  item.task_unlock_name_zh,
+        }
+
+    # 9. Conflict helpers and caches
+    _valid_cache: dict = {}
+    _ext_conflict_cache: dict = {}
+
+    def _get_external_conflict(item, slot_id):
+        """Check item against the base installed set only (not combo items). Cached."""
+        key = (item.id, slot_id)
+        if key not in _ext_conflict_cache:
+            r = _check_conflicts(item, item.id, installed_set_base, base_only_items_map, slots_by_item, slot_id, lang)
+            _ext_conflict_cache[key] = None if r["valid"] else r
+        return _ext_conflict_cache[key]
+
+    def _ser_conflict(r):
+        if r is None:
+            return None
+        return {"reason_key": r["reason_key"], "reason_name": r["reason_name"],
+                "conflicting_item_id": r["conflicting_item_id"], "conflicting_slot_id": r["conflicting_slot_id"]}
+
+    def _validated_children(slot_id, inst_list, raw_candidates):
+        """Returns [(item, external_conflict_or_None), ...] excluding internal conflicts."""
+        key = (slot_id, tuple(sorted(inst_list)))
+        if key in _valid_cache:
+            return _valid_cache[key]
+        inst_set = set(inst_list)
+        inst_items_map = {iid: items_map[iid] for iid in inst_list if iid in items_map}
+        result = []
+        for ci in raw_candidates:
+            r_full = _check_conflicts(ci, ci.id, inst_set, inst_items_map, slots_by_item, slot_id, lang)
+            if r_full["valid"]:
+                result.append((ci, None))
+            else:
+                # If the conflict is only with the base installed set (not with combo items),
+                # include it as an externally conflicted option so it can be shown in red.
+                r_ext = _get_external_conflict(ci, slot_id)
+                if r_ext is not None:
+                    result.append((ci, r_ext))
+                # else: internal conflict (with parent or sibling child) - skip entirely
+        _valid_cache[key] = result
+        return result
+
+    # 10. Frontier expansion + stats (pure Python, no further DB queries)
+    all_combos = []
+    for parent in all_parents:
+        child_slots = child_slots_by_parent.get(parent.id, [])
+        parent_child_slot_ids = [cs.id for cs in child_slots]
+        parent_name = parent.name or parent.id
+        t0 = time.monotonic()
+        parent_conflict = parent_external_conflict.get(parent.id)
+
+        if not child_slots:
+            combo_ids = installed_ids + [parent.id]
+            stats = _compute_stats(base_item, combo_ids, items_map, strength_level, equip_ergo_modifier)
+            all_combos.append({
+                "parent_item":          _ser(parent),
+                "child_items":          [],
+                "child_slot_ids":       [],
+                "all_child_slot_ids":   [],
+                "conflict":             _ser_conflict(parent_conflict),
+                **stats,
+            })
+            continue
+
+        # frontier: list of dicts { child_items, child_slot_ids, installed_ids, conflict }
+        frontier = [{"child_items": [], "child_slot_ids": [], "installed_ids": installed_ids + [parent.id], "conflict": parent_conflict}]
+
+        for cs in child_slots:
+            raw_candidates = child_items_by_slot.get(cs.id, [])
+            if not raw_candidates:
+                continue
+
+            next_frontier = []
+            seen: dict = {}
+            for state in frontier:
+                inst_list = state["installed_ids"]
+                key = tuple(sorted(inst_list))
+                if key not in seen:
+                    seen[key] = _validated_children(cs.id, inst_list, raw_candidates)
+                valid_children_with_conflicts = seen[key]
+
+                next_frontier.append(state)  # "skip this child slot" is always valid
+                for ci, ext_conflict in valid_children_with_conflicts:
+                    next_frontier.append({
+                        "child_items":    state["child_items"] + [ci],
+                        "child_slot_ids": state["child_slot_ids"] + [cs.id],
+                        "installed_ids":  state["installed_ids"] + [ci.id],
+                        "conflict":       state["conflict"] or ext_conflict,
+                    })
+
+            frontier = next_frontier
+            print(f"    [{parent_name!r}] after slot={cs.slot_name!r} candidates={len(raw_candidates)} frontier={len(frontier)}")
+
+        print(f"  [{parent_name!r}] final frontier={len(frontier)} elapsed={time.monotonic()-t0:.2f}s")
+
+        for state in frontier:
+            combo_ids = installed_ids + [parent.id] + [ci.id for ci in state["child_items"]]
+            stats = _compute_stats(base_item, combo_ids, items_map, strength_level, equip_ergo_modifier)
+            all_combos.append({
+                "parent_item":          _ser(parent),
+                "child_items":          [_ser(ci) for ci in state["child_items"]],
+                "child_slot_ids":       state["child_slot_ids"],
+                "all_child_slot_ids":   parent_child_slot_ids,
+                "conflict":             _ser_conflict(state["conflict"]),
+                **stats,
+            })
+
+    clean      = _dedup_by_stats([c for c in all_combos if not c.get("conflict")])
+    conflicted = _dedup_by_stats([c for c in all_combos if c.get("conflict")])
+    result = {"base": base_stats, "combos": clean + conflicted, "timed_out": False}
+
+    with _COMBO_FULL_CACHE_LOCK:
+        if len(_COMBO_FULL_CACHE) >= _COMBO_FULL_CACHE_MAX:
+            keys = list(_COMBO_FULL_CACHE.keys())
+            for k in keys[:len(keys) // 2]:
+                del _COMBO_FULL_CACHE[k]
+        _COMBO_FULL_CACHE[_cache_key] = result
+
+    return result
 
 
 # ---------------------------------------------------

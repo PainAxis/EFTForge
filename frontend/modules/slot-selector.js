@@ -269,6 +269,11 @@ async function openSlotSelector(parentNode, slot) {
     document.getElementById("attachment-placeholder").style.display = "none";
 
     EFTForge.state.currentSearchQuery = "";
+    EFTForge.state.lastComboItems = [];
+    EFTForge.state.comboMode = false;
+    _comboAvailableChecked = false;
+    _abortComboCalc();
+    _disconnectComboObserver();
 
   const box = document.getElementById("attachment-table-container");
 
@@ -299,6 +304,10 @@ async function openSlotSelector(parentNode, slot) {
                     ${t("ui.compare")}
                     <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
                 </button>
+                <div id="combo-view-btns" class="combo-view-btns" style="display:none;">
+                    <button id="combo-list-btn" class="toggle-btn${!EFTForge.state.comboMode ? ' active' : ''}" onclick="setComboView(false)">${t("ui.comboList")}</button>
+                    <button id="combo-combo-btn" class="toggle-btn${EFTForge.state.comboMode ? ' active' : ''}" onclick="setComboView(true)">${t("ui.combo")}</button>
+                </div>
             </div>
             <button id="att-table-close-btn" class="att-table-close-btn">&#x2715;</button>
         </div>
@@ -523,6 +532,11 @@ function applyAttachmentSearch(query) {
 }
 
 function applyAttachmentSort() {
+  if (EFTForge.state.comboMode) {
+      applyComboSort();
+      return;
+  }
+
   const dir = EFTForge.state.attachmentSort.direction === "asc" ? 1 : -1;
 
   let itemsToRender = EFTForge.state.currentSearchQuery
@@ -608,6 +622,8 @@ function applyAttachmentSort() {
   updateSortIndicators();
   renderAttachmentRows(itemsToRender);
   _updateColumnVisibility(itemsToRender);
+
+  if (!_comboAvailableChecked) _checkComboAvailability();
 }
 
 function _updateColumnVisibility(items) {
@@ -634,23 +650,28 @@ function _updateColumnVisibility(items) {
 }
 
 function changeSort(key) {
-  if (EFTForge.state.attachmentSort.key === key) {
-    EFTForge.state.attachmentSort.direction =
-      EFTForge.state.attachmentSort.direction === "asc"
-        ? "desc"
-        : "asc";
-  } else {
-    EFTForge.state.attachmentSort.key = key;
+  if (EFTForge.state.comboMode) {
+    // Combo mode: each column has one fixed "best" direction, no toggle
+    const bestDir = { recoil: "asc", weight: "asc", ergo: "desc", evo: "desc", price: "asc", name: "asc" };
+    EFTForge.state.comboSort.key       = key;
+    EFTForge.state.comboSort.direction = bestDir[key] ?? "asc";
+    applyAttachmentSort();
+    return;
+  }
 
-    // Default directions per column
+  const sortState = EFTForge.state.attachmentSort;
+  if (sortState.key === key) {
+    sortState.direction = sortState.direction === "asc" ? "desc" : "asc";
+  } else {
+    sortState.key = key;
     if (key === "recoil") {
-      EFTForge.state.attachmentSort.direction = "asc"; // strongest reduction first
+      sortState.direction = "asc";
     } else if (key === "evo") {
-      EFTForge.state.attachmentSort.direction = "desc"; // highest evo first
+      sortState.direction = "desc";
     } else if (key === "price") {
-      EFTForge.state.attachmentSort.direction = "asc"; // cheapest first
+      sortState.direction = "asc";
     } else {
-      EFTForge.state.attachmentSort.direction = "asc";
+      sortState.direction = "asc";
     }
   }
 
@@ -658,30 +679,23 @@ function changeSort(key) {
 }
 
 function updateSortIndicators() {
-  const headers = ["name", "weight", "recoil", "ergo", "acc", "evo", "price"];
+  const sortState = EFTForge.state.comboMode
+      ? EFTForge.state.comboSort
+      : EFTForge.state.attachmentSort;
 
+  const headers = ["name", "weight", "recoil", "ergo", "acc", "evo", "price"];
   headers.forEach(key => {
     const th = document.getElementById(`th-${key}`);
     if (!th) return;
-
-    const span = th.querySelector(".sort-indicator");
-    span.textContent = "";
-
+    th.querySelector(".sort-indicator").textContent = "";
     th.classList.remove("active-sort");
   });
 
-  const activeTh = document.getElementById(
-    `th-${EFTForge.state.attachmentSort.key}`
-  );
-
+  const activeTh = document.getElementById(`th-${sortState.key}`);
   if (!activeTh) return;
-
   activeTh.classList.add("active-sort");
-
-  const span = activeTh.querySelector(".sort-indicator");
-
-  span.textContent =
-    EFTForge.state.attachmentSort.direction === "asc" ? " ▲" : " ▼";
+  activeTh.querySelector(".sort-indicator").textContent =
+      sortState.direction === "asc" ? " ▲" : " ▼";
 }
 
 function togglePurchasableOnly() {
@@ -692,6 +706,15 @@ function togglePurchasableOnly() {
 }
 
 function toggleCompareMode() {
+    // Disable combo mode if enabling compare
+    if (!EFTForge.state.compareMode && EFTForge.state.comboMode) {
+        _abortComboCalc();
+        EFTForge.state.comboMode = false;
+        EFTForge.state.lastComboItems = [];
+        document.getElementById("combo-list-btn")?.classList.add("active");
+        document.getElementById("combo-combo-btn")?.classList.remove("active");
+    }
+
     EFTForge.state.compareMode = !EFTForge.state.compareMode;
     if (!EFTForge.state.compareMode) {
         EFTForge.state.compareBaselineId = null;
@@ -1373,4 +1396,614 @@ function renderAttachmentRows(items) {
   tbody.appendChild(fragment);
   _initMarqueeText(tbody, { hoverOnly: true });
   _cacheStatBarEls();
+}
+
+// ============================================================
+// COMBO MODE
+// ============================================================
+
+// Returns [{parentNode, slotId}, ...] path from fromNode leading to targetNode
+// via successive children, or null if not found. Empty array means fromNode === targetNode.
+function _findAncestorPath(fromNode, targetNode) {
+    if (fromNode === targetNode) return [];
+    for (const [slotId, childNode] of Object.entries(fromNode.children || {})) {
+        if (childNode === targetNode) return [{ parentNode: fromNode, slotId }];
+        const sub = _findAncestorPath(childNode, targetNode);
+        if (sub !== null) return [{ parentNode: fromNode, slotId }, ...sub];
+    }
+    return null;
+}
+
+// Find the effective combo root for the current slot selection.
+// Left-side queue slots (Barrel, Muzzle, etc.) are each their own combo root - they
+// never bubble up to the gun level. Sub-slots of a left-queue item bubble up only as
+// far as the nearest left-queue ancestor. Everything else bubbles up to the gun's direct
+// child slot (original behavior).
+function _findComboRootSlot() {
+    const tree         = EFTForge.state.buildTree;
+    const targetParent = EFTForge.state.lastParentNode;
+    const targetSlotId = EFTForge.state.lastSlot?.id;
+    if (!tree || !targetParent || !targetSlotId) return { parentNode: targetParent, slotId: targetSlotId };
+
+    const leftSet = typeof _AG_LEFT_ORDER !== "undefined" ? new Set(_AG_LEFT_ORDER) : new Set();
+
+    // If the current slot is itself a left-queue slot, it is its own combo root
+    if (leftSet.has(EFTForge.state.lastSlot?.slot_name)) {
+        return { parentNode: targetParent, slotId: targetSlotId, isLeftQueueRoot: true };
+    }
+
+    // Direct child of gun root - return as-is
+    if (targetParent === tree) return { parentNode: tree, slotId: targetSlotId, isLeftQueueRoot: false };
+
+    // Walk path from gun root down to targetParent
+    const path = _findAncestorPath(tree, targetParent);
+    if (path && path.length > 0) {
+        if (leftSet.size > 0) {
+            // Find deepest left-queue ancestor slot along the path
+            for (let i = path.length - 1; i >= 0; i--) {
+                const { parentNode, slotId } = path[i];
+                const slots = EFTForge.state.slotCache[parentNode.item.id] || [];
+                const slot  = slots.find(s => s.id === slotId);
+                if (slot && leftSet.has(slot.slot_name)) {
+                    return { parentNode, slotId, isLeftQueueRoot: true };
+                }
+            }
+        }
+        // No left-queue ancestor - fall back to gun root's direct child
+        return { parentNode: tree, slotId: path[0].slotId, isLeftQueueRoot: false };
+    }
+
+    return { parentNode: targetParent, slotId: targetSlotId, isLeftQueueRoot: false };
+}
+
+let _comboChildSlotCache   = {};   // item_id -> slots[]  (used only for availability check)
+let _comboAvailableChecked = false; // true once we've finished the availability check for the current slot
+let _comboAbortController  = null;  // AbortController for the in-flight comboFull request
+
+const _COMBO_BATCH_SIZE  = 60;
+let _comboLazyItems      = [];   // full sorted list for lazy rendering
+let _comboLazyRendered   = 0;    // rows currently in the DOM
+let _comboLazyObserver   = null; // IntersectionObserver watching the sentinel row
+let _comboSpacer         = null; // <tr> that reserves height for unrendered rows
+let _comboRowHeight      = 52;   // measured px per row, updated on first render
+
+function _disconnectComboObserver() {
+    if (_comboLazyObserver) {
+        _comboLazyObserver.disconnect();
+        _comboLazyObserver = null;
+    }
+    _comboSpacer = null;
+}
+
+function _abortComboCalc() {
+    if (_comboAbortController) {
+        _comboAbortController.abort();
+        _comboAbortController = null;
+    }
+}
+
+function setComboView(wantCombo) {
+    if (EFTForge.state.comboMode === wantCombo) return;
+    EFTForge.state.comboMode = wantCombo;
+
+    const listBtn  = document.getElementById("combo-list-btn");
+    const comboBtn = document.getElementById("combo-combo-btn");
+    if (listBtn)  listBtn.classList.toggle("active", !wantCombo);
+    if (comboBtn) comboBtn.classList.toggle("active",  wantCombo);
+
+    if (wantCombo) {
+        if (EFTForge.state.compareMode) {
+            EFTForge.state.compareMode = false;
+            EFTForge.state.compareBaselineId = null;
+            EFTForge.state.compareBaselineEntry = null;
+            EFTForge.state.compareBaselineSlotPath = null;
+            const cmpBtn = document.getElementById("compare-toggle-btn");
+            if (cmpBtn) cmpBtn.classList.remove("active");
+        }
+        openComboView();
+    } else {
+        _abortComboCalc();
+        _disconnectComboObserver();
+        EFTForge.state.lastComboItems = [];
+        applyAttachmentSort();
+    }
+}
+
+async function _checkComboAvailability() {
+    _comboAvailableChecked = true;
+    const { slotId: rootSlotId } = _findComboRootSlot();
+
+    // If we are inside a sub-slot of an already-installed item, that item by
+    // definition has child slots. The root-level combo is always calculable.
+    if (rootSlotId !== EFTForge.state.lastSlot?.id) {
+        _showComboToggle(true);
+        return;
+    }
+
+    // Root-level slot: check whether any items in it have child slots.
+    const validItems = EFTForge.state.lastProcessedItems.filter(e => !e.hasConflict);
+    if (!validItems.length) return;
+
+    // Phase 1: check existing caches
+    for (const entry of validItems) {
+        if (_comboChildSlotCache.hasOwnProperty(entry.item.id)) {
+            if (_comboChildSlotCache[entry.item.id].length > 0) { _showComboToggle(true); return; }
+            continue;
+        }
+        const sc = EFTForge.state.slotCache[entry.item.id];
+        if (sc && sc.some(s => s.has_allowed_items)) { _showComboToggle(true); return; }
+    }
+
+    // Phase 2: fetch uncached items in parallel; show as soon as one has child slots
+    const uncached = validItems.filter(e =>
+        !_comboChildSlotCache.hasOwnProperty(e.item.id) &&
+        !EFTForge.state.slotCache[e.item.id]
+    );
+    if (!uncached.length) return;
+
+    const batch = uncached.slice(0, 20);
+    let found = false;
+    await Promise.allSettled(batch.map(async entry => {
+        if (found || !_comboAvailableChecked) return;
+        try {
+            const slots = await fetchItemSlots(entry.item.id);
+            const filtered = slots.filter(s => s.has_allowed_items);
+            _comboChildSlotCache[entry.item.id] = filtered;
+            if (filtered.length > 0 && !found) { found = true; _showComboToggle(true); }
+        } catch { /* ignore */ }
+    }));
+}
+
+function _showComboToggle(visible) {
+    const el = document.getElementById("combo-view-btns");
+    if (el) el.style.display = visible ? "flex" : "none";
+}
+
+
+async function openComboView() {
+    if (!EFTForge.state.lastSlot || !EFTForge.state.lastParentNode) return;
+
+    const { t } = EFTForge.lang;
+
+    // Always calculate from the highest-level ancestor slot (direct child of gun root)
+    const { parentNode: rootParentNode, slotId: rootSlotId, isLeftQueueRoot } = _findComboRootSlot();
+
+    // Build slot-emptied IDs: remove everything installed under the root slot
+    const baseIds = collectAttachmentIds(EFTForge.state.buildTree);
+    let slotEmptiedIds = baseIds;
+    if (rootParentNode.children[rootSlotId]) {
+        const installedNode = rootParentNode.children[rootSlotId];
+        const idsToRemove = new Set([installedNode.item.id, ...collectAttachmentIds(installedNode)]);
+        slotEmptiedIds = baseIds.filter(id => !idsToRemove.has(id));
+    }
+
+    const cacheKey = `combo__${rootSlotId}__${slotEmptiedIds.slice().sort().join(",")}`;
+
+    if (EFTForge.state.combosCache[cacheKey]) {
+        EFTForge.state.lastComboItems     = EFTForge.state.combosCache[cacheKey].items;
+        EFTForge.state.lastComboWasCapped = false;
+        applyComboSort();
+        return;
+    }
+
+    const tbody = document.getElementById("attachment-body");
+    if (tbody) {
+        _clearMarqueeTimers();
+        tbody.innerHTML = `<tr><td colspan="7" class="combo-status-row">${escapeHtml(t("ui.comboLoading"))}</td></tr>`;
+    }
+
+    _abortComboCalc();
+    _comboAbortController = new AbortController();
+    const signal = _comboAbortController.signal;
+
+    let result;
+    try {
+        result = await comboFull({
+            base_item_id:              EFTForge.state.currentGun.id,
+            installed_ids:             slotEmptiedIds,
+            root_slot_id:              rootSlotId,
+            lang:                      _lang(),
+            strength_level:            EFTForge.state.currentStrengthLevel ?? 10,
+            equip_ergo_modifier:       EFTForge.state.currentEquipErgoModifier ?? 0,
+            exclude_child_slot_names:  (isLeftQueueRoot && typeof _AG_LEFT_ORDER !== "undefined")
+                                           ? _AG_LEFT_ORDER.filter(n => n !== EFTForge.state.lastSlot?.slot_name) : [],
+        }, signal);
+    } catch (err) {
+        if (err.name === "AbortError") return;
+        console.error("Combo full failed:", err);
+        if (tbody && EFTForge.state.comboMode) {
+            tbody.innerHTML = `<tr><td colspan="7" class="combo-status-row combo-error">${escapeHtml(t("ui.comboError"))}</td></tr>`;
+        }
+        EFTForge.state.comboMode = false;
+        document.getElementById("combo-list-btn")?.classList.add("active");
+        document.getElementById("combo-combo-btn")?.classList.remove("active");
+        return;
+    }
+
+    if (!EFTForge.state.comboMode) return;
+
+    if (!result.combos.length) {
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="combo-status-row">${escapeHtml(t("ui.comboNone"))}</td></tr>`;
+        return;
+    }
+
+    const base       = result.base;
+    const baseEED     = parseFloat(base.evo_ergo_delta ?? 0);
+    const baseRecoilV = base.recoil_vertical ?? null;
+    const baseRecoilH = base.recoil_horizontal ?? null;
+    const baseErgo    = parseFloat(base.total_ergo ?? 0);
+    const baseWeight  = parseFloat(base.total_weight ?? 0);
+
+    const processedCombos = result.combos.map(combo => {
+        const simEED     = parseFloat(combo.evo_ergo_delta ?? 0);
+        const simErgo    = parseFloat(combo.total_ergo ?? 0);
+        const simWeight  = parseFloat(combo.total_weight ?? 0);
+        const simRecoilV = combo.recoil_vertical ?? null;
+        const simRecoilH = combo.recoil_horizontal ?? null;
+        const comboEEDDelta    = simEED - baseEED;
+        const comboErgoDelta   = simErgo - baseErgo;
+        const comboWeightDelta = simWeight - baseWeight;
+        const comboRecoilPct   = (baseRecoilV && simRecoilV !== null)
+            ? (simRecoilV / baseRecoilV - 1) * 100
+            : parseFloat(combo.parent_item.recoil_modifier ?? 0) * 100
+              + combo.child_items.reduce((s, ci) => s + parseFloat(ci.recoil_modifier ?? 0) * 100, 0);
+
+        let totalPrice = 0; let hasPrice = false;
+        for (const item of [combo.parent_item, ...combo.child_items]) {
+            const p = _getPriceRub(item);
+            if (p !== null) { totalPrice += p; hasPrice = true; }
+        }
+
+        const sortName = combo.parent_item.name.toLowerCase()
+            + combo.child_items.map(ci => " " + ci.name.toLowerCase()).join("");
+
+        return {
+            parentEntry:       { item: combo.parent_item, hasConflict: false,
+                                  recoilPercent: parseFloat(combo.parent_item.recoil_modifier ?? 0) * 100,
+                                  sortName: combo.parent_item.name.toLowerCase() },
+            childItems:        combo.child_items,
+            childSlotIds:      combo.child_slot_ids,
+            allChildSlotIds:   combo.all_child_slot_ids,
+            conflict:          combo.conflict || null,
+            sortName, simEED, simErgo, simWeight, simRecoilV, simRecoilH,
+            comboEEDDelta, comboErgoDelta, comboWeightDelta, comboRecoilPct,
+            totalPrice: hasPrice ? totalPrice : null,
+        };
+    });
+
+    EFTForge.state.combosCache[cacheKey] = { items: processedCombos };
+    EFTForge.state.lastComboItems        = processedCombos;
+    EFTForge.state.lastComboWasCapped    = false;
+
+    applyComboSort();
+}
+
+function applyComboSort() {
+    const items = EFTForge.state.lastComboItems;
+    if (!items || !items.length) {
+        const { t } = EFTForge.lang;
+        const tbody = document.getElementById("attachment-body");
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="combo-status-row">${escapeHtml(t("ui.comboNone"))}</td></tr>`;
+        return;
+    }
+
+    const { key: sortKey, direction: sortDir } = EFTForge.state.comboSort;
+    const dir    = sortDir === "asc" ? 1 : -1;
+    const sorted = [...items];
+
+    sorted.sort((a, b) => {
+        let primary;
+        switch (sortKey) {
+            case "name":    primary = a.sortName < b.sortName ? -1 : a.sortName > b.sortName ? 1 : 0; break;
+            case "recoil":  primary = a.comboRecoilPct - b.comboRecoilPct; break;
+            case "ergo":    primary = a.comboErgoDelta - b.comboErgoDelta; break;
+            case "evo":     primary = a.comboEEDDelta  - b.comboEEDDelta;  break;
+            case "weight":  primary = a.comboWeightDelta - b.comboWeightDelta; break;
+            case "price": {
+                const ap = a.totalPrice; const bp = b.totalPrice;
+                if (ap === null && bp === null) { primary = 0; break; }
+                if (ap === null) return 1;
+                if (bp === null) return -1;
+                primary = ap - bp; break;
+            }
+            default: primary = 0;
+        }
+        if (primary !== 0) return primary * dir;
+
+        // Secondary: when sorting by recoil, break ties by evo ergo delta (higher = better, so descending)
+        if (sortKey === "recoil") {
+            const evoDiff = b.comboEEDDelta - a.comboEEDDelta;
+            if (evoDiff !== 0) return evoDiff;
+        }
+
+        // Tertiary: alphabetical
+        return a.sortName < b.sortName ? -1 : a.sortName > b.sortName ? 1 : 0;
+    });
+
+    updateSortIndicators();
+    _renderComboRows(sorted);
+    _updateComboColumnVisibility(sorted);
+}
+
+function _updateComboColumnVisibility(items) {
+    const table = document.querySelector(".attachment-table");
+    if (!table) return;
+
+    const allItems = items.flatMap(e => [e.parentEntry.item, ...e.childItems]);
+
+    const hasWeight = allItems.some(it => parseFloat(it.weight ?? 0) !== 0);
+    const hasRecoil = allItems.some(it => it.recoil_modifier != null && it.recoil_modifier !== 0);
+    const hasErgo   = allItems.some(it => it.ergonomics_modifier != null && it.ergonomics_modifier !== 0);
+    const hasEvo    = hasErgo && items.some(e => Math.abs(e.comboEEDDelta) > 0.05);
+    const hasPrice  = items.some(e => e.totalPrice !== null);
+
+    table.classList.toggle("hide-col-weight", !hasWeight);
+    table.classList.toggle("hide-col-recoil", !hasRecoil);
+    table.classList.add("hide-col-acc");
+    table.classList.toggle("hide-col-ergo",   !hasErgo);
+    table.classList.toggle("hide-col-evo",    !hasEvo);
+    table.classList.toggle("hide-col-price",  !hasPrice);
+}
+
+function _isComboInstalled(entry) {
+    const { parentNode: rootParentNode, slotId: rootSlotId } = _findComboRootSlot();
+    const installedNode = rootParentNode?.children?.[rootSlotId];
+    if (!installedNode || String(installedNode.item.id) !== String(entry.parentEntry.item.id)) return false;
+
+    // Check each slot the combo specifies matches what's installed
+    const comboChildMap = new Map(
+        entry.childSlotIds.map((sid, i) => [sid, String(entry.childItems[i].id)])
+    );
+    for (const [sid, expectedId] of comboChildMap) {
+        const actual = installedNode.children?.[sid] ? String(installedNode.children[sid].item.id) : null;
+        if (expectedId !== actual) return false;
+    }
+
+    // Check no extra children are installed beyond what this combo includes
+    // allChildSlotIds lists every child slot the server considered for this parent
+    const knownSlotSet = new Set(entry.allChildSlotIds ?? entry.childSlotIds);
+    for (const sid of Object.keys(installedNode.children || {})) {
+        if (knownSlotSet.has(sid) && !comboChildMap.has(sid)) return false;
+    }
+    return true;
+}
+
+function _buildComboRow(entry) {
+    const { parentEntry, childItems } = entry;
+    const parentItem = parentEntry.item;
+
+    const row = document.createElement("tr");
+    if (entry.conflict) {
+        row.classList.add("conflict-row");
+    } else if (_isComboInstalled(entry)) {
+        row.classList.add("attachment-row-installed");
+    }
+
+    let iconAreaHtml;
+    if (!childItems.length) {
+        iconAreaHtml = `<div class="attachment-icon-wrapper">
+            <img src="${escapeHtml(parentItem.icon_link)}" class="attachment-icon" loading="lazy" decoding="async" onerror="this.style.display='none'" />
+            <div class="slot-shortname">${escapeHtml(parentItem.short_name)}</div>
+        </div>`;
+    } else {
+        iconAreaHtml = `<div class="attachment-icon-wrapper ghost-combo-icon">
+            <img src="${escapeHtml(parentItem.icon_link)}" class="attachment-icon" loading="lazy" decoding="async" onerror="this.style.display='none'" />
+            <div class="slot-shortname">${escapeHtml(parentItem.short_name)}</div>
+        </div>`;
+        for (const ci of childItems) {
+            iconAreaHtml += `<div class="ghost-combo-plus">+</div>
+            <div class="attachment-icon-wrapper ghost-combo-icon">
+                <img src="${escapeHtml(ci.icon_link)}" class="attachment-icon" loading="lazy" decoding="async" onerror="this.style.display='none'" />
+                <div class="slot-shortname">${escapeHtml(ci.short_name)}</div>
+            </div>`;
+        }
+    }
+
+    const fmtSign = (v, d = 1) => `${v > 0 ? "+" : ""}${v.toFixed(d)}`;
+
+    let priceCellHtml;
+    if (!childItems.length) {
+        priceCellHtml = _attPriceCellContent(parentItem);
+    } else {
+        const allItems = [parentItem, ...childItems];
+        let total = 0; let valid = true;
+        for (const it of allItems) { const p = _getPriceRub(it); if (p === null) { valid = false; break; } total += p; }
+        priceCellHtml = valid
+            ? `<div class="att-price-wrap"><span class="combo-price-sum">&#931;</span><span>${_formatPrice(total)}</span></div>`
+            : `-`;
+    }
+
+    const recoilCls = entry.comboRecoilPct <= 0 ? "positive" : "negative";
+    const ergoCls   = entry.comboErgoDelta >= 0 ? "ergo-positive" : "ergo-negative";
+    const evoCls    = entry.comboEEDDelta  >= 0 ? "positive" : "negative";
+
+    row.innerHTML = `
+        <td class="name-cell"><div class="attachment-name-wrapper">${iconAreaHtml}</div></td>
+        <td>${priceCellHtml}</td>
+        <td>${fmtSign(entry.comboWeightDelta, 3)}</td>
+        <td class="${recoilCls}">${fmtSign(entry.comboRecoilPct)}%</td>
+        <td class="acc-cell"></td>
+        <td class="${ergoCls}">${entry.comboErgoDelta >= 0 ? "+" : ""}${formatStat(entry.comboErgoDelta)}</td>
+        <td class="${evoCls}">${fmtSign(entry.comboEEDDelta)}</td>
+    `;
+
+    row.addEventListener("mouseenter", () => {
+        if (!_statBarEls || !_statBarEls.ergoFill?.isConnected) _cacheStatBarEls();
+        if (!_statBarEls) return;
+        const { ergoFill, ergoVal, rvFill, rvVal, rhFill, rhVal } = _statBarEls;
+        const refErgo    = EFTForge.state.lastTotalErgo;
+        const refRecoilV = EFTForge.state.lastRecoilV;
+        const refRecoilH = EFTForge.state.lastRecoilH;
+
+        const ergoDelta = entry.simErgo - refErgo;
+        if (ergoFill) {
+            ergoFill.style.width = Math.min(refErgo, 100) + "%";
+            let dEl = ergoFill.parentElement.querySelector(".delta-bar");
+            if (!dEl) { dEl = document.createElement("div"); dEl.className = "delta-bar"; ergoFill.parentElement.appendChild(dEl); }
+            if (ergoDelta !== 0) {
+                const base = Math.min(refErgo, 100); const sim = Math.min(refErgo + ergoDelta, 100);
+                dEl.style.left = Math.min(base, sim) + "%"; dEl.style.width = Math.abs(sim - base) + "%";
+                dEl.style.background = ergoDelta >= 0 ? "#4CAF50" : "#f44336";
+                dEl.style.borderRadius = ergoDelta >= 0 ? "0 3px 3px 0" : "3px";
+                dEl.style.transformOrigin = ergoDelta >= 0 ? "left" : "right";
+                dEl.style.display = ""; _animateDeltaBarIn(dEl);
+            } else { _animateDeltaBarOut(dEl); }
+        }
+        if (ergoVal) { const dt = ergoDelta !== 0 ? ` <span style="color:${ergoDelta >= 0 ? "#4CAF50" : "#f44336"}">(${ergoDelta > 0 ? "+" : ""}${formatStat(ergoDelta)})</span>` : ""; ergoVal.innerHTML = `<span style="color:#eee">${formatStat(refErgo)}</span>${dt}`; }
+
+        if (entry.simRecoilV !== null && refRecoilV !== null && rvFill) {
+            const rvBase = Math.min(refRecoilV, 500) / 5; const rvDelta = entry.simRecoilV - refRecoilV;
+            const rvSim  = Math.min(Math.max(refRecoilV + rvDelta, 0), 500) / 5;
+            rvFill.style.width = rvBase + "%";
+            let dEl = rvFill.parentElement.querySelector(".delta-bar");
+            if (!dEl) { dEl = document.createElement("div"); dEl.className = "delta-bar"; rvFill.parentElement.appendChild(dEl); }
+            if (rvDelta !== 0) {
+                dEl.style.left = Math.min(rvBase, rvSim) + "%"; dEl.style.width = Math.abs(rvSim - rvBase) + "%";
+                dEl.style.background = rvDelta <= 0 ? "#4CAF50" : "#f44336";
+                dEl.style.borderRadius = rvDelta > 0 ? "0 3px 3px 0" : "3px";
+                dEl.style.transformOrigin = rvDelta > 0 ? "left" : "right";
+                dEl.style.display = ""; _animateDeltaBarIn(dEl);
+            } else { _animateDeltaBarOut(dEl); }
+            if (rvVal) { const dt = rvDelta !== 0 ? ` <span style="color:${rvDelta <= 0 ? "#4CAF50" : "#f44336"}">(${rvDelta > 0 ? "+" : ""}${Math.round(rvDelta)})</span>` : ""; rvVal.innerHTML = `<span style="color:#eee">${Math.round(refRecoilV)}</span>${dt}`; }
+        }
+
+        if (entry.simRecoilH !== null && refRecoilH !== null && rhFill) {
+            const rhBase = Math.min(refRecoilH, 500) / 5; const rhDelta = entry.simRecoilH - refRecoilH;
+            const rhSim  = Math.min(Math.max(refRecoilH + rhDelta, 0), 500) / 5;
+            rhFill.style.width = rhBase + "%";
+            let dEl = rhFill.parentElement.querySelector(".delta-bar");
+            if (!dEl) { dEl = document.createElement("div"); dEl.className = "delta-bar"; rhFill.parentElement.appendChild(dEl); }
+            if (rhDelta !== 0) {
+                dEl.style.left = Math.min(rhBase, rhSim) + "%"; dEl.style.width = Math.abs(rhSim - rhBase) + "%";
+                dEl.style.background = rhDelta <= 0 ? "#4CAF50" : "#f44336";
+                dEl.style.borderRadius = rhDelta > 0 ? "0 3px 3px 0" : "3px";
+                dEl.style.transformOrigin = rhDelta > 0 ? "left" : "right";
+                dEl.style.display = ""; _animateDeltaBarIn(dEl);
+            } else { _animateDeltaBarOut(dEl); }
+            if (rhVal) { const dt = rhDelta !== 0 ? ` <span style="color:${rhDelta <= 0 ? "#4CAF50" : "#f44336"}">(${rhDelta > 0 ? "+" : ""}${Math.round(rhDelta)})</span>` : ""; rhVal.innerHTML = `<span style="color:#eee">${Math.round(refRecoilH)}</span>${dt}`; }
+        }
+
+        _setExtraStats(entry.simWeight, entry.simEED);
+    });
+
+    row.addEventListener("mouseleave", () => {
+        if (!_statBarEls || !_statBarEls.ergoFill?.isConnected) _cacheStatBarEls();
+        [_statBarEls?.ergoFill, _statBarEls?.rvFill, _statBarEls?.rhFill, _statBarEls?.accFill].forEach(fill => {
+            if (!fill) return;
+            const dEl = fill.parentElement.querySelector(".delta-bar");
+            if (dEl) _animateDeltaBarOut(dEl);
+        });
+        _restoreStatBarsToCurrent();
+    });
+
+    row.addEventListener("click", async () => {
+        if (entry.conflict) {
+            const { t } = EFTForge.lang;
+            const conflictText = t(entry.conflict.reason_key) + (entry.conflict.reason_name ?? "");
+            showToast(t("toast.attachmentConflict"), `${parentItem.name}\n${conflictText}`);
+            if (EFTForge.state.gridView) {
+                const conflictsWithGun = entry.conflict.conflicting_item_id === EFTForge.state.currentGun?.id;
+                if (conflictsWithGun) {
+                    flashGunCellInGrid();
+                } else {
+                    if (entry.conflict.conflicting_item_id) flashConflictInGrid(entry.conflict.conflicting_item_id);
+                    if (entry.conflict.conflicting_slot_id) flashConflictSlotInGrid(entry.conflict.conflicting_slot_id);
+                }
+            } else {
+                if (entry.conflict.conflicting_item_id) flashConflictInTree(EFTForge.state.buildTree, entry.conflict.conflicting_item_id);
+                if (entry.conflict.conflicting_slot_id) flashConflictSlotInTree(entry.conflict.conflicting_slot_id);
+            }
+            return;
+        }
+
+        if (_isComboInstalled(entry)) return;
+
+        const { parentNode: rootParentNode, slotId: rootSlotId } = _findComboRootSlot();
+        if (!rootParentNode || !rootSlotId) return;
+
+        rootParentNode.children[rootSlotId] = { item: parentItem, children: {} };
+        const newNode = rootParentNode.children[rootSlotId];
+        for (let i = 0; i < entry.childItems.length; i++) {
+            newNode.children[entry.childSlotIds[i]] = { item: entry.childItems[i], children: {} };
+        }
+
+        EFTForge.state.processedCache = {};
+        EFTForge.state.combosCache    = {};
+
+        refreshBuildStats();
+        applyAttachmentSort();
+        await renderFullTree(true);
+        flashSlot(rootParentNode, rootSlotId, "install");
+        if (typeof updateAttTableHeaderImg === "function") updateAttTableHeaderImg();
+    });
+
+    return row;
+}
+
+function _renderNextComboBatch(tbody) {
+    const sentinel = tbody.querySelector(".combo-load-sentinel");
+    const fragment = document.createDocumentFragment();
+    const end = Math.min(_comboLazyRendered + _COMBO_BATCH_SIZE, _comboLazyItems.length);
+    for (let i = _comboLazyRendered; i < end; i++) {
+        fragment.appendChild(_buildComboRow(_comboLazyItems[i]));
+    }
+    _comboLazyRendered = end;
+    if (sentinel) tbody.insertBefore(fragment, sentinel);
+    else tbody.appendChild(fragment);
+    if (_comboSpacer) {
+        const remaining = _comboLazyItems.length - _comboLazyRendered;
+        _comboSpacer.firstElementChild.style.height = remaining > 0 ? `${remaining * _comboRowHeight}px` : "0";
+    }
+}
+
+function _renderComboRows(items) {
+    _disconnectComboObserver();
+    _clearMarqueeTimers();
+    _statBarEls = null;
+    _comboLazyItems    = items;
+    _comboLazyRendered = 0;
+
+    const tbody = document.getElementById("attachment-body");
+    tbody.innerHTML = "";
+
+    _renderNextComboBatch(tbody);
+
+    if (_comboLazyRendered < _comboLazyItems.length) {
+        // Measure actual row height so the spacer accurately represents the full list
+        const sampleRow = tbody.querySelector("tr");
+        _comboRowHeight = (sampleRow && sampleRow.getBoundingClientRect().height > 0)
+            ? sampleRow.getBoundingClientRect().height : 52;
+
+        const sentinel = document.createElement("tr");
+        sentinel.className = "combo-load-sentinel";
+        sentinel.innerHTML = `<td colspan="7"></td>`;
+        tbody.appendChild(sentinel);
+
+        // Spacer reserves height for unrendered rows so the scrollbar shows the full size upfront
+        _comboSpacer = document.createElement("tr");
+        _comboSpacer.className = "combo-spacer";
+        const spacerTd = document.createElement("td");
+        spacerTd.colSpan = 7;
+        spacerTd.style.padding = "0";
+        spacerTd.style.height = `${(_comboLazyItems.length - _comboLazyRendered) * _comboRowHeight}px`;
+        _comboSpacer.appendChild(spacerTd);
+        tbody.appendChild(_comboSpacer);
+
+        const scrollRoot = document.querySelector(".right-panel");
+        _comboLazyObserver = new IntersectionObserver((entries) => {
+            if (!entries[0].isIntersecting) return;
+            _renderNextComboBatch(tbody);
+            if (_comboLazyRendered >= _comboLazyItems.length) {
+                sentinel.remove();
+                if (_comboSpacer) { _comboSpacer.remove(); _comboSpacer = null; }
+                _disconnectComboObserver();
+                _initMarqueeText(tbody, { hoverOnly: true });
+                _cacheStatBarEls();
+            }
+        }, { root: scrollRoot, rootMargin: "300px" });
+        _comboLazyObserver.observe(sentinel);
+    }
+
+    _initMarqueeText(tbody, { hoverOnly: true });
+    _cacheStatBarEls();
 }
