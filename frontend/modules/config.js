@@ -10,7 +10,7 @@ window.EFTForge.config = {
     IS_LOCAL_DEV: _isLocalDev,
 
     APP_VERSION:    "Development Build",
-    APP_BUILD_DATE: "2026-05-12T03:46:41.141Z", // UTC - run new Date().toISOString() in console when bumping version
+    APP_BUILD_DATE: "2026-05-13T03:08:26.497Z", // UTC - run new Date().toISOString() in console when bumping version
 
     CALIBER_DISPLAY_MAP: {
         "Caliber20x1mm":      "20x1mm disk",
@@ -83,5 +83,11 @@ window.EFTForge.config = {
         "Handgun", "Revolver",
         "Grenade launcher", "Grenade Launcher",
         "Primary",
+    ],
+
+    // Item IDs to exclude from combo calc child/grandchild slots.
+    // Add item IDs here to prevent them from appearing as combo options.
+    COMBO_EXCLUDE_ITEM_IDS: [
+        // example: "5a7b4900e899ef197b331a3b", // some tac device
     ],
 };

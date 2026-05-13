@@ -1457,28 +1457,56 @@ header:not(.header-expanded) .header-nav-btn-icon {
   cursor: crosshair;
 }
 
-.att-graph-dot {
-  transition: r 0.1s ease, stroke-width 0.1s ease;
-}
-
 .att-graph-dot-click {
   cursor: pointer;
 }
 
-.att-graph-dot-click:hover {
-  r: 7.5;
-  stroke: #fff;
-  stroke-width: 1.5;
+.att-graph-dot-click:hover .graph-item-name {
+  fill: #eee;
+}
+
+.graph-item-name {
+  font-family: "Bender", Arial, sans-serif;
+  font-weight: 600;
+  fill: #aaa;
+  text-shadow: 0 0 2px #000, 0 0 3px #000, 0 0 5px #000;
+  pointer-events: none;
+  user-select: none;
 }
 
 @keyframes graph-row-flash {
-  0%   { background: #f5c54240; }
-  60%  { background: #f5c54240; }
+  0%   { background: #ffffff28; }
+  60%  { background: #ffffff28; }
   100% { background: transparent; }
 }
 
 .graph-row-highlight {
   animation: graph-row-flash 1s ease forwards;
+}
+
+.graph-zoom-box {
+  fill: rgba(245, 197, 66, 0.08);
+  stroke: #f5c542;
+  stroke-width: 1;
+  stroke-dasharray: 4, 3;
+  pointer-events: none;
+}
+
+.graph-reset-svg-btn rect {
+  transition: fill 0.1s ease, stroke 0.1s ease;
+}
+.graph-reset-svg-btn:hover rect {
+  fill: #2a2a2a;
+  stroke: #666;
+}
+.graph-reset-svg-btn:hover text {
+  fill: #f5c542;
+}
+.graph-ch-toggle-btn rect {
+  transition: fill 0.1s ease, stroke 0.1s ease;
+}
+.graph-ch-toggle-btn:hover rect {
+  fill: #2a2a2a;
 }
 
 .combo-child-label {
@@ -5373,6 +5401,30 @@ body[data-mobile="true"].mobile-publish-mode #left-build-area {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .dev-modal-toggle.active {
+  background: #1a2e1a;
+  border-color: #2e6b2e;
+  color: #4caf50;
+}
+.dev-item-id-badge {
+  font-family: "Courier New", monospace;
+  font-size: 10px;
+  color: #f5c542;
+  background: #1a1600;
+  border: 1px solid #3a3000;
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-top: 2px;
+  cursor: pointer;
+  user-select: none;
+  display: inline-block;
+  letter-spacing: 0.3px;
+  transition: background 0.1s, color 0.1s;
+}
+.dev-item-id-badge:hover {
+  background: #2a2200;
+  color: #ffe082;
+}
+.dev-item-id-badge--copied {
   background: #1a2e1a;
   border-color: #2e6b2e;
   color: #4caf50;

@@ -272,6 +272,8 @@ async function openSlotSelector(parentNode, slot) {
     EFTForge.state.lastComboItems = [];
     EFTForge.state.comboMode = false;
     EFTForge.state.graphMode = false;
+    _graphView = null;
+    _graphZoomController?.abort();
     _comboAvailableChecked = false;
     _abortComboCalc();
     _disconnectComboObserver();
@@ -307,8 +309,8 @@ async function openSlotSelector(parentNode, slot) {
                 </button>
                 <div id="combo-view-btns" class="combo-view-btns">
                     <button id="combo-list-btn" class="toggle-btn${(!EFTForge.state.comboMode && !EFTForge.state.graphMode) ? ' active' : ''}" onclick="setListView()">${t("ui.comboList")}</button>
-                    <button id="graph-view-btn" class="toggle-btn${EFTForge.state.graphMode ? ' active' : ''}" onclick="setGraphView(true)">${t("ui.graph")}</button>
                     <button id="combo-combo-btn" class="toggle-btn${EFTForge.state.comboMode ? ' active' : ''}" onclick="setComboView(true)" style="display:none;">${t("ui.combo")}</button>
+                    <button id="graph-view-btn" class="toggle-btn${EFTForge.state.graphMode ? ' active' : ''}" onclick="setGraphView(true)">${t("ui.graph")}</button>
                 </div>
             </div>
             <button id="att-table-close-btn" class="att-table-close-btn">&#x2715;</button>
@@ -719,7 +721,8 @@ function togglePurchasableOnly() {
     EFTForge.state.purchasableOnly = !EFTForge.state.purchasableOnly;
     const btn = document.getElementById("purchasable-toggle-btn");
     if (btn) btn.classList.toggle("active", EFTForge.state.purchasableOnly);
-    applyAttachmentSort();
+    if (EFTForge.state.comboMode) applyComboSort();
+    else applyAttachmentSort();
 }
 
 function toggleCompareMode() {
@@ -1038,6 +1041,7 @@ function renderAttachmentRows(items) {
 
                 <div class="att-name-and-rating">
                     <div class="attachment-name-text"><span class="marquee-text">${escapeHtml(item.name)}</span></div>
+                    ${EFTForge._dev?.showItemIds ? `<div class="dev-item-id-badge" data-id="${escapeHtml(item.id)}">${escapeHtml(item.id)}</div>` : ""}
                     ${item.task_unlock_name ? `<div class="att-task-unlock">${escapeHtml(t("ui.taskUnlock"))}${escapeHtml((EFTForge.state.lang === "zh" && item.task_unlock_name_zh) ? item.task_unlock_name_zh : item.task_unlock_name)}</div>` : ""}
                     ${(() => {
                         const rd  = EFTForge.state.ratingsCache[item.id] || {};
@@ -1486,6 +1490,10 @@ let _comboLazyObserver   = null; // IntersectionObserver watching the sentinel r
 let _comboSpacer         = null; // <tr> that reserves height for unrendered rows
 let _comboRowHeight      = 52;   // measured px per row, updated on first render
 
+let _graphView              = null; // { xMin, xMax, yMin, yMax } | null = auto-fit
+let _graphZoomController    = null; // AbortController for wheel/drag window listeners
+let _graphCrosshairEnabled  = true;
+
 function _disconnectComboObserver() {
     if (_comboLazyObserver) {
         _comboLazyObserver.disconnect();
@@ -1508,6 +1516,19 @@ function _updateViewBtns() {
     document.getElementById("combo-combo-btn")?.classList.toggle("active", EFTForge.state.comboMode);
 }
 
+function _updateGraphHeader() {
+    const inGraph = EFTForge.state.graphMode;
+    const disp = inGraph ? "none" : "";
+    document.getElementById("purchasable-toggle-btn").style.display = disp;
+    document.getElementById("compare-toggle-btn").style.display = disp;
+    const h3 = document.querySelector(".att-table-header h3");
+    if (h3) {
+        const textNode = h3.firstChild;
+        if (textNode && textNode.nodeType === Node.TEXT_NODE)
+            textNode.nodeValue = inGraph ? `${t("ui.graph")} - ` : t("ui.selectAttFor");
+    }
+}
+
 function setListView() {
     const wasCombo = EFTForge.state.comboMode;
     const wasGraph = EFTForge.state.graphMode;
@@ -1521,6 +1542,8 @@ function setListView() {
     }
     if (wasGraph) {
         EFTForge.state.graphMode = false;
+        _graphZoomController?.abort();
+        _graphView = null;
         document.getElementById("attachment-graph")?.remove();
         const table = document.querySelector(".attachment-table");
         if (table) table.style.display = "";
@@ -1529,6 +1552,7 @@ function setListView() {
     }
 
     _updateViewBtns();
+    _updateGraphHeader();
     applyAttachmentSort();
 }
 
@@ -1549,6 +1573,7 @@ function setGraphView(wantGraph) {
         if (table) table.style.display = "none";
         if (searchInput) searchInput.style.display = "none";
 
+        _graphView = null;
         let graphDiv = document.getElementById("attachment-graph");
         if (!graphDiv) {
             graphDiv = document.createElement("div");
@@ -1558,6 +1583,8 @@ function setGraphView(wantGraph) {
         }
         _buildGraphSVG(graphDiv);
     } else {
+        _graphZoomController?.abort();
+        _graphView = null;
         document.getElementById("attachment-graph")?.remove();
         if (table) table.style.display = "";
         if (searchInput) searchInput.style.display = "";
@@ -1565,9 +1592,14 @@ function setGraphView(wantGraph) {
     }
 
     _updateViewBtns();
+    _updateGraphHeader();
 }
 
 function _buildGraphSVG(container) {
+    _graphZoomController?.abort();
+    _graphZoomController = new AbortController();
+    const { signal } = _graphZoomController;
+
     const allItems = EFTForge.state.lastProcessedItems;
     if (!allItems || !allItems.length) { container.innerHTML = ""; return; }
 
@@ -1579,22 +1611,27 @@ function _buildGraphSVG(container) {
     const ML = 54, MR = 14, MT = 18, MB = 46;
     const PW = W - ML - MR, PH = H - MT - MB;
 
+    // Compute full data extent with padding
     const xs = items.map(e => e.recoilPercent);
     const ys = items.map(e => e.contribution);
-    let xMin = Math.min(...xs), xMax = Math.max(...xs);
-    let yMin = Math.min(...ys), yMax = Math.max(...ys);
-    const xRange = Math.max(xMax - xMin, 0.5);
-    const yRange = Math.max(yMax - yMin, 1);
-    xMin -= xRange * 0.08; xMax += xRange * 0.08;
-    yMin -= yRange * 0.10; yMax += yRange * 0.10;
-    // Snap to zero only when zero is close to an edge (within 20% of range)
-    if (xMin > 0 && xMin < xRange * 0.2)  xMin = 0;
-    if (xMax < 0 && xMax > -xRange * 0.2) xMax = 0;
-    if (yMin > 0 && yMin < yRange * 0.2)  yMin = 0;
-    if (yMax < 0 && yMax > -yRange * 0.2) yMax = 0;
+    let dxMin = Math.min(...xs), dxMax = Math.max(...xs);
+    let dyMin = Math.min(...ys), dyMax = Math.max(...ys);
+    const xRange = Math.max(dxMax - dxMin, 0.5);
+    const yRange = Math.max(dyMax - dyMin, 1);
+    dxMin -= xRange * 0.08; dxMax += xRange * 0.08;
+    dyMin -= yRange * 0.10; dyMax += yRange * 0.10;
+    if (dxMin > 0 && dxMin < xRange * 0.2)  dxMin = 0;
+    if (dxMax < 0 && dxMax > -xRange * 0.2) dxMax = 0;
+    if (dyMin > 0 && dyMin < yRange * 0.2)  dyMin = 0;
+    if (dyMax < 0 && dyMax > -yRange * 0.2) dyMax = 0;
 
+    const { xMin, xMax, yMin, yMax } = _graphView || { xMin: dxMin, xMax: dxMax, yMin: dyMin, yMax: dyMax };
+
+    // x-axis is inverted: right side = more negative recoil = better
     const toX = x => ML + (xMax - x) / (xMax - xMin) * PW;
     const toY = y => MT + (1 - (y - yMin) / (yMax - yMin)) * PH;
+    const toDataX = sx => xMax - (sx - ML) / PW * (xMax - xMin);
+    const toDataY = sy => yMin + (1 - (sy - MT) / PH) * (yMax - yMin);
 
     function niceTicks(lo, hi, target) {
         const range = hi - lo;
@@ -1612,6 +1649,7 @@ function _buildGraphSVG(container) {
     const yTicks = niceTicks(yMin, yMax, 5);
 
     let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" class="att-graph-svg" preserveAspectRatio="xMidYMid meet">`;
+    s += `<defs><clipPath id="plot-clip"><rect x="${ML}" y="${MT}" width="${PW}" height="${PH}"/></clipPath></defs>`;
     s += `<rect x="${ML}" y="${MT}" width="${PW}" height="${PH}" fill="#161616" rx="2"/>`;
 
     for (const tx of xTicks) {
@@ -1637,43 +1675,349 @@ function _buildGraphSVG(container) {
         s += `<text x="${ML-5}" y="${(toY(ty)+3.5).toFixed(1)}" text-anchor="end">${lbl}</text>`;
     }
     s += `</g>`;
-    s += `<text x="${(ML+PW/2).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="11" fill="#666" font-family="Bender,Arial,sans-serif">Recoil % (right = better)</text>`;
+    s += `<text x="${(ML+PW/2).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="11" fill="#666" font-family="Bender,Arial,sans-serif">Recoil Modifier</text>`;
     s += `<text x="10" y="${(MT+PH/2).toFixed(1)}" text-anchor="middle" font-size="11" fill="#666" font-family="Bender,Arial,sans-serif" transform="rotate(-90,10,${(MT+PH/2).toFixed(1)})">EvoErgo</text>`;
 
     const pts = [...items].sort((a, b) => (a.hasConflict ? 0 : 1) - (b.hasConflict ? 0 : 1));
+    s += `<g clip-path="url(#plot-clip)">`;
     for (const e of pts) {
-        const cx = toX(e.recoilPercent).toFixed(1), cy = toY(e.contribution).toFixed(1);
+        const cxN = toX(e.recoilPercent), cyN = toY(e.contribution);
+        const cx = cxN.toFixed(1), cy = cyN.toFixed(1);
         const fill = e.hasConflict ? "#444"
             : e.recoilPercent <= 0 && e.contribution >= 0 ? "#4CAF50"
             : e.recoilPercent < 0  ? "#f5c542"
             : e.contribution > 0   ? "#29b6f6"
             : "#f44336";
-        const op = e.hasConflict ? "0.35" : "1";
+        const op = e.hasConflict ? 0.3 : 1;
         const r = `${e.recoilPercent>0?"+":""}${e.recoilPercent.toFixed(1)}%`;
         const v = `${e.contribution>0?"+":""}${e.contribution.toFixed(1)}`;
         const eg = `${e.ergoModifier>0?"+":""}${e.ergoModifier.toFixed(1)}`;
         const tip = `${e.item.name}\nRecoil: ${r}  EvoErgo: ${v}\nErgo: ${eg}`;
         const cls = `att-graph-dot${e.hasConflict ? "" : " att-graph-dot-click"}`;
-        s += `<circle cx="${cx}" cy="${cy}" r="5.5" fill="${fill}" fill-opacity="${op}" stroke="#0d0d0d" stroke-width="1.2" class="${cls}" data-item-id="${escapeHtml(String(e.item.id))}" data-tooltip="${escapeHtml(tip)}"/>`;
+        const iw = 22, ih = 22;
+        const ix = (cxN - iw / 2).toFixed(1), iy = (cyN - ih / 2).toFixed(1);
+
+        // Word-wrap short name to fit within icon width (~8 chars per line at font-size 4.5)
+        const FONT_SZ = 4.5, LINE_H = 5.3, MAX_CHARS = 8;
+        const nameLines = [];
+        let nameCur = '';
+        for (const w of (e.item.short_name || e.item.name || '').split(' ')) {
+            if (!nameCur) { nameCur = w; }
+            else if ((nameCur + ' ' + w).length <= MAX_CHARS) { nameCur += ' ' + w; }
+            else { nameLines.push(nameCur); nameCur = w; }
+        }
+        if (nameCur) nameLines.push(nameCur);
+        const txX = (cxN + iw / 2 - 1).toFixed(1);
+        const txY0 = cyN - ih / 2 + FONT_SZ;
+
+        s += `<g class="${cls}" data-item-id="${escapeHtml(String(e.item.id))}" data-tooltip="${escapeHtml(tip)}" opacity="${op}">`;
+        s += `<image href="${escapeHtml(e.item.icon_link)}" x="${ix}" y="${iy}" width="${iw}" height="${ih}" preserveAspectRatio="xMidYMid meet"/>`;
+        s += `<text class="graph-item-name" text-anchor="end" font-size="${FONT_SZ}">`;
+        nameLines.forEach((line, i) => {
+            s += `<tspan x="${txX}" y="${(txY0 + i * LINE_H).toFixed(1)}">${escapeHtml(line)}</tspan>`;
+        });
+        s += `</text>`;
+        s += `</g>`;
     }
+    s += `</g>`;
+
+    // Crosshair overlay - hidden until hover, pointer-events off so dots remain interactive
+    s += `<g id="graph-crosshair" visibility="hidden" pointer-events="none">`;
+    s += `<g clip-path="url(#plot-clip)">`;
+    s += `<line id="graph-ch-vt" stroke="#f5c542" stroke-width="0.6" stroke-opacity="0.25"/>`;
+    s += `<line id="graph-ch-vb" stroke="#f5c542" stroke-width="0.6" stroke-opacity="0.25"/>`;
+    s += `<line id="graph-ch-hl" stroke="#f5c542" stroke-width="0.6" stroke-opacity="0.25"/>`;
+    s += `<line id="graph-ch-hr" stroke="#f5c542" stroke-width="0.6" stroke-opacity="0.25"/>`;
+    s += `<circle id="graph-ch-dot" r="1.8" fill="none" stroke="#f5c542" stroke-width="0.7" stroke-opacity="0.5"/>`;
+    s += `</g>`;
+    s += `<text id="graph-ch-tx" font-size="7" fill="#f5c54299" font-family="Bender,Arial,sans-serif"/>`;
+    s += `<text id="graph-ch-ty" font-size="7" fill="#f5c54299" font-family="Bender,Arial,sans-serif"/>`;
+    s += `</g>`;
 
     s += `<rect x="${ML}" y="${MT}" width="${PW}" height="${PH}" fill="none" stroke="#2a2a2a" stroke-width="1" rx="2"/>`;
+
+    // Control hints watermark - top-right corner of plot
+    const hintX = ML + PW - 5, hintY = MT + 9;
+    s += `<g font-size="7" fill="#3a3a3a" font-family="Bender,Arial,sans-serif" text-anchor="end">`;
+    s += `<text x="${hintX}" y="${hintY}">Scroll to zoom</text>`;
+    s += `<text x="${hintX}" y="${hintY + 9}">Scroll wheel drag to pan</text>`;
+    s += `<text x="${hintX}" y="${hintY + 18}">Click and drag to box zoom</text>`;
+    s += `<text x="${hintX}" y="${hintY + 27}">Right click to reset</text>`;
+    s += `</g>`;
+
+    if (_graphView !== null) {
+        const bx = ML + PW - 14;
+        s += `<g class="graph-reset-svg-btn" style="cursor:pointer" data-tooltip="Reset zoom">`;
+        s += `<rect x="${bx}" y="2" width="14" height="14" rx="2" fill="#1e1e1e" stroke="#3a3a3a" stroke-width="0.5"/>`;
+        s += `<text x="${bx + 7}" y="12" text-anchor="middle" font-size="9" fill="#888" font-family="Arial,sans-serif">&#x21BA;</text>`;
+        s += `</g>`;
+    }
+
+    // crosshair toggle button - top-left of plot area
+    {
+        const chActive = _graphCrosshairEnabled;
+        const cx = ML;
+        const ic = chActive ? "#f5c542" : "#555";
+        s += `<g class="graph-ch-toggle-btn" style="cursor:pointer" data-tooltip="${chActive ? "Hide crosshair" : "Show crosshair"}">`;
+        s += `<rect x="${cx}" y="2" width="14" height="14" rx="2" fill="#1e1e1e" stroke="${chActive ? "#f5c542" : "#3a3a3a"}" stroke-width="0.5"/>`;
+        s += `<svg x="${cx + 3}" y="5" width="8" height="8" viewBox="0 0 18 18" fill="none">`;
+        s += `<circle cx="9" cy="9" r="7.5" stroke="${ic}" stroke-width="1.5"/>`;
+        s += `<circle cx="9" cy="9" r="3.5" stroke="${ic}" stroke-width="1.5"/>`;
+        s += `<line x1="9" y1="1.5" x2="9" y2="5" stroke="${ic}" stroke-width="1.5" stroke-linecap="round"/>`;
+        s += `<line x1="9" y1="13" x2="9" y2="16.5" stroke="${ic}" stroke-width="1.5" stroke-linecap="round"/>`;
+        s += `<line x1="1.5" y1="9" x2="5" y2="9" stroke="${ic}" stroke-width="1.5" stroke-linecap="round"/>`;
+        s += `<line x1="13" y1="9" x2="16.5" y2="9" stroke="${ic}" stroke-width="1.5" stroke-linecap="round"/>`;
+        s += `</svg>`;
+        s += `</g>`;
+    }
+
     s += `</svg>`;
     container.innerHTML = s;
 
-    container.querySelectorAll(".att-graph-dot-click").forEach(dot => {
-        dot.addEventListener("click", () => {
-            const itemId = dot.dataset.itemId;
-            setGraphView(false);
-            requestAnimationFrame(() => {
-                const row = document.querySelector(`tr[data-item-id="${CSS.escape(itemId)}"]`);
-                if (!row) return;
-                row.scrollIntoView({ block: "center", behavior: "smooth" });
-                row.classList.add("graph-row-highlight");
-                setTimeout(() => row.classList.remove("graph-row-highlight"), 1000);
-            });
-        });
+    // ---- Interactions ----
+    const svg = container.querySelector("svg");
+
+    function svgPoint(e) {
+        const rect = svg.getBoundingClientRect();
+        return {
+            sx: (e.clientX - rect.left) / rect.width  * W,
+            sy: (e.clientY - rect.top)  / rect.height * H,
+        };
+    }
+    function inPlot(sx, sy) {
+        return sx >= ML && sx <= ML + PW && sy >= MT && sy <= MT + PH;
+    }
+    function resetZoom() { _graphView = null; _buildGraphSVG(container); }
+
+    // -- Reset zoom button (SVG overlay) --
+    container.querySelector(".graph-reset-svg-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        resetZoom();
     });
+
+    // -- Crosshair toggle button --
+    container.querySelector(".graph-ch-toggle-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        _graphCrosshairEnabled = !_graphCrosshairEnabled;
+        _buildGraphSVG(container);
+    });
+
+    // -- Right-click anywhere on SVG resets zoom (suppresses context menu) --
+    svg.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        const pt = svgPoint(e);
+        if (inPlot(pt.sx, pt.sy)) resetZoom();
+    }, { signal });
+
+    // -- Wheel: zoom (mouse wheel / pinch) or pan (touchpad two-finger swipe) --
+    // ctrlKey=true  -> pinch zoom (high sensitivity)
+    // ctrlKey=false, deltaX!=0 or small pixel delta -> two-finger pan
+    // ctrlKey=false, large discrete delta -> mouse wheel zoom (big jumps)
+    let wheelAccum = 0, panAccumX = 0, panAccumY = 0, wheelRaf = null;
+    let lastWheelPt = { sx: ML + PW / 2, sy: MT + PH / 2 };
+
+    svg.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const pt = svgPoint(e);
+        if (!inPlot(pt.sx, pt.sy)) return;
+
+        const isPan = !e.ctrlKey && (e.deltaX !== 0 || (e.deltaMode === 0 && Math.abs(e.deltaY) < 50));
+
+        if (isPan) {
+            const rect = svg.getBoundingClientRect();
+            panAccumX += e.deltaX / rect.width  * W * 0.5;
+            panAccumY += e.deltaY / rect.height * H * 0.5;
+        } else {
+            lastWheelPt = pt;
+            // Pinch (ctrlKey): raw deltaY is small (~3), scale up for sensitivity
+            wheelAccum += e.ctrlKey ? e.deltaY * 2 : e.deltaY;
+        }
+
+        if (wheelRaf) return;
+        wheelRaf = requestAnimationFrame(() => {
+            wheelRaf = null;
+            let cur = _graphView || { xMin: dxMin, xMax: dxMax, yMin: dyMin, yMax: dyMax };
+
+            if (wheelAccum !== 0) {
+                const factor = Math.pow(1.5, wheelAccum / 100);
+                wheelAccum = 0;
+                const cx = toDataX(lastWheelPt.sx), cy = toDataY(lastWheelPt.sy);
+                cur = {
+                    xMin: cx + (cur.xMin - cx) * factor,
+                    xMax: cx + (cur.xMax - cx) * factor,
+                    yMin: cy + (cur.yMin - cy) * factor,
+                    yMax: cy + (cur.yMax - cy) * factor,
+                };
+            }
+
+            if (panAccumX !== 0 || panAccumY !== 0) {
+                const dDataX = panAccumX / PW * (cur.xMax - cur.xMin);
+                const dDataY = panAccumY / PH * (cur.yMax - cur.yMin);
+                panAccumX = 0; panAccumY = 0;
+                cur = {
+                    xMin: cur.xMin - dDataX,
+                    xMax: cur.xMax - dDataX,
+                    yMin: cur.yMin - dDataY,
+                    yMax: cur.yMax - dDataY,
+                };
+            }
+
+            _graphView = cur;
+            _buildGraphSVG(container);
+        });
+    }, { passive: false });
+
+    // -- Middle-mouse drag: pan --
+    let panMouseState = null, panMouseRaf = null, panMouseDelta = null;
+
+    // -- Box zoom + LMB click --
+    let dragState = null; // { start: {sx,sy}, moved: bool, boxEl }
+
+    svg.addEventListener("mousedown", (e) => {
+        if (e.button === 1) {
+            const pt = svgPoint(e);
+            if (!inPlot(pt.sx, pt.sy)) return;
+            e.preventDefault();
+            panMouseState = { last: pt };
+            return;
+        }
+        if (e.button !== 0) return;
+        const pt = svgPoint(e);
+        if (!inPlot(pt.sx, pt.sy)) return;
+        e.preventDefault();
+        const boxEl = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        boxEl.setAttribute("class", "graph-zoom-box");
+        boxEl.setAttribute("x", pt.sx.toFixed(1));
+        boxEl.setAttribute("y", pt.sy.toFixed(1));
+        boxEl.setAttribute("width", "0");
+        boxEl.setAttribute("height", "0");
+        svg.appendChild(boxEl);
+        dragState = { start: pt, moved: false, boxEl };
+    }, { signal });
+
+    window.addEventListener("mousemove", (e) => {
+        if (panMouseState) {
+            const pt = svgPoint(e);
+            const dx = pt.sx - panMouseState.last.sx;
+            const dy = pt.sy - panMouseState.last.sy;
+            panMouseState.last = pt;
+            if (!panMouseDelta) panMouseDelta = { x: 0, y: 0 };
+            panMouseDelta.x += dx;
+            panMouseDelta.y += dy;
+            if (!panMouseRaf) {
+                panMouseRaf = requestAnimationFrame(() => {
+                    panMouseRaf = null;
+                    const d = panMouseDelta; panMouseDelta = null;
+                    const cur = _graphView || { xMin: dxMin, xMax: dxMax, yMin: dyMin, yMax: dyMax };
+                    _graphView = {
+                        xMin: cur.xMin + d.x / PW * (cur.xMax - cur.xMin),
+                        xMax: cur.xMax + d.x / PW * (cur.xMax - cur.xMin),
+                        yMin: cur.yMin - d.y / PH * (cur.yMax - cur.yMin),
+                        yMax: cur.yMax - d.y / PH * (cur.yMax - cur.yMin),
+                    };
+                    _buildGraphSVG(container);
+                });
+            }
+            return;
+        }
+
+        if (!dragState) return;
+        const pt = svgPoint(e);
+        const dx = pt.sx - dragState.start.sx, dy = pt.sy - dragState.start.sy;
+        if (!dragState.moved && Math.hypot(dx, dy) < 4) return;
+        dragState.moved = true;
+        dragState.boxEl.setAttribute("x",      Math.min(pt.sx, dragState.start.sx).toFixed(1));
+        dragState.boxEl.setAttribute("y",      Math.min(pt.sy, dragState.start.sy).toFixed(1));
+        dragState.boxEl.setAttribute("width",  Math.abs(dx).toFixed(1));
+        dragState.boxEl.setAttribute("height", Math.abs(dy).toFixed(1));
+    }, { signal });
+
+    window.addEventListener("mouseup", (e) => {
+        if (e.button === 1 && panMouseState) {
+            panMouseState = null;
+            return;
+        }
+
+        if (!dragState) return;
+        const state = dragState;
+        dragState = null;
+        state.boxEl.remove();
+
+        if (!state.moved) {
+            const dot = e.target.closest?.(".att-graph-dot-click");
+            if (dot) {
+                const itemId = dot.dataset.itemId;
+                setGraphView(false);
+                requestAnimationFrame(() => {
+                    const row = document.querySelector(`tr[data-item-id="${CSS.escape(itemId)}"]`);
+                    if (!row) return;
+                    row.scrollIntoView({ block: "center", behavior: "smooth" });
+                    row.classList.add("graph-row-highlight");
+                    setTimeout(() => row.classList.remove("graph-row-highlight"), 1000);
+                });
+            }
+            return;
+        }
+
+        const { sx: ex, sy: ey } = svgPoint(e);
+        const x1 = Math.max(Math.min(ex, state.start.sx), ML);
+        const x2 = Math.min(Math.max(ex, state.start.sx), ML + PW);
+        const y1 = Math.max(Math.min(ey, state.start.sy), MT);
+        const y2 = Math.min(Math.max(ey, state.start.sy), MT + PH);
+        if (x2 - x1 < 4 || y2 - y1 < 4) return;
+
+        // x-axis inverted: left SVG pixel = larger data x
+        _graphView = {
+            xMin: toDataX(x2),
+            xMax: toDataX(x1),
+            yMin: toDataY(y2),
+            yMax: toDataY(y1),
+        };
+        _buildGraphSVG(container);
+    }, { signal });
+
+    // -- Crosshair --
+    const chGroup = svg.querySelector("#graph-crosshair");
+    const chVT = svg.querySelector("#graph-ch-vt");
+    const chVB = svg.querySelector("#graph-ch-vb");
+    const chHL = svg.querySelector("#graph-ch-hl");
+    const chHR = svg.querySelector("#graph-ch-hr");
+    const chDot = svg.querySelector("#graph-ch-dot");
+    const chTX  = svg.querySelector("#graph-ch-tx");
+    const chTY  = svg.querySelector("#graph-ch-ty");
+    const CHGAP = 6;
+
+    svg.addEventListener("mousemove", (e) => {
+        const pt = svgPoint(e);
+        if (!inPlot(pt.sx, pt.sy) || !_graphCrosshairEnabled) { chGroup.setAttribute("visibility", "hidden"); return; }
+        const { sx, sy } = pt;
+        chGroup.setAttribute("visibility", "visible");
+
+        const f = v => v.toFixed(1);
+        chVT.setAttribute("x1", f(sx)); chVT.setAttribute("x2", f(sx));
+        chVT.setAttribute("y1", MT);    chVT.setAttribute("y2", f(Math.max(MT, sy - CHGAP)));
+        chVB.setAttribute("x1", f(sx)); chVB.setAttribute("x2", f(sx));
+        chVB.setAttribute("y1", f(Math.min(MT + PH, sy + CHGAP))); chVB.setAttribute("y2", MT + PH);
+        chHL.setAttribute("x1", ML);    chHL.setAttribute("x2", f(Math.max(ML, sx - CHGAP)));
+        chHL.setAttribute("y1", f(sy)); chHL.setAttribute("y2", f(sy));
+        chHR.setAttribute("x1", f(Math.min(ML + PW, sx + CHGAP))); chHR.setAttribute("x2", ML + PW);
+        chHR.setAttribute("y1", f(sy)); chHR.setAttribute("y2", f(sy));
+        chDot.setAttribute("cx", f(sx)); chDot.setAttribute("cy", f(sy));
+
+        const dataX = toDataX(sx), dataY = toDataY(sy);
+        chTX.textContent = `R: ${dataX >= 0 ? "+" : ""}${dataX.toFixed(2)}%`;
+        chTY.textContent = `EE: ${dataY >= 0 ? "+" : ""}${dataY.toFixed(2)}`;
+
+        // Position text near cursor, flip horizontally near right edge
+        const tx = sx + CHGAP + 2 > ML + PW - 58 ? sx - CHGAP - 58 : sx + CHGAP + 2;
+        const ty = sy > MT + PH - 18 ? sy - CHGAP - 5 : sy - CHGAP + 1;
+        chTX.setAttribute("x", f(tx)); chTX.setAttribute("y", f(ty));
+        chTY.setAttribute("x", f(tx)); chTY.setAttribute("y", f(ty + 8));
+    }, { signal });
+
+    svg.addEventListener("mouseleave", () => {
+        chGroup?.setAttribute("visibility", "hidden");
+    }, { signal });
 }
 
 function setComboView(wantCombo) {
@@ -1803,6 +2147,7 @@ async function openComboView() {
             equip_ergo_modifier:       EFTForge.state.currentEquipErgoModifier ?? 0,
             exclude_child_slot_names:  (isLeftQueueRoot && typeof _AG_LEFT_ORDER !== "undefined")
                                            ? _AG_LEFT_ORDER.filter(n => n !== EFTForge.state.lastSlot?.slot_name) : [],
+            exclude_item_ids:          EFTForge.config.COMBO_EXCLUDE_ITEM_IDS ?? [],
         }, signal);
     } catch (err) {
         if (err.name === "AbortError") return;
@@ -1907,9 +2252,15 @@ function applyComboSort() {
     const query = EFTForge.state.currentSearchQuery;
     const { key: sortKey, direction: sortDir } = EFTForge.state.comboSort;
     const dir    = sortDir === "asc" ? 1 : -1;
-    const sorted = query
-        ? items.filter(e => e.sortName.includes(query))
-        : [...items];
+
+    const isBuyable = item => {
+        if (!item.trader_vendor || item.trader_price_rub == null) return true;
+        return (EFTForge.state.traderLevels[item.trader_vendor] ?? 4) >= (item.trader_min_level ?? 1);
+    };
+
+    let sorted = query ? items.filter(e => e.sortName.includes(query)) : [...items];
+    if (EFTForge.state.purchasableOnly)
+        sorted = sorted.filter(e => isBuyable(e.parentEntry.item) && e.childItems.every(isBuyable));
 
     sorted.sort((a, b) => {
         let primary;

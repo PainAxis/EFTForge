@@ -944,6 +944,7 @@ def combo_full(
     strength_level: int = Body(default=10),
     equip_ergo_modifier: float = Body(default=0.0),
     exclude_child_slot_names: List[str] = Body(default=[]),
+    exclude_item_ids: List[str] = Body(default=[]),
     db: Session = Depends(get_db),
 ):
     if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
@@ -959,6 +960,7 @@ def combo_full(
         strength_level,
         round(equip_ergo_modifier, 6),
         frozenset(exclude_child_slot_names),
+        frozenset(exclude_item_ids),
     )
     with _COMBO_FULL_CACHE_LOCK:
         cached = _COMBO_FULL_CACHE.get(_cache_key)
@@ -1048,31 +1050,18 @@ def combo_full(
             child_items_by_slot.setdefault(slot_id_col, []).append(item)
             items_map[item.id] = item
 
-    # Stat-relevance filter: drop child slots where no item changes recoil or ergo.
-    # Eliminates tactical lights, lasers, etc. that cause combinatorial explosion.
-    child_items_by_slot = {
-        sid: items for sid, items in child_items_by_slot.items()
-        if any((i.recoil_modifier or 0) != 0 or (i.ergonomics_modifier or 0) != 0 for i in items)
-    }
+    # Item ID exclusion: drop specific items from all child slots.
+    # Also drops the slot entirely if it ends up empty after exclusion.
+    if exclude_item_ids:
+        _exclude_ids = set(exclude_item_ids)
+        child_items_by_slot = {
+            sid: [i for i in items if i.id not in _exclude_ids]
+            for sid, items in child_items_by_slot.items()
+        }
     child_slots_by_parent = {
-        pid: [s for s in slots if s.id in child_items_by_slot]
+        pid: [s for s in slots if child_items_by_slot.get(s.id)]
         for pid, slots in child_slots_by_parent.items()
     }
-
-    # Deduplicate child slots with identical allowed item sets per parent.
-    # e.g. a handguard with 4 identical Mount rails expands to the same combos regardless
-    # of which rail holds the item - only one representative slot is needed.
-    deduped_child_slots_by_parent: dict = {}
-    for pid, slots in child_slots_by_parent.items():
-        seen_item_sets: set = set()
-        deduped: list = []
-        for s in slots:
-            items_key = frozenset(i.id for i in child_items_by_slot.get(s.id, []))
-            if items_key and items_key not in seen_item_sets:
-                seen_item_sets.add(items_key)
-                deduped.append(s)
-        deduped_child_slots_by_parent[pid] = deduped
-    child_slots_by_parent = deduped_child_slots_by_parent
 
     print(f"[combo-full] root_slot={root_slot_id} all_parents={len(all_parents)} conflicting={len(parent_external_conflict)}")
     for pid, slots in child_slots_by_parent.items():
@@ -1089,23 +1078,58 @@ def combo_full(
         for s in combo_item_slots:
             slots_by_item.setdefault(s.parent_item_id, []).append(s)
 
-    # Filter items in Mount slots: only keep mounts that have at least one non-excluded child
-    # slot (i.e., they can accept foregrips). Tac-device-only and bipod-only mounts are excluded.
-    _mount_child_exclude = exclude_names | frozenset(["Bipod"])
-    for pid, slots in list(child_slots_by_parent.items()):
-        for s in slots:
-            if s.slot_name != "Mount":
-                continue
-            items = child_items_by_slot.get(s.id, [])
-            filtered = [
-                item for item in items
-                if any(cs.slot_name not in _mount_child_exclude for cs in slots_by_item.get(item.id, []))
-            ]
-            child_items_by_slot[s.id] = filtered
-    child_slots_by_parent = {
-        pid: [s for s in slots if child_items_by_slot.get(s.id)]
-        for pid, slots in child_slots_by_parent.items()
+    # Load grandchild data: for mount items that survived the filter, load their
+    # child slots and items so the expansion can go parent -> mount -> foregrip.
+    _mount_slot_ids = {s.id for s in all_child_slots if s.slot_name == "Mount"}
+    _valid_mount_item_ids = {
+        item.id
+        for slot_id, items in child_items_by_slot.items()
+        if slot_id in _mount_slot_ids
+        for item in items
     }
+    grandchild_slots_by_mount: dict = {}  # mount_item_id -> [Slot]
+    grandchild_items_by_slot2: dict = {}  # slot_id -> [Item]
+    if _valid_mount_item_ids:
+        _gc_all_slots = db.query(Slot).filter(Slot.parent_item_id.in_(_valid_mount_item_ids)).all()
+        _gc_slot_ids  = [s.id for s in _gc_all_slots]
+        _gc_has_items: set = set()
+        if _gc_slot_ids:
+            _gc_counts = (
+                db.query(SlotAllowedItem.slot_id)
+                .filter(SlotAllowedItem.slot_id.in_(_gc_slot_ids))
+                .distinct()
+                .all()
+            )
+            _gc_has_items = {row[0] for row in _gc_counts}
+        for s in _gc_all_slots:
+            if s.id in _gc_has_items and s.slot_name not in exclude_names:
+                grandchild_slots_by_mount.setdefault(s.parent_item_id, []).append(s)
+        _active_gc_slot_ids = [s.id for slots in grandchild_slots_by_mount.values() for s in slots]
+        if _active_gc_slot_ids:
+            _gc_rows = (
+                db.query(SlotAllowedItem.slot_id, Item)
+                .join(Item, SlotAllowedItem.allowed_item_id == Item.id)
+                .filter(SlotAllowedItem.slot_id.in_(_active_gc_slot_ids))
+                .all()
+            )
+            for slot_id_col, item in _gc_rows:
+                grandchild_items_by_slot2.setdefault(slot_id_col, []).append(item)
+                items_map[item.id] = item
+        if exclude_item_ids:
+            _exclude_ids = set(exclude_item_ids)
+            grandchild_items_by_slot2 = {
+                sid: [i for i in items if i.id not in _exclude_ids]
+                for sid, items in grandchild_items_by_slot2.items()
+            }
+        grandchild_slots_by_mount = {
+            mid: [s for s in slots if grandchild_items_by_slot2.get(s.id)]
+            for mid, slots in grandchild_slots_by_mount.items()
+        }
+        _gc_item_ids = {i.id for items in grandchild_items_by_slot2.values() for i in items}
+        if _gc_item_ids:
+            _gc_item_slots = db.query(Slot).filter(Slot.parent_item_id.in_(_gc_item_ids)).all()
+            for s in _gc_item_slots:
+                slots_by_item.setdefault(s.parent_item_id, []).append(s)
 
     # Release the DB connection now - all data is loaded into memory.
     # The expansion below is CPU-only and can run for several seconds on large trees;
@@ -1182,6 +1206,31 @@ def combo_full(
         _valid_cache[key] = result
         return result
 
+    def _expand_mount(base_state, mount_item):
+        """Expand a state through a mount item's child slots (foregrip etc.), returning all variants."""
+        gc_slots = grandchild_slots_by_mount.get(mount_item.id, [])
+        if not gc_slots:
+            return [base_state]
+        states = [base_state]
+        for gc_slot in gc_slots:
+            raw_gc = grandchild_items_by_slot2.get(gc_slot.id, [])
+            if not raw_gc:
+                continue
+            next_states = []
+            for st in states:
+                inst_list = st["installed_ids"]
+                valid_gc = _validated_children(gc_slot.id, inst_list, raw_gc)
+                next_states.append(st)  # "skip grandchild slot" is always valid
+                for gc_item, gc_conflict in valid_gc:
+                    next_states.append({
+                        "child_items":    st["child_items"] + [gc_item],
+                        "child_slot_ids": st["child_slot_ids"] + [gc_slot.id],
+                        "installed_ids":  st["installed_ids"] + [gc_item.id],
+                        "conflict":       st["conflict"] or gc_conflict,
+                    })
+            states = next_states
+        return states
+
     # 10. Frontier expansion + stats (pure Python, no further DB queries)
     all_combos = []
     for parent in all_parents:
@@ -1223,12 +1272,16 @@ def combo_full(
 
                 next_frontier.append(state)  # "skip this child slot" is always valid
                 for ci, ext_conflict in valid_children_with_conflicts:
-                    next_frontier.append({
+                    new_state = {
                         "child_items":    state["child_items"] + [ci],
                         "child_slot_ids": state["child_slot_ids"] + [cs.id],
                         "installed_ids":  state["installed_ids"] + [ci.id],
                         "conflict":       state["conflict"] or ext_conflict,
-                    })
+                    }
+                    if cs.slot_name == "Mount" and ci.id in grandchild_slots_by_mount:
+                        next_frontier.extend(_expand_mount(new_state, ci))
+                    else:
+                        next_frontier.append(new_state)
 
             frontier = next_frontier
             print(f"    [{parent_name!r}] after slot={cs.slot_name!r} candidates={len(raw_candidates)} frontier={len(frontier)}")

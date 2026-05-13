@@ -1176,6 +1176,27 @@ async function switchLang(lang) {
         if (toolbar && _loadSettings().gridToolbar === false) {
             toolbar.style.display = "none";
         }
+
+        // Restore item ID overlay state
+        window.EFTForge._dev = window.EFTForge._dev || {};
+        EFTForge._dev.showItemIds = _loadSettings().showItemIds === true;
+
+        // Click-to-copy delegation for item ID badges
+        document.addEventListener("click", (e) => {
+            const badge = e.target.closest(".dev-item-id-badge");
+            if (!badge) return;
+            e.stopPropagation();
+            const id = badge.dataset.id;
+            navigator.clipboard.writeText(id).then(() => {
+                const prev = badge.textContent;
+                badge.textContent = "Copied!";
+                badge.classList.add("dev-item-id-badge--copied");
+                setTimeout(() => {
+                    badge.textContent = prev;
+                    badge.classList.remove("dev-item-id-badge--copied");
+                }, 1000);
+            });
+        });
     }
 
     // ── Debugger: Conflict ──────────────────────────────────────
@@ -1555,6 +1576,14 @@ async function switchLang(lang) {
                             </button>
                         </div>
 
+                        <div class="dev-modal-section-label" style="padding-top:18px;">Attachment Table</div>
+                        <div class="dev-modal-row">
+                            <span class="dev-modal-row-label">Show item IDs (click to copy)</span>
+                            <button id="dev-id-overlay-toggle" class="dev-modal-toggle${EFTForge._dev?.showItemIds ? " active" : ""}">
+                                ${EFTForge._dev?.showItemIds ? "ON" : "OFF"}
+                            </button>
+                        </div>
+
                         <div class="dev-modal-section-label" style="padding-top:18px;">Debuggers</div>
 
                         <div class="dev-debugger-row">
@@ -1606,6 +1635,29 @@ async function switchLang(lang) {
             this.textContent = nowVisible ? "OFF" : "ON";
             this.classList.toggle("active", !nowVisible);
             _saveSetting("gridToolbar", !nowVisible);
+        });
+
+        document.getElementById("dev-id-overlay-toggle").addEventListener("click", function () {
+            const newVal = !(EFTForge._dev?.showItemIds === true);
+            EFTForge._dev = EFTForge._dev || {};
+            EFTForge._dev.showItemIds = newVal;
+            _saveSetting("showItemIds", newVal);
+            this.textContent = newVal ? "ON" : "OFF";
+            this.classList.toggle("active", newVal);
+            if (newVal) {
+                document.querySelectorAll("#attachment-body tr[data-item-id]").forEach(tr => {
+                    if (tr.querySelector(".dev-item-id-badge")) return;
+                    const nameText = tr.querySelector(".attachment-name-text");
+                    if (!nameText) return;
+                    const badge = document.createElement("div");
+                    badge.className = "dev-item-id-badge";
+                    badge.dataset.id = tr.dataset.itemId;
+                    badge.textContent = tr.dataset.itemId;
+                    nameText.insertAdjacentElement("afterend", badge);
+                });
+            } else {
+                document.querySelectorAll(".dev-item-id-badge").forEach(el => el.remove());
+            }
         });
 
         _bindDebugger("dev-dbg-conflict-btn", "dev-dbg-conflict-out", _runConflictDebugger);
