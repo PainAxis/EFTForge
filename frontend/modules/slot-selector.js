@@ -271,6 +271,7 @@ async function openSlotSelector(parentNode, slot) {
     EFTForge.state.currentSearchQuery = "";
     EFTForge.state.lastComboItems = [];
     EFTForge.state.comboMode = false;
+    EFTForge.state.graphMode = false;
     _comboAvailableChecked = false;
     _abortComboCalc();
     _disconnectComboObserver();
@@ -304,9 +305,10 @@ async function openSlotSelector(parentNode, slot) {
                     ${t("ui.compare")}
                     <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
                 </button>
-                <div id="combo-view-btns" class="combo-view-btns" style="display:none;">
-                    <button id="combo-list-btn" class="toggle-btn${!EFTForge.state.comboMode ? ' active' : ''}" onclick="setComboView(false)">${t("ui.comboList")}</button>
-                    <button id="combo-combo-btn" class="toggle-btn${EFTForge.state.comboMode ? ' active' : ''}" onclick="setComboView(true)">${t("ui.combo")}</button>
+                <div id="combo-view-btns" class="combo-view-btns">
+                    <button id="combo-list-btn" class="toggle-btn${(!EFTForge.state.comboMode && !EFTForge.state.graphMode) ? ' active' : ''}" onclick="setListView()">${t("ui.comboList")}</button>
+                    <button id="graph-view-btn" class="toggle-btn${EFTForge.state.graphMode ? ' active' : ''}" onclick="setGraphView(true)">${t("ui.graph")}</button>
+                    <button id="combo-combo-btn" class="toggle-btn${EFTForge.state.comboMode ? ' active' : ''}" onclick="setComboView(true)" style="display:none;">${t("ui.combo")}</button>
                 </div>
             </div>
             <button id="att-table-close-btn" class="att-table-close-btn">&#x2715;</button>
@@ -321,7 +323,7 @@ async function openSlotSelector(parentNode, slot) {
             class="search-input"
         />
 
-        <table class="attachment-table">
+        <table class="attachment-table hide-col-ree hide-col-rub-recoil hide-col-eer">
 
             <thead>
                 <tr>
@@ -330,6 +332,9 @@ async function openSlotSelector(parentNode, slot) {
                     </th>
                     <th id="th-price" onclick="changeSort('price')" data-tooltip="${escapeHtml(t('th.priceTooltip'))}">
                         ${t("th.price")} <span class="sort-indicator"></span>
+                    </th>
+                    <th id="th-rub-recoil" onclick="changeSort('rub-recoil')" data-tooltip="${escapeHtml(t('th.rubRecoilTooltip'))}">
+                        ${t("th.rubRecoil")} <span class="sort-indicator"></span>
                     </th>
                     <th id="th-weight" onclick="changeSort('weight')">
                         ${t("th.weight")} <span class="sort-indicator"></span>
@@ -345,6 +350,12 @@ async function openSlotSelector(parentNode, slot) {
                     </th>
                     <th id="th-evo" onclick="changeSort('evo')">
                         ${t("th.evoErgo")} <span class="sort-indicator"></span>
+                    </th>
+                    <th id="th-ree" onclick="changeSort('ree')" data-tooltip="${escapeHtml(t('th.reeTooltip'))}">
+                        ${t("th.ree")} <span class="sort-indicator"></span>
+                    </th>
+                    <th id="th-eer" onclick="changeSort('eer')" data-tooltip="${escapeHtml(t('th.eerTooltip'))}">
+                        ${t("th.eer")} <span class="sort-indicator"></span>
                     </th>
                 </tr>
             </thead>
@@ -536,6 +547,11 @@ function applyAttachmentSort() {
       applyComboSort();
       return;
   }
+  if (EFTForge.state.graphMode) {
+      const graphDiv = document.getElementById("attachment-graph");
+      if (graphDiv) _buildGraphSVG(graphDiv);
+      return;
+  }
 
   const dir = EFTForge.state.attachmentSort.direction === "asc" ? 1 : -1;
 
@@ -646,13 +662,14 @@ function _updateColumnVisibility(items) {
     table.classList.toggle("hide-col-ergo",   !hasErgo);
     table.classList.toggle("hide-col-evo",    !hasEvo);
     table.classList.toggle("hide-col-price",  !hasPrice);
-
+    // Combo-only columns - always hidden in list mode
+    table.classList.add("hide-col-ree", "hide-col-rub-recoil", "hide-col-eer");
 }
 
 function changeSort(key) {
   if (EFTForge.state.comboMode) {
     // Combo mode: each column has one fixed "best" direction, no toggle
-    const bestDir = { recoil: "asc", weight: "asc", ergo: "desc", evo: "desc", price: "asc", name: "asc" };
+    const bestDir = { recoil: "asc", weight: "asc", ergo: "desc", evo: "desc", price: "asc", name: "asc", ree: "asc", "rub-recoil": "asc", eer: "asc" };
     EFTForge.state.comboSort.key       = key;
     EFTForge.state.comboSort.direction = bestDir[key] ?? "asc";
     applyAttachmentSort();
@@ -683,7 +700,7 @@ function updateSortIndicators() {
       ? EFTForge.state.comboSort
       : EFTForge.state.attachmentSort;
 
-  const headers = ["name", "weight", "recoil", "ergo", "acc", "evo", "price"];
+  const headers = ["name", "weight", "recoil", "ergo", "acc", "evo", "ree", "rub-recoil", "eer", "price"];
   headers.forEach(key => {
     const th = document.getElementById(`th-${key}`);
     if (!th) return;
@@ -711,8 +728,7 @@ function toggleCompareMode() {
         _abortComboCalc();
         EFTForge.state.comboMode = false;
         EFTForge.state.lastComboItems = [];
-        document.getElementById("combo-list-btn")?.classList.add("active");
-        document.getElementById("combo-combo-btn")?.classList.remove("active");
+        _updateViewBtns();
     }
 
     EFTForge.state.compareMode = !EFTForge.state.compareMode;
@@ -867,6 +883,7 @@ function renderAttachmentRows(items) {
               </div>
           </td>
           <td>${_attPriceCellContent(blItem)}</td>
+          <td class="col-combo-only"></td>
           <td>${ghostStats ? ghostStats.weight.toFixed(3) : parseFloat(blItem.weight ?? 0).toFixed(3)}</td>
           <td>${ghostStats ? formatStat(ghostStats.recoilPct) : formatStat(bl.recoilPercent)}%</td>
           <td class="acc-cell">${(() => {
@@ -930,6 +947,7 @@ function renderAttachmentRows(items) {
     const { item, contribution, recoilPercent, ergoModifier } = entry;
 
     const row = document.createElement("tr");
+    row.dataset.itemId = item.id;
 
     if (entry.hasConflict) {
         row.classList.add("conflict-row");
@@ -1039,6 +1057,7 @@ function renderAttachmentRows(items) {
         </td>
 
         <td>${_attPriceCellContent(item)}</td>
+        <td class="col-combo-only"></td>
         ${weightCell}
         ${recoilCell}
         ${accCell}
@@ -1482,31 +1501,206 @@ function _abortComboCalc() {
     }
 }
 
-function setComboView(wantCombo) {
-    if (EFTForge.state.comboMode === wantCombo) return;
-    EFTForge.state.comboMode = wantCombo;
+function _updateViewBtns() {
+    const inList = !EFTForge.state.comboMode && !EFTForge.state.graphMode;
+    document.getElementById("combo-list-btn")?.classList.toggle("active", inList);
+    document.getElementById("graph-view-btn")?.classList.toggle("active", EFTForge.state.graphMode);
+    document.getElementById("combo-combo-btn")?.classList.toggle("active", EFTForge.state.comboMode);
+}
 
-    const listBtn  = document.getElementById("combo-list-btn");
-    const comboBtn = document.getElementById("combo-combo-btn");
-    if (listBtn)  listBtn.classList.toggle("active", !wantCombo);
-    if (comboBtn) comboBtn.classList.toggle("active",  wantCombo);
+function setListView() {
+    const wasCombo = EFTForge.state.comboMode;
+    const wasGraph = EFTForge.state.graphMode;
+    if (!wasCombo && !wasGraph) return;
 
-    if (wantCombo) {
-        if (EFTForge.state.compareMode) {
-            EFTForge.state.compareMode = false;
-            EFTForge.state.compareBaselineId = null;
-            EFTForge.state.compareBaselineEntry = null;
-            EFTForge.state.compareBaselineSlotPath = null;
-            const cmpBtn = document.getElementById("compare-toggle-btn");
-            if (cmpBtn) cmpBtn.classList.remove("active");
-        }
-        openComboView();
-    } else {
+    if (wasCombo) {
         _abortComboCalc();
         _disconnectComboObserver();
+        EFTForge.state.comboMode = false;
         EFTForge.state.lastComboItems = [];
+    }
+    if (wasGraph) {
+        EFTForge.state.graphMode = false;
+        document.getElementById("attachment-graph")?.remove();
+        const table = document.querySelector(".attachment-table");
+        if (table) table.style.display = "";
+        const searchInput = document.getElementById("attachment-search");
+        if (searchInput) searchInput.style.display = "";
+    }
+
+    _updateViewBtns();
+    applyAttachmentSort();
+}
+
+function setGraphView(wantGraph) {
+    if (EFTForge.state.graphMode === wantGraph) return;
+    EFTForge.state.graphMode = wantGraph;
+
+    const table       = document.querySelector(".attachment-table");
+    const searchInput = document.getElementById("attachment-search");
+
+    if (wantGraph) {
+        if (EFTForge.state.comboMode) {
+            _abortComboCalc();
+            _disconnectComboObserver();
+            EFTForge.state.comboMode = false;
+            EFTForge.state.lastComboItems = [];
+        }
+        if (table) table.style.display = "none";
+        if (searchInput) searchInput.style.display = "none";
+
+        let graphDiv = document.getElementById("attachment-graph");
+        if (!graphDiv) {
+            graphDiv = document.createElement("div");
+            graphDiv.id = "attachment-graph";
+            graphDiv.className = "att-graph-container";
+            table?.parentNode.insertBefore(graphDiv, table);
+        }
+        _buildGraphSVG(graphDiv);
+    } else {
+        document.getElementById("attachment-graph")?.remove();
+        if (table) table.style.display = "";
+        if (searchInput) searchInput.style.display = "";
         applyAttachmentSort();
     }
+
+    _updateViewBtns();
+}
+
+function _buildGraphSVG(container) {
+    const allItems = EFTForge.state.lastProcessedItems;
+    if (!allItems || !allItems.length) { container.innerHTML = ""; return; }
+
+    const query = EFTForge.state.currentSearchQuery;
+    const items = query ? allItems.filter(e => e.sortName.includes(query)) : allItems;
+    if (!items.length) { container.innerHTML = ""; return; }
+
+    const W = 520, H = 360;
+    const ML = 54, MR = 14, MT = 18, MB = 46;
+    const PW = W - ML - MR, PH = H - MT - MB;
+
+    const xs = items.map(e => e.recoilPercent);
+    const ys = items.map(e => e.contribution);
+    let xMin = Math.min(...xs), xMax = Math.max(...xs);
+    let yMin = Math.min(...ys), yMax = Math.max(...ys);
+    const xRange = Math.max(xMax - xMin, 0.5);
+    const yRange = Math.max(yMax - yMin, 1);
+    xMin -= xRange * 0.08; xMax += xRange * 0.08;
+    yMin -= yRange * 0.10; yMax += yRange * 0.10;
+    // Snap to zero only when zero is close to an edge (within 20% of range)
+    if (xMin > 0 && xMin < xRange * 0.2)  xMin = 0;
+    if (xMax < 0 && xMax > -xRange * 0.2) xMax = 0;
+    if (yMin > 0 && yMin < yRange * 0.2)  yMin = 0;
+    if (yMax < 0 && yMax > -yRange * 0.2) yMax = 0;
+
+    const toX = x => ML + (xMax - x) / (xMax - xMin) * PW;
+    const toY = y => MT + (1 - (y - yMin) / (yMax - yMin)) * PH;
+
+    function niceTicks(lo, hi, target) {
+        const range = hi - lo;
+        const rough = range / target;
+        const mag = Math.pow(10, Math.floor(Math.log10(Math.abs(rough) || 1)));
+        const norm = rough / mag;
+        const step = norm <= 1.5 ? mag : norm <= 3 ? 2*mag : norm <= 7 ? 5*mag : 10*mag;
+        const ticks = [];
+        for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-9; v = +(v + step).toFixed(10))
+            ticks.push(+v.toFixed(8));
+        return ticks;
+    }
+
+    const xTicks = niceTicks(xMin, xMax, 6);
+    const yTicks = niceTicks(yMin, yMax, 5);
+
+    let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" class="att-graph-svg" preserveAspectRatio="xMidYMid meet">`;
+    s += `<rect x="${ML}" y="${MT}" width="${PW}" height="${PH}" fill="#161616" rx="2"/>`;
+
+    for (const tx of xTicks) {
+        const sx = toX(tx).toFixed(1);
+        s += `<line x1="${sx}" y1="${MT}" x2="${sx}" y2="${MT+PH}" stroke="#222" stroke-width="1"/>`;
+    }
+    for (const ty of yTicks) {
+        const sy = toY(ty).toFixed(1);
+        s += `<line x1="${ML}" y1="${sy}" x2="${ML+PW}" y2="${sy}" stroke="#222" stroke-width="1"/>`;
+    }
+
+    const zx = toX(0), zy = toY(0);
+    if (zx >= ML && zx <= ML+PW) s += `<line x1="${zx.toFixed(1)}" y1="${MT}" x2="${zx.toFixed(1)}" y2="${MT+PH}" stroke="#363636" stroke-width="1" stroke-dasharray="4,3"/>`;
+    if (zy >= MT && zy <= MT+PH) s += `<line x1="${ML}" y1="${zy.toFixed(1)}" x2="${ML+PW}" y2="${zy.toFixed(1)}" stroke="#363636" stroke-width="1" stroke-dasharray="4,3"/>`;
+
+    s += `<g font-size="10" fill="#555" font-family="Bender,Arial,sans-serif">`;
+    for (const tx of xTicks) {
+        const lbl = tx === 0 ? "0" : `${tx>0?"+":""}${parseFloat(tx.toFixed(2))}%`;
+        s += `<text x="${toX(tx).toFixed(1)}" y="${MT+PH+14}" text-anchor="middle">${lbl}</text>`;
+    }
+    for (const ty of yTicks) {
+        const lbl = ty === 0 ? "0" : `${ty>0?"+":""}${parseFloat(ty.toFixed(2))}`;
+        s += `<text x="${ML-5}" y="${(toY(ty)+3.5).toFixed(1)}" text-anchor="end">${lbl}</text>`;
+    }
+    s += `</g>`;
+    s += `<text x="${(ML+PW/2).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="11" fill="#666" font-family="Bender,Arial,sans-serif">Recoil % (right = better)</text>`;
+    s += `<text x="10" y="${(MT+PH/2).toFixed(1)}" text-anchor="middle" font-size="11" fill="#666" font-family="Bender,Arial,sans-serif" transform="rotate(-90,10,${(MT+PH/2).toFixed(1)})">EvoErgo</text>`;
+
+    const pts = [...items].sort((a, b) => (a.hasConflict ? 0 : 1) - (b.hasConflict ? 0 : 1));
+    for (const e of pts) {
+        const cx = toX(e.recoilPercent).toFixed(1), cy = toY(e.contribution).toFixed(1);
+        const fill = e.hasConflict ? "#444"
+            : e.recoilPercent <= 0 && e.contribution >= 0 ? "#4CAF50"
+            : e.recoilPercent < 0  ? "#f5c542"
+            : e.contribution > 0   ? "#29b6f6"
+            : "#f44336";
+        const op = e.hasConflict ? "0.35" : "1";
+        const r = `${e.recoilPercent>0?"+":""}${e.recoilPercent.toFixed(1)}%`;
+        const v = `${e.contribution>0?"+":""}${e.contribution.toFixed(1)}`;
+        const eg = `${e.ergoModifier>0?"+":""}${e.ergoModifier.toFixed(1)}`;
+        const tip = `${e.item.name}\nRecoil: ${r}  EvoErgo: ${v}\nErgo: ${eg}`;
+        const cls = `att-graph-dot${e.hasConflict ? "" : " att-graph-dot-click"}`;
+        s += `<circle cx="${cx}" cy="${cy}" r="5.5" fill="${fill}" fill-opacity="${op}" stroke="#0d0d0d" stroke-width="1.2" class="${cls}" data-item-id="${escapeHtml(String(e.item.id))}" data-tooltip="${escapeHtml(tip)}"/>`;
+    }
+
+    s += `<rect x="${ML}" y="${MT}" width="${PW}" height="${PH}" fill="none" stroke="#2a2a2a" stroke-width="1" rx="2"/>`;
+    s += `</svg>`;
+    container.innerHTML = s;
+
+    container.querySelectorAll(".att-graph-dot-click").forEach(dot => {
+        dot.addEventListener("click", () => {
+            const itemId = dot.dataset.itemId;
+            setGraphView(false);
+            requestAnimationFrame(() => {
+                const row = document.querySelector(`tr[data-item-id="${CSS.escape(itemId)}"]`);
+                if (!row) return;
+                row.scrollIntoView({ block: "center", behavior: "smooth" });
+                row.classList.add("graph-row-highlight");
+                setTimeout(() => row.classList.remove("graph-row-highlight"), 1000);
+            });
+        });
+    });
+}
+
+function setComboView(wantCombo) {
+    if (!wantCombo) { setListView(); return; }
+    if (EFTForge.state.comboMode) return;
+
+    if (EFTForge.state.graphMode) {
+        EFTForge.state.graphMode = false;
+        document.getElementById("attachment-graph")?.remove();
+        const table = document.querySelector(".attachment-table");
+        if (table) table.style.display = "";
+        const searchInput = document.getElementById("attachment-search");
+        if (searchInput) searchInput.style.display = "";
+    }
+
+    EFTForge.state.comboMode = true;
+    _updateViewBtns();
+
+    if (EFTForge.state.compareMode) {
+        EFTForge.state.compareMode = false;
+        EFTForge.state.compareBaselineId = null;
+        EFTForge.state.compareBaselineEntry = null;
+        EFTForge.state.compareBaselineSlotPath = null;
+        const cmpBtn = document.getElementById("compare-toggle-btn");
+        if (cmpBtn) cmpBtn.classList.remove("active");
+    }
+    openComboView();
 }
 
 async function _checkComboAvailability() {
@@ -1555,8 +1749,10 @@ async function _checkComboAvailability() {
 }
 
 function _showComboToggle(visible) {
-    const el = document.getElementById("combo-view-btns");
-    if (el) el.style.display = visible ? "flex" : "none";
+    const btn       = document.getElementById("combo-combo-btn");
+    const container = document.getElementById("combo-view-btns");
+    if (btn)       btn.style.display = visible ? "" : "none";
+    if (container) container.classList.toggle("has-combo", visible);
 }
 
 
@@ -1589,7 +1785,7 @@ async function openComboView() {
     const tbody = document.getElementById("attachment-body");
     if (tbody) {
         _clearMarqueeTimers();
-        tbody.innerHTML = `<tr><td colspan="7" class="combo-status-row">${escapeHtml(t("ui.comboLoading"))}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="combo-status-row">${escapeHtml(t("ui.comboLoading"))}</td></tr>`;
     }
 
     _abortComboCalc();
@@ -1612,18 +1808,17 @@ async function openComboView() {
         if (err.name === "AbortError") return;
         console.error("Combo full failed:", err);
         if (tbody && EFTForge.state.comboMode) {
-            tbody.innerHTML = `<tr><td colspan="7" class="combo-status-row combo-error">${escapeHtml(t("ui.comboError"))}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="10" class="combo-status-row combo-error">${escapeHtml(t("ui.comboError"))}</td></tr>`;
         }
         EFTForge.state.comboMode = false;
-        document.getElementById("combo-list-btn")?.classList.add("active");
-        document.getElementById("combo-combo-btn")?.classList.remove("active");
+        _updateViewBtns();
         return;
     }
 
     if (!EFTForge.state.comboMode) return;
 
     if (!result.combos.length) {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="combo-status-row">${escapeHtml(t("ui.comboNone"))}</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="combo-status-row">${escapeHtml(t("ui.comboNone"))}</td></tr>`;
         return;
     }
 
@@ -1653,6 +1848,27 @@ async function openComboView() {
             const p = _getPriceRub(item);
             if (p !== null) { totalPrice += p; hasPrice = true; }
         }
+        const finalPrice = hasPrice ? totalPrice : null;
+
+        // R+EE/3: combined recoil+evo score; more negative = better (lower = more recoil reduction)
+        const comboREE = comboRecoilPct + comboEEDDelta / 3;
+
+        // ₽/Recoil: rubles per 1% recoil reduction; null when no price or no recoil reduction
+        const comboRublePerRecoil = (finalPrice !== null && comboRecoilPct < 0)
+            ? finalPrice / Math.abs(comboRecoilPct)
+            : null;
+
+        // EE:R: recoil gained per evo unit changed
+        // Display format: [eeSign][rSign][ratio] - first sign = evo direction, second = recoil direction
+        // + = gain/reduction (good), - = loss/increase (bad)
+        let comboEERDisplay = null, comboEERSort = null;
+        if (comboEEDDelta !== 0) {
+            const eeSign = comboEEDDelta >= 0 ? "+" : "-";
+            const rSign  = comboRecoilPct <= 0 ? "+" : "-";
+            const ratio  = Math.abs(comboRecoilPct) / Math.abs(comboEEDDelta);
+            comboEERDisplay = `${eeSign}${rSign}${ratio.toFixed(1)}`;
+            comboEERSort    = ratio;
+        }
 
         const sortName = combo.parent_item.name.toLowerCase()
             + combo.child_items.map(ci => " " + ci.name.toLowerCase()).join("");
@@ -1667,7 +1883,8 @@ async function openComboView() {
             conflict:          combo.conflict || null,
             sortName, simEED, simErgo, simWeight, simRecoilV, simRecoilH,
             comboEEDDelta, comboErgoDelta, comboWeightDelta, comboRecoilPct,
-            totalPrice: hasPrice ? totalPrice : null,
+            totalPrice: finalPrice,
+            comboREE, comboRublePerRecoil, comboEERDisplay, comboEERSort,
         };
     });
 
@@ -1683,13 +1900,16 @@ function applyComboSort() {
     if (!items || !items.length) {
         const { t } = EFTForge.lang;
         const tbody = document.getElementById("attachment-body");
-        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="combo-status-row">${escapeHtml(t("ui.comboNone"))}</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="combo-status-row">${escapeHtml(t("ui.comboNone"))}</td></tr>`;
         return;
     }
 
+    const query = EFTForge.state.currentSearchQuery;
     const { key: sortKey, direction: sortDir } = EFTForge.state.comboSort;
     const dir    = sortDir === "asc" ? 1 : -1;
-    const sorted = [...items];
+    const sorted = query
+        ? items.filter(e => e.sortName.includes(query))
+        : [...items];
 
     sorted.sort((a, b) => {
         let primary;
@@ -1705,6 +1925,21 @@ function applyComboSort() {
                 if (ap === null) return 1;
                 if (bp === null) return -1;
                 primary = ap - bp; break;
+            }
+            case "ree":   primary = a.comboREE - b.comboREE; break;
+            case "rub-recoil": {
+                const ap = a.comboRublePerRecoil; const bp = b.comboRublePerRecoil;
+                if (ap === null && bp === null) { primary = 0; break; }
+                if (ap === null) return 1;
+                if (bp === null) return -1;
+                primary = ap - bp; break;
+            }
+            case "eer": {
+                const as = a.comboEERSort; const bs = b.comboEERSort;
+                if (as === null && bs === null) { primary = 0; break; }
+                if (as === null) return 1;
+                if (bs === null) return -1;
+                primary = as - bs; break;
             }
             default: primary = 0;
         }
@@ -1741,8 +1976,11 @@ function _updateComboColumnVisibility(items) {
     table.classList.toggle("hide-col-recoil", !hasRecoil);
     table.classList.add("hide-col-acc");
     table.classList.toggle("hide-col-ergo",   !hasErgo);
-    table.classList.toggle("hide-col-evo",    !hasEvo);
-    table.classList.toggle("hide-col-price",  !hasPrice);
+    table.classList.toggle("hide-col-evo",         !hasEvo);
+    table.classList.toggle("hide-col-price",       !hasPrice);
+    table.classList.toggle("hide-col-ree",         !hasRecoil);
+    table.classList.toggle("hide-col-rub-recoil",  !(hasRecoil && hasPrice));
+    table.classList.toggle("hide-col-eer",         !(hasRecoil && hasEvo));
 }
 
 function _isComboInstalled(entry) {
@@ -1817,15 +2055,62 @@ function _buildComboRow(entry) {
     const ergoCls   = entry.comboErgoDelta >= 0 ? "ergo-positive" : "ergo-negative";
     const evoCls    = entry.comboEEDDelta  >= 0 ? "positive" : "negative";
 
+    const reeCls  = entry.comboREE <= 0 ? "positive" : "negative";
+    const rrCellHtml = entry.comboRublePerRecoil !== null
+        ? `<div class="att-price-wrap"><span>${_formatPrice(Math.round(entry.comboRublePerRecoil))}</span></div>`
+        : `-`;
+
     row.innerHTML = `
         <td class="name-cell"><div class="attachment-name-wrapper">${iconAreaHtml}</div></td>
         <td>${priceCellHtml}</td>
+        <td>${rrCellHtml}</td>
         <td>${fmtSign(entry.comboWeightDelta, 3)}</td>
         <td class="${recoilCls}">${fmtSign(entry.comboRecoilPct)}%</td>
         <td class="acc-cell"></td>
         <td class="${ergoCls}">${entry.comboErgoDelta >= 0 ? "+" : ""}${formatStat(entry.comboErgoDelta)}</td>
         <td class="${evoCls}">${fmtSign(entry.comboEEDDelta)}</td>
+        <td class="${reeCls}">${fmtSign(entry.comboREE, 1)}</td>
+        <td>${entry.comboEERDisplay ?? `-`}</td>
     `;
+
+    if (childItems.length > 0) {
+        const allItems = [parentItem, ...childItems];
+        let breakdownValid = true;
+        const parts = allItems.map(it => {
+            const p = _getPriceRub(it);
+            if (p === null) breakdownValid = false;
+            return { it, p };
+        });
+        if (breakdownValid) {
+            const total = parts.reduce((s, x) => s + x.p, 0);
+            const fleaCache = EFTForge.state.pveMode ? EFTForge.state.fleaCachePve : EFTForge.state.fleaCachePvp;
+            const rows = parts.map(({ it, p }) => {
+                const hasTrader = it.trader_vendor && it.trader_price_rub != null;
+                const traderAvail = hasTrader &&
+                    (EFTForge.state.traderLevels[it.trader_vendor] ?? 4) >= (it.trader_min_level ?? 1);
+                const fleaPrice = fleaCache?.[it.id] ?? null;
+                let vendorHtml;
+                if (traderAvail && (fleaPrice === null || it.trader_price_rub <= fleaPrice)) {
+                    const trader = EFTForge.state.tradersByNorm?.[it.trader_vendor];
+                    const imgSrc = trader?.imageLink || "";
+                    vendorHtml = imgSrc
+                        ? `<img src="${escapeHtml(imgSrc)}" class="price-bd-vendor" onerror="this.style.display='none'" />`
+                        : `<span class="price-bd-vendor-label">${escapeHtml(it.trader_vendor)}</span>`;
+                } else {
+                    const { t } = EFTForge.lang;
+                    vendorHtml = `<span class="price-bd-flea">${escapeHtml(t("stats.fleaLabel"))}</span>`;
+                }
+                return `<div class="price-bd-row">` +
+                    `<img src="${escapeHtml(it.icon_link)}" class="price-bd-icon" onerror="this.style.display='none'" />` +
+                    `<span class="price-bd-name">${escapeHtml(it.short_name)}</span>` +
+                    vendorHtml +
+                    `<span class="price-bd-price">${_formatPrice(p)}</span>` +
+                    `</div>`;
+            }).join("");
+            const html = `<div class="price-bd">${rows}<div class="price-bd-total"><span>&#931;</span><span>${_formatPrice(total)}</span></div></div>`;
+            row.children[1].dataset.tooltipHtml = html;
+        }
+    }
 
     row.addEventListener("mouseenter", () => {
         if (!_statBarEls || !_statBarEls.ergoFill?.isConnected) _cacheStatBarEls();
@@ -1976,14 +2261,14 @@ function _renderComboRows(items) {
 
         const sentinel = document.createElement("tr");
         sentinel.className = "combo-load-sentinel";
-        sentinel.innerHTML = `<td colspan="7"></td>`;
+        sentinel.innerHTML = `<td colspan="10"></td>`;
         tbody.appendChild(sentinel);
 
         // Spacer reserves height for unrendered rows so the scrollbar shows the full size upfront
         _comboSpacer = document.createElement("tr");
         _comboSpacer.className = "combo-spacer";
         const spacerTd = document.createElement("td");
-        spacerTd.colSpan = 7;
+        spacerTd.colSpan = 10;
         spacerTd.style.padding = "0";
         spacerTd.style.height = `${(_comboLazyItems.length - _comboLazyRendered) * _comboRowHeight}px`;
         _comboSpacer.appendChild(spacerTd);

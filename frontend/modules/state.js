@@ -88,6 +88,7 @@ window.EFTForge.state = {
 
     // Combo recommender
     comboMode:         false,
+    graphMode:         false,
     lastComboItems:    [],
     lastComboWasCapped: false,
     combosCache:       {},

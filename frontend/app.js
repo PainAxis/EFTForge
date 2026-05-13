@@ -1090,9 +1090,16 @@ async function switchLang(lang) {
     }
 
     function show(target, cx, cy) {
+        const html = target.dataset.tooltipHtml;
         const text = target.dataset.tooltip;
-        if (!text) return;
-        tip.textContent = text;
+        if (!html && !text) return;
+        if (html) {
+            tip.innerHTML = html;
+            tip.classList.add("html-tip");
+        } else {
+            tip.textContent = text;
+            tip.classList.remove("html-tip");
+        }
         tip.classList.add("visible");
         activeTarget = target;
         // Read dimensions once after content is set; reused on every mousemove.
@@ -1102,7 +1109,7 @@ async function switchLang(lang) {
     }
 
     function hide() {
-        tip.classList.remove("visible");
+        tip.classList.remove("visible", "html-tip");
         activeTarget = null;
     }
 
@@ -1111,7 +1118,7 @@ async function switchLang(lang) {
     }, { passive: true });
 
     document.addEventListener("mouseover", (e) => {
-        let target = e.target.closest("[data-tooltip]");
+        let target = e.target.closest("[data-tooltip], [data-tooltip-html]");
 
         // Convert native title attributes to data-tooltip on first hover so
         // the browser never shows its default tooltip (e.g. from markdown content)

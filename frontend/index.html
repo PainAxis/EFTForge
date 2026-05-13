@@ -1049,6 +1049,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
   font-size: 13px;
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
   position: sticky;
   top: -40px;
   padding-top: 30px;
@@ -1076,12 +1077,18 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .attachment-table th:nth-child(5),
 .attachment-table th:nth-child(6),
 .attachment-table th:nth-child(7),
+.attachment-table th:nth-child(8),
+.attachment-table th:nth-child(9),
+.attachment-table th:nth-child(10),
 .attachment-table td:nth-child(2),
 .attachment-table td:nth-child(3),
 .attachment-table td:nth-child(4),
 .attachment-table td:nth-child(5),
 .attachment-table td:nth-child(6),
-.attachment-table td:nth-child(7) {
+.attachment-table td:nth-child(7),
+.attachment-table td:nth-child(8),
+.attachment-table td:nth-child(9),
+.attachment-table td:nth-child(10) {
   width: 1px;
   white-space: nowrap;
   text-align: right;
@@ -1090,18 +1097,25 @@ header:not(.header-expanded) .header-nav-btn-icon {
 }
 
 /* Auto-hide empty columns */
+/* Column order: 1=name 2=price 3=₽/recoil 4=weight 5=recoil 6=acc 7=ergo 8=evo 9=R+EE/3 10=EE:R */
 .attachment-table.hide-col-price th:nth-child(2),
 .attachment-table.hide-col-price td:nth-child(2) { display: none; }
-.attachment-table.hide-col-weight th:nth-child(3),
-.attachment-table.hide-col-weight td:nth-child(3) { display: none; }
-.attachment-table.hide-col-recoil th:nth-child(4),
-.attachment-table.hide-col-recoil td:nth-child(4) { display: none; }
-.attachment-table.hide-col-acc th:nth-child(5),
-.attachment-table.hide-col-acc td:nth-child(5) { display: none; }
-.attachment-table.hide-col-ergo th:nth-child(6),
-.attachment-table.hide-col-ergo td:nth-child(6) { display: none; }
-.attachment-table.hide-col-evo th:nth-child(7),
-.attachment-table.hide-col-evo td:nth-child(7) { display: none; }
+.attachment-table.hide-col-rub-recoil th:nth-child(3),
+.attachment-table.hide-col-rub-recoil td:nth-child(3) { display: none; }
+.attachment-table.hide-col-weight th:nth-child(4),
+.attachment-table.hide-col-weight td:nth-child(4) { display: none; }
+.attachment-table.hide-col-recoil th:nth-child(5),
+.attachment-table.hide-col-recoil td:nth-child(5) { display: none; }
+.attachment-table.hide-col-acc th:nth-child(6),
+.attachment-table.hide-col-acc td:nth-child(6) { display: none; }
+.attachment-table.hide-col-ergo th:nth-child(7),
+.attachment-table.hide-col-ergo td:nth-child(7) { display: none; }
+.attachment-table.hide-col-evo th:nth-child(8),
+.attachment-table.hide-col-evo td:nth-child(8) { display: none; }
+.attachment-table.hide-col-ree th:nth-child(9),
+.attachment-table.hide-col-ree td:nth-child(9) { display: none; }
+.attachment-table.hide-col-eer th:nth-child(10),
+.attachment-table.hide-col-eer td:nth-child(10) { display: none; }
 
 /* Price cell display in attachment table */
 .att-price-wrap {
@@ -1396,7 +1410,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
   flex-shrink: 0;
   font-size: 14px;
   font-weight: 700;
-  color: #00c8b4;
+  color: #f5c542;
   align-self: center;
   padding: 0 2px;
 }
@@ -1407,6 +1421,9 @@ header:not(.header-expanded) .header-nav-btn-icon {
   display: flex;
   gap: 0;
   flex-shrink: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #333;
 }
 
 .combo-view-btns .toggle-btn {
@@ -1414,15 +1431,54 @@ header:not(.header-expanded) .header-nav-btn-icon {
   padding: 5px 10px;
   font-size: 11px;
   border-radius: 0;
+  border: none;
+  border-right: 1px solid #333;
 }
 
-.combo-view-btns .toggle-btn:first-child {
-  border-radius: 4px 0 0 4px;
+.combo-view-btns .toggle-btn:last-of-type,
+.combo-view-btns:not(.has-combo) #graph-view-btn {
   border-right: none;
 }
 
-.combo-view-btns .toggle-btn:last-child {
-  border-radius: 0 4px 4px 0;
+/* ===========================
+   ATTACHMENT GRAPH VIEW
+=========================== */
+
+.att-graph-container {
+  width: 100%;
+  padding: 8px 0 4px;
+  box-sizing: border-box;
+}
+
+.att-graph-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: crosshair;
+}
+
+.att-graph-dot {
+  transition: r 0.1s ease, stroke-width 0.1s ease;
+}
+
+.att-graph-dot-click {
+  cursor: pointer;
+}
+
+.att-graph-dot-click:hover {
+  r: 7.5;
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+
+@keyframes graph-row-flash {
+  0%   { background: #f5c54240; }
+  60%  { background: #f5c54240; }
+  100% { background: transparent; }
+}
+
+.graph-row-highlight {
+  animation: graph-row-flash 1s ease forwards;
 }
 
 .combo-child-label {
@@ -1459,6 +1515,71 @@ header:not(.header-expanded) .header-nav-btn-icon {
   font-size: 9px;
   color: #888;
   margin-right: 3px;
+  font-weight: 700;
+}
+
+.price-bd {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 180px;
+}
+
+.price-bd-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.price-bd-icon {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.price-bd-name {
+  flex: 1;
+  font-size: 11px;
+  color: #ccc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.price-bd-vendor {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  flex-shrink: 0;
+  border-radius: 2px;
+}
+
+.price-bd-vendor-label,
+.price-bd-flea {
+  font-size: 8px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.price-bd-vendor-label { color: #888; }
+.price-bd-flea { color: #c8a84b; }
+
+.price-bd-price {
+  font-size: 11px;
+  color: #eee;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.price-bd-total {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 4px;
+  border-top: 1px solid #3a3a3a;
+  font-size: 11px;
+  color: #f5c542;
   font-weight: 700;
 }
 
@@ -1718,6 +1839,11 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
 
 #eft-tooltip.visible {
     opacity: 1;
+}
+
+#eft-tooltip.html-tip {
+    white-space: normal;
+    pointer-events: none;
 }
 
 /* =========================
