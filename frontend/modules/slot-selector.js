@@ -1497,7 +1497,14 @@ let _comboRowHeight      = 65;   // measured px per row, updated on first render
 
 let _graphView              = null; // { xMin, xMax, yMin, yMax } | null = auto-fit
 let _graphZoomController    = null; // AbortController for wheel/drag window listeners
-let _graphCrosshairEnabled  = true;
+let _graphCrosshairEnabled  = localStorage.getItem("eftforge_graph_crosshair") !== "0";
+let _graphLabelsEnabled     = localStorage.getItem("eftforge_graph_labels")    !== "0";
+let _graphYAxisEvo          = localStorage.getItem("eftforge_graph_y_axis") !== "ergo";
+let _graphHintsEnabled      = localStorage.getItem("eftforge_graph_hints")  !== "0";
+let _graphPanState          = null; // { last: {sx,sy} } while middle-button drag is active
+let _graphPanRaf            = null;
+let _graphPanDelta          = null;
+let _graphClusterState      = {}; // clusterKey -> activeIndex
 
 function _disconnectComboObserver() {
     if (_comboLazyObserver) {
@@ -1555,6 +1562,7 @@ function setListView() {
         EFTForge.state.graphMode = false;
         _graphZoomController?.abort();
         _graphView = null;
+        _graphPanState = null; _graphPanRaf = null; _graphPanDelta = null; _graphClusterState = {};
         document.getElementById("attachment-graph")?.remove();
         const table = document.querySelector(".attachment-table");
         if (table) table.style.display = "";
@@ -1596,6 +1604,7 @@ function setGraphView(wantGraph) {
     } else {
         _graphZoomController?.abort();
         _graphView = null;
+        _graphPanState = null; _graphPanRaf = null; _graphPanDelta = null; _graphClusterState = {};
         document.getElementById("attachment-graph")?.remove();
         if (table) table.style.display = "";
         if (searchInput) searchInput.style.display = "";
@@ -1618,13 +1627,13 @@ function _buildGraphSVG(container) {
     const items = query ? allItems.filter(e => e.sortName.includes(query)) : allItems;
     if (!items.length) { container.innerHTML = ""; return; }
 
-    const W = 520, H = 360;
-    const ML = 54, MR = 14, MT = 18, MB = 46;
+    const W = 520, H = 320;
+    const ML = 46, MR = 20, MT = 12, MB = 40;
     const PW = W - ML - MR, PH = H - MT - MB;
 
     // Compute full data extent with padding
     const xs = items.map(e => e.recoilPercent);
-    const ys = items.map(e => e.contribution);
+    const ys = items.map(e => _graphYAxisEvo ? e.contribution : e.ergoModifier);
     let dxMin = Math.min(...xs), dxMax = Math.max(...xs);
     let dyMin = Math.min(...ys), dyMax = Math.max(...ys);
     const xRange = Math.max(dxMax - dxMin, 0.5);
@@ -1661,7 +1670,7 @@ function _buildGraphSVG(container) {
 
     let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" class="att-graph-svg" preserveAspectRatio="xMidYMid meet">`;
     s += `<defs><clipPath id="plot-clip"><rect x="${ML}" y="${MT}" width="${PW}" height="${PH}"/></clipPath></defs>`;
-    s += `<rect x="${ML}" y="${MT}" width="${PW}" height="${PH}" fill="#161616" rx="2"/>`;
+    s += `<rect x="${ML}" y="${MT}" width="${PW}" height="${PH}" fill="#0d0d0d" rx="2"/>`;
 
     for (const tx of xTicks) {
         const sx = toX(tx).toFixed(1);
@@ -1676,7 +1685,7 @@ function _buildGraphSVG(container) {
     if (zx >= ML && zx <= ML+PW) s += `<line x1="${zx.toFixed(1)}" y1="${MT}" x2="${zx.toFixed(1)}" y2="${MT+PH}" stroke="#363636" stroke-width="1" stroke-dasharray="4,3"/>`;
     if (zy >= MT && zy <= MT+PH) s += `<line x1="${ML}" y1="${zy.toFixed(1)}" x2="${ML+PW}" y2="${zy.toFixed(1)}" stroke="#363636" stroke-width="1" stroke-dasharray="4,3"/>`;
 
-    s += `<g font-size="10" fill="#555" font-family="Bender,Arial,sans-serif">`;
+    s += `<g font-size="8" fill="#555" font-family="Bender,Arial,sans-serif" style="user-select:none;pointer-events:none">`;
     for (const tx of xTicks) {
         const lbl = tx === 0 ? "0" : `${tx>0?"+":""}${parseFloat(tx.toFixed(2))}%`;
         s += `<text x="${toX(tx).toFixed(1)}" y="${MT+PH+14}" text-anchor="middle">${lbl}</text>`;
@@ -1686,59 +1695,90 @@ function _buildGraphSVG(container) {
         s += `<text x="${ML-5}" y="${(toY(ty)+3.5).toFixed(1)}" text-anchor="end">${lbl}</text>`;
     }
     s += `</g>`;
-    s += `<text x="${(ML+PW/2).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#666" font-family="Bender,Arial,sans-serif">${t("graph.xLabel")}</text>`;
-    s += `<text x="10" y="${(MT+PH/2).toFixed(1)}" text-anchor="middle" font-size="8" fill="#666" font-family="Bender,Arial,sans-serif" transform="rotate(-90,10,${(MT+PH/2).toFixed(1)})">${t("graph.yLabel")}</text>`;
+    s += `<text x="${(ML+PW/2).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#666" font-family="Bender,Arial,sans-serif" style="user-select:none;pointer-events:none">${t("graph.xLabel")}</text>`;
+    s += `<text x="8" y="${(MT+PH/2).toFixed(1)}" text-anchor="middle" font-size="8" fill="#666" font-family="Bender,Arial,sans-serif" transform="rotate(-90,8,${(MT+PH/2).toFixed(1)})" style="user-select:none;pointer-events:none">${t(_graphYAxisEvo ? "graph.yLabel" : "graph.yLabelErgo")}</text>`;
 
     const iw = 22, ih = 22;
-    const FONT_SZ = 4.5, LINE_H = 5.3, MAX_CHARS = 8;
+    const FONT_SZ = 4.5;
 
     const ICON_GAP = 3;
     const pts = [...items].sort((a, b) => (a.hasConflict ? 0 : 1) - (b.hasConflict ? 0 : 1));
     const plotPts = pts.map(e => {
-        const ox = toX(e.recoilPercent), oy = toY(e.contribution);
-        const r = `${e.recoilPercent>0?"+":""}${e.recoilPercent.toFixed(1)}%`;
-        const v = `${e.contribution>0?"+":""}${e.contribution.toFixed(1)}`;
+        const yVal = _graphYAxisEvo ? e.contribution : e.ergoModifier;
+        const ox = toX(e.recoilPercent), oy = toY(yVal);
+        const r  = `${e.recoilPercent>0?"+":""}${e.recoilPercent.toFixed(1)}%`;
+        const v  = `${e.contribution>0?"+":""}${e.contribution.toFixed(1)}`;
         const eg = `${e.ergoModifier>0?"+":""}${e.ergoModifier.toFixed(1)}`;
-        const tip = `${e.item.name}\n${t("graph.tooltipRecoil")}: ${r}  ${t("graph.tooltipEvoErgo")}: ${v}\n${t("graph.tooltipErgo")}: ${eg}`;
         const cls = `att-graph-dot${e.hasConflict ? "" : " att-graph-dot-click"}`;
-        const nameLines = [];
-        let nameCur = '';
-        for (const w of (e.item.short_name || e.item.name || '').split(' ')) {
-            if (!nameCur) { nameCur = w; }
-            else if ((nameCur + ' ' + w).length <= MAX_CHARS) { nameCur += ' ' + w; }
-            else { nameLines.push(nameCur); nameCur = w; }
-        }
-        if (nameCur) nameLines.push(nameCur);
-        return { e, ox, oy, tip, cls, nameLines };
+        const shortName = e.item.short_name || e.item.name || '';
+        return { e, ox, oy, r, v, eg, cls, shortName };
     });
 
-    // Dots at exact data coordinates + hairlines to icon bottom-center
-    s += `<g clip-path="url(#plot-clip)" pointer-events="none">`;
-    for (const p of plotPts) {
-        const iconBottomY = p.oy - ICON_GAP;
-        s += `<line x1="${p.ox.toFixed(1)}" y1="${p.oy.toFixed(1)}" x2="${p.ox.toFixed(1)}" y2="${iconBottomY.toFixed(1)}" stroke="#555" stroke-width="0.6" stroke-dasharray="2,2"/>`;
-        s += `<circle cx="${p.ox.toFixed(1)}" cy="${p.oy.toFixed(1)}" r="2" fill="#888"/>`;
-    }
-    s += `</g>`;
+    // Group items that share the exact same SVG coordinates into clusters
+    {
+        const posMap = new Map();
+        for (const p of plotPts) {
+            const k = `${p.ox.toFixed(2)},${p.oy.toFixed(2)}`;
+            if (!posMap.has(k)) posMap.set(k, []);
+            posMap.get(k).push(p);
+        }
+        const clusters = [...posMap.values()];
 
-    // Icons above their dot
-    s += `<g clip-path="url(#plot-clip)">`;
-    for (const p of plotPts) {
-        const { e, ox, oy, tip, cls, nameLines } = p;
-        const x = ox, y = oy - ih / 2 - ICON_GAP;
-        const ix = (x - iw / 2).toFixed(1), iy = (y - ih / 2).toFixed(1);
-        const txX = (x + iw / 2 - 1).toFixed(1);
-        const txY0 = y - ih / 2 + FONT_SZ;
-        s += `<g class="${cls}" data-item-id="${escapeHtml(String(e.item.id))}" data-tooltip="${escapeHtml(tip)}">`;
-        s += `<image href="${escapeHtml(e.item.base_image_link || e.item.icon_link)}" x="${ix}" y="${iy}" width="${iw}" height="${ih}" preserveAspectRatio="xMidYMid meet"/>`;
-        s += `<text class="graph-item-name" text-anchor="end" font-size="${FONT_SZ}">`;
-        nameLines.forEach((line, i) => {
-            s += `<tspan x="${txX}" y="${(txY0 + i * LINE_H).toFixed(1)}">${escapeHtml(line)}</tspan>`;
-        });
-        s += `</text>`;
+        s += `<g clip-path="url(#plot-clip)">`;
+        for (const cluster of clusters) {
+            const isMulti = cluster.length > 1;
+            const key = isMulti ? cluster.map(p => p.e.item.id).sort().join(',') : null;
+            const activeIdx = isMulti ? ((_graphClusterState[key] ?? 0) % cluster.length) : 0;
+            const p = cluster[activeIdx];
+            const { e, ox, oy, r, v, eg, cls, shortName } = p;
+            const x = ox, y = oy - ih / 2 - ICON_GAP;
+            const ix = (x - iw / 2).toFixed(1), iy = (y - ih / 2).toFixed(1);
+            const iconBottomY = oy - ICON_GAP;
+
+            const yLabel = t(_graphYAxisEvo ? "graph.tooltipEvoErgo" : "graph.tooltipErgo");
+            const yStr   = _graphYAxisEvo ? v : eg;
+
+            let tipAttr;
+            if (isMulti) {
+                let html = `<div class='graph-cluster-tip'>`;
+                for (let i = 0; i < cluster.length; i++) {
+                    const cp = cluster[i];
+                    const src = (cp.e.item.base_image_link || cp.e.item.icon_link || '').replace(/'/g, '%27');
+                    html += `<div class='gct-row${i === activeIdx ? ' gct-active' : ''}'>`;
+                    html += `<img src='${src}' style='width:20px;height:20px;object-fit:contain'>`;
+                    html += `<span>${escapeHtml(cp.shortName)}</span></div>`;
+                }
+                html += `<div class='gct-stats'>${t("graph.tooltipRecoil")}: ${r} &nbsp; ${yLabel}: ${yStr}</div>`;
+                html += `<div class='gct-hint'>${t("graph.hintCycle")}</div></div>`;
+                tipAttr = `data-tooltip-html="${escapeHtml(html)}"`;
+            } else {
+                const src = (e.item.base_image_link || e.item.icon_link || '').replace(/'/g, '%27');
+                let html = `<div style='display:flex;align-items:center;gap:8px'>`;
+                html += `<img src='${src}' style='width:36px;height:36px;object-fit:contain;flex-shrink:0'>`;
+                html += `<div><div style='color:#ddd;font-size:12px;margin-bottom:3px'>${escapeHtml(e.item.name)}</div>`;
+                html += `<div style='color:#888;font-size:11px'>${t("graph.tooltipRecoil")}: ${r} &nbsp; ${yLabel}: ${yStr}</div>`;
+                html += `</div></div>`;
+                tipAttr = `data-tooltip-html="${escapeHtml(html)}"`;
+            }
+
+            s += `<g class="${cls}${isMulti ? ' graph-cluster' : ''}" data-item-id="${escapeHtml(String(e.item.id))}"${isMulti ? ` data-cluster-key="${escapeHtml(key)}" data-cluster-count="${cluster.length}"` : ''} ${tipAttr}>`;
+            s += `<line x1="${ox.toFixed(1)}" y1="${oy.toFixed(1)}" x2="${ox.toFixed(1)}" y2="${iconBottomY.toFixed(1)}" stroke="#555" stroke-width="0.6" stroke-dasharray="2,2" pointer-events="none"/>`;
+            s += `<circle cx="${ox.toFixed(1)}" cy="${oy.toFixed(1)}" r="1.5" fill="#f5c542"/>`;
+            s += `<image href="${escapeHtml(e.item.base_image_link || e.item.icon_link)}" x="${ix}" y="${iy}" width="${iw}" height="${ih}" preserveAspectRatio="xMidYMid meet"/>`;
+            if (_graphLabelsEnabled) {
+                const txY = (y + ih / 2 + FONT_SZ - 7).toFixed(1);
+                s += `<text class="graph-item-name" x="${x.toFixed(1)}" y="${txY}" text-anchor="middle" font-size="${FONT_SZ}">${escapeHtml(shortName)}</text>`;
+            }
+            if (isMulti) {
+                const bx = (x + iw / 2).toFixed(1);
+                const by = (y - ih / 2).toFixed(1);
+                s += `<circle cx="${bx}" cy="${by}" r="3.5" fill="#f5c542" pointer-events="none"/>`;
+                s += `<text x="${bx}" y="${by}" text-anchor="middle" dominant-baseline="central" font-size="4.5" font-weight="bold" fill="#111" font-family="Bender,Arial,sans-serif" pointer-events="none">${cluster.length}</text>`;
+            }
+            s += `</g>`;
+        }
         s += `</g>`;
     }
-    s += `</g>`;
 
     // Crosshair overlay - hidden until hover, pointer-events off so dots remain interactive
     s += `<g id="graph-crosshair" visibility="hidden" pointer-events="none">`;
@@ -1756,30 +1796,27 @@ function _buildGraphSVG(container) {
     s += `<rect x="${ML}" y="${MT}" width="${PW}" height="${PH}" fill="none" stroke="#2a2a2a" stroke-width="1" rx="2"/>`;
 
     // Control hints watermark - top-right corner of plot
-    const hintX = ML + PW - 5, hintY = MT + 9;
-    s += `<g font-size="7" fill="#3a3a3a" font-family="Bender,Arial,sans-serif" text-anchor="end">`;
-    s += `<text x="${hintX}" y="${hintY}">${t("graph.hintScroll")}</text>`;
-    s += `<text x="${hintX}" y="${hintY + 9}">${t("graph.hintPan")}</text>`;
-    s += `<text x="${hintX}" y="${hintY + 18}">${t("graph.hintBoxZoom")}</text>`;
-    s += `<text x="${hintX}" y="${hintY + 27}">${t("graph.hintReset")}</text>`;
-    s += `</g>`;
-
-    if (_graphView !== null) {
-        const bx = ML + PW - 14;
-        s += `<g class="graph-reset-svg-btn" style="cursor:pointer" data-tooltip="${t("graph.resetZoom")}">`;
-        s += `<rect x="${bx}" y="2" width="14" height="14" rx="2" fill="#1e1e1e" stroke="#3a3a3a" stroke-width="0.5"/>`;
-        s += `<text x="${bx + 7}" y="12" text-anchor="middle" font-size="9" fill="#888" font-family="Arial,sans-serif">&#x21BA;</text>`;
+    if (_graphHintsEnabled) {
+        const hintX = ML + PW - 5, hintY = MT + 9;
+        s += `<g font-size="7" fill="#3a3a3a" font-family="Bender,Arial,sans-serif" text-anchor="end" style="user-select:none;pointer-events:none">`;
+        s += `<text x="${hintX}" y="${hintY}">${t("graph.hintPan")}</text>`;
+        s += `<text x="${hintX}" y="${hintY + 9}">${t("graph.hintScroll")}</text>`;
+        s += `<text x="${hintX}" y="${hintY + 18}">${t("graph.hintBoxZoom")}</text>`;
+        s += `<text x="${hintX}" y="${hintY + 27}">${t("graph.hintReset")}</text>`;
         s += `</g>`;
     }
 
-    // crosshair toggle button - top-left of plot area
+    // Buttons - vertical column on right side of SVG, outside the plot
     {
+        const bx = W - 16; // 14px wide, 2px from SVG right edge
+        const by0 = MT;    // start level with plot top
+        const bGap = 16;   // 14px button + 2px gap
+
         const chActive = _graphCrosshairEnabled;
-        const cx = ML;
         const ic = chActive ? "#f5c542" : "#555";
         s += `<g class="graph-ch-toggle-btn" style="cursor:pointer" data-tooltip="${chActive ? t("graph.hideCrosshair") : t("graph.showCrosshair")}">`;
-        s += `<rect x="${cx}" y="2" width="14" height="14" rx="2" fill="#1e1e1e" stroke="${chActive ? "#f5c542" : "#3a3a3a"}" stroke-width="0.5"/>`;
-        s += `<svg x="${cx + 3}" y="5" width="8" height="8" viewBox="0 0 18 18" fill="none">`;
+        s += `<rect x="${bx}" y="${by0}" width="14" height="14" rx="2" fill="#1e1e1e" stroke="${chActive ? "#f5c542" : "#3a3a3a"}" stroke-width="0.5"/>`;
+        s += `<svg x="${bx + 3}" y="${by0 + 3}" width="8" height="8" viewBox="0 0 18 18" fill="none">`;
         s += `<circle cx="9" cy="9" r="7.5" stroke="${ic}" stroke-width="1.5"/>`;
         s += `<circle cx="9" cy="9" r="3.5" stroke="${ic}" stroke-width="1.5"/>`;
         s += `<line x1="9" y1="1.5" x2="9" y2="5" stroke="${ic}" stroke-width="1.5" stroke-linecap="round"/>`;
@@ -1788,6 +1825,39 @@ function _buildGraphSVG(container) {
         s += `<line x1="13" y1="9" x2="16.5" y2="9" stroke="${ic}" stroke-width="1.5" stroke-linecap="round"/>`;
         s += `</svg>`;
         s += `</g>`;
+
+        const lbActive = _graphLabelsEnabled;
+        const lc = lbActive ? "#f5c542" : "#555";
+        s += `<g class="graph-lbl-toggle-btn" style="cursor:pointer" data-tooltip="${lbActive ? t("graph.hideLabels") : t("graph.showLabels")}">`;
+        s += `<rect x="${bx}" y="${by0 + bGap}" width="14" height="14" rx="2" fill="#1e1e1e" stroke="${lbActive ? "#f5c542" : "#3a3a3a"}" stroke-width="0.5"/>`;
+        s += `<text x="${bx + 7}" y="${by0 + bGap + 10.5}" text-anchor="middle" font-size="8" font-weight="bold" fill="${lc}" font-family="Bender,Arial,sans-serif">A</text>`;
+        s += `</g>`;
+
+        const yc = _graphYAxisEvo ? "#f5c542" : "#555";
+        s += `<g class="graph-yaxis-toggle-btn" style="cursor:pointer" data-tooltip="${_graphYAxisEvo ? t("graph.switchToErgo") : t("graph.switchToEvoErgo")}">`;
+        s += `<rect x="${bx}" y="${by0 + bGap * 2}" width="14" height="14" rx="2" fill="#1e1e1e" stroke="${_graphYAxisEvo ? "#f5c542" : "#3a3a3a"}" stroke-width="0.5"/>`;
+        s += `<svg x="${bx + 2}" y="${by0 + bGap * 2 + 2}" width="10" height="10" viewBox="0 0 18 18" fill="none">`;
+        s += `<line x1="4" y1="2" x2="4" y2="14" stroke="${yc}" stroke-width="1.5" stroke-linecap="round"/>`;
+        s += `<line x1="4" y1="14" x2="16" y2="14" stroke="${yc}" stroke-width="1.5" stroke-linecap="round"/>`;
+        s += `<circle cx="7" cy="12" r="1.8" fill="${yc}"/>`;
+        s += `<circle cx="11" cy="8" r="1.8" fill="${yc}"/>`;
+        s += `<circle cx="14" cy="5" r="1.8" fill="${yc}"/>`;
+        s += `</svg>`;
+        s += `</g>`;
+
+        const hActive = _graphHintsEnabled;
+        const hc = hActive ? "#f5c542" : "#555";
+        s += `<g class="graph-hints-toggle-btn" style="cursor:pointer" data-tooltip="${hActive ? t("graph.hideHints") : t("graph.showHints")}">`;
+        s += `<rect x="${bx}" y="${by0 + bGap * 3}" width="14" height="14" rx="2" fill="#1e1e1e" stroke="${hActive ? "#f5c542" : "#3a3a3a"}" stroke-width="0.5"/>`;
+        s += `<text x="${bx + 7}" y="${by0 + bGap * 3 + 10.5}" text-anchor="middle" font-size="9" font-weight="bold" fill="${hc}" font-family="Bender,Arial,sans-serif">?</text>`;
+        s += `</g>`;
+
+        if (_graphView !== null) {
+            s += `<g class="graph-reset-svg-btn" style="cursor:pointer" data-tooltip="${t("graph.resetZoom")}">`;
+            s += `<rect x="${bx}" y="${by0 + bGap * 4}" width="14" height="14" rx="2" fill="#1e1e1e" stroke="#3a3a3a" stroke-width="0.5"/>`;
+            s += `<text x="${bx + 7}" y="${by0 + bGap * 4 + 10}" text-anchor="middle" font-size="9" fill="#888" font-family="Arial,sans-serif">&#x21BA;</text>`;
+            s += `</g>`;
+        }
     }
 
     s += `</svg>`;
@@ -1818,7 +1888,45 @@ function _buildGraphSVG(container) {
     container.querySelector(".graph-ch-toggle-btn")?.addEventListener("click", (e) => {
         e.stopPropagation();
         _graphCrosshairEnabled = !_graphCrosshairEnabled;
+        localStorage.setItem("eftforge_graph_crosshair", _graphCrosshairEnabled ? "1" : "0");
         _buildGraphSVG(container);
+    });
+
+    // -- Label toggle button --
+    container.querySelector(".graph-lbl-toggle-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        _graphLabelsEnabled = !_graphLabelsEnabled;
+        localStorage.setItem("eftforge_graph_labels", _graphLabelsEnabled ? "1" : "0");
+        _buildGraphSVG(container);
+    });
+
+    // -- Y-axis mode toggle button --
+    container.querySelector(".graph-yaxis-toggle-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        _graphYAxisEvo = !_graphYAxisEvo;
+        localStorage.setItem("eftforge_graph_y_axis", _graphYAxisEvo ? "evo" : "ergo");
+        _graphView = null; // reset zoom so new axis range fits
+        _buildGraphSVG(container);
+    });
+
+    // -- Hints toggle button --
+    container.querySelector(".graph-hints-toggle-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        _graphHintsEnabled = !_graphHintsEnabled;
+        localStorage.setItem("eftforge_graph_hints", _graphHintsEnabled ? "1" : "0");
+        _buildGraphSVG(container);
+    });
+
+    // -- Cluster scroll: cycle active item, blocks zoom handler --
+    container.querySelectorAll(".graph-cluster").forEach(clusterEl => {
+        clusterEl.addEventListener("wheel", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const key = clusterEl.dataset.clusterKey;
+            const count = parseInt(clusterEl.dataset.clusterCount, 10);
+            _graphClusterState[key] = ((_graphClusterState[key] ?? 0) + (e.deltaY > 0 ? 1 : -1) + count) % count;
+            _buildGraphSVG(container);
+        }, { passive: false, signal });
     });
 
     // -- Right-click anywhere on SVG resets zoom (suppresses context menu) --
@@ -1828,10 +1936,10 @@ function _buildGraphSVG(container) {
         if (inPlot(pt.sx, pt.sy)) resetZoom();
     }, { signal });
 
-    // -- Wheel: zoom (mouse wheel / pinch) or pan (touchpad two-finger swipe) --
-    // ctrlKey=true  -> pinch zoom (high sensitivity)
+    // -- Wheel: zoom (ctrl+scroll / pinch) or pan (touchpad two-finger swipe) --
+    // ctrlKey=true  -> zoom (pinch or ctrl+scroll)
     // ctrlKey=false, deltaX!=0 or small pixel delta -> two-finger pan
-    // ctrlKey=false, large discrete delta -> mouse wheel zoom (big jumps)
+    // ctrlKey=false, plain mouse wheel -> ignored (no zoom)
     let wheelAccum = 0, panAccumX = 0, panAccumY = 0, wheelRaf = null;
     let lastWheelPt = { sx: ML + PW / 2, sy: MT + PH / 2 };
 
@@ -1846,10 +1954,12 @@ function _buildGraphSVG(container) {
             const rect = svg.getBoundingClientRect();
             panAccumX += e.deltaX / rect.width  * W * 0.5;
             panAccumY += e.deltaY / rect.height * H * 0.5;
-        } else {
+        } else if (e.ctrlKey) {
             lastWheelPt = pt;
-            // Pinch (ctrlKey): raw deltaY is small (~3), scale up for sensitivity
-            wheelAccum += e.ctrlKey ? e.deltaY * 2 : e.deltaY;
+            // Pinch zoom or ctrl+scroll: raw deltaY is small for pinch (~3), scale up for sensitivity
+            wheelAccum += e.deltaY * 2;
+        } else {
+            return; // plain mouse wheel - no zoom
         }
 
         if (wheelRaf) return;
@@ -1858,7 +1968,7 @@ function _buildGraphSVG(container) {
             let cur = _graphView || { xMin: dxMin, xMax: dxMax, yMin: dyMin, yMax: dyMax };
 
             if (wheelAccum !== 0) {
-                const factor = Math.pow(1.5, wheelAccum / 100);
+                const factor = Math.pow(1.5, wheelAccum / 400);
                 wheelAccum = 0;
                 const cx = toDataX(lastWheelPt.sx), cy = toDataY(lastWheelPt.sy);
                 cur = {
@@ -1887,17 +1997,18 @@ function _buildGraphSVG(container) {
     }, { passive: false });
 
     // -- Middle-mouse drag: pan --
-    let panMouseState = null, panMouseRaf = null, panMouseDelta = null;
+    // _graphPanState/Raf/Delta are module-level so they survive SVG rebuilds mid-drag.
 
     // -- Box zoom + LMB click --
     let dragState = null; // { start: {sx,sy}, moved: bool, boxEl }
 
     svg.addEventListener("mousedown", (e) => {
         if (e.button === 1) {
+            e.preventDefault(); // must be before inPlot check to block browser auto-scroll
             const pt = svgPoint(e);
             if (!inPlot(pt.sx, pt.sy)) return;
-            e.preventDefault();
-            panMouseState = { last: pt };
+            _graphPanState = { last: pt };
+            svg.style.cursor = 'grabbing';
             return;
         }
         if (e.button !== 0) return;
@@ -1915,24 +2026,24 @@ function _buildGraphSVG(container) {
     }, { signal });
 
     window.addEventListener("mousemove", (e) => {
-        if (panMouseState) {
+        if (_graphPanState) {
             const pt = svgPoint(e);
-            const dx = pt.sx - panMouseState.last.sx;
-            const dy = pt.sy - panMouseState.last.sy;
-            panMouseState.last = pt;
-            if (!panMouseDelta) panMouseDelta = { x: 0, y: 0 };
-            panMouseDelta.x += dx;
-            panMouseDelta.y += dy;
-            if (!panMouseRaf) {
-                panMouseRaf = requestAnimationFrame(() => {
-                    panMouseRaf = null;
-                    const d = panMouseDelta; panMouseDelta = null;
+            const dx = pt.sx - _graphPanState.last.sx;
+            const dy = pt.sy - _graphPanState.last.sy;
+            _graphPanState.last = pt;
+            if (!_graphPanDelta) _graphPanDelta = { x: 0, y: 0 };
+            _graphPanDelta.x += dx;
+            _graphPanDelta.y += dy;
+            if (!_graphPanRaf) {
+                _graphPanRaf = requestAnimationFrame(() => {
+                    _graphPanRaf = null;
+                    const d = _graphPanDelta; _graphPanDelta = null;
                     const cur = _graphView || { xMin: dxMin, xMax: dxMax, yMin: dyMin, yMax: dyMax };
                     _graphView = {
                         xMin: cur.xMin + d.x / PW * (cur.xMax - cur.xMin),
                         xMax: cur.xMax + d.x / PW * (cur.xMax - cur.xMin),
-                        yMin: cur.yMin - d.y / PH * (cur.yMax - cur.yMin),
-                        yMax: cur.yMax - d.y / PH * (cur.yMax - cur.yMin),
+                        yMin: cur.yMin + d.y / PH * (cur.yMax - cur.yMin),
+                        yMax: cur.yMax + d.y / PH * (cur.yMax - cur.yMin),
                     };
                     _buildGraphSVG(container);
                 });
@@ -1952,8 +2063,9 @@ function _buildGraphSVG(container) {
     }, { signal });
 
     window.addEventListener("mouseup", (e) => {
-        if (e.button === 1 && panMouseState) {
-            panMouseState = null;
+        if (e.button === 1 && _graphPanState) {
+            _graphPanState = null;
+            svg.style.cursor = '';
             return;
         }
 
@@ -2037,6 +2149,8 @@ function _buildGraphSVG(container) {
     svg.addEventListener("mouseleave", () => {
         chGroup?.setAttribute("visibility", "hidden");
     }, { signal });
+
+    if (_graphPanState) svg.style.cursor = 'grabbing';
 }
 
 function setComboView(wantCombo) {

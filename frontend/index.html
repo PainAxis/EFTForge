@@ -1475,7 +1475,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
 
 .att-graph-container {
   width: 100%;
-  padding: 8px 0 4px;
+  padding: 0 0 4px;
   box-sizing: border-box;
 }
 
@@ -1484,6 +1484,13 @@ header:not(.header-expanded) .header-nav-btn-icon {
   width: 100%;
   height: auto;
   cursor: crosshair;
+}
+
+.att-graph-dot circle:first-of-type {
+  transition: fill 0.12s ease;
+}
+.att-graph-dot:hover circle:first-of-type {
+  fill: #ffe566;
 }
 
 .att-graph-dot-click {
@@ -1498,9 +1505,39 @@ header:not(.header-expanded) .header-nav-btn-icon {
   font-family: "Bender", Arial, sans-serif;
   font-weight: 600;
   fill: #aaa;
-  text-shadow: 0 0 2px #000, 0 0 3px #000, 0 0 5px #000;
+  text-shadow: 0 0 3px rgba(0,0,0,0.9);
   pointer-events: none;
   user-select: none;
+}
+
+.graph-cluster-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 110px;
+}
+.gct-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #888;
+}
+.gct-row.gct-active {
+  color: #f5c542;
+}
+.gct-hint {
+  font-size: 9px;
+  color: #555;
+  margin-top: 2px;
+  text-align: center;
+}
+.gct-stats {
+  font-size: 10px;
+  color: #666;
+  border-top: 1px solid #2a2a2a;
+  padding-top: 4px;
+  margin-top: 1px;
 }
 
 @keyframes graph-row-flash {
