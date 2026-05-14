@@ -95,7 +95,7 @@ async function comboBatchProcess(payload) {
     return res.json();
 }
 
-async function comboFull(payload, signal) {
+async function comboFull(payload, signal, onProgress) {
     const res = await fetch(`${_base()}/build/combo-full`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
@@ -103,7 +103,31 @@ async function comboFull(payload, signal) {
         signal,
     });
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
-    return res.json();
+
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() ?? "";
+        for (const part of parts) {
+            const line = part.split("\n").find(l => l.startsWith("data: "));
+            if (!line) continue;
+            const event = JSON.parse(line.slice(6));
+            if (event.type === "progress") {
+                onProgress?.(event);
+            } else if (event.type === "result") {
+                return event.data;
+            } else if (event.type === "error") {
+                throw new Error(event.message ?? "combo-full stream error");
+            }
+        }
+    }
+    throw new Error("combo-full stream ended without result");
 }
 
 async function fetchFleaPrices(itemIds, gameMode = "regular") {

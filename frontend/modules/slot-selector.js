@@ -2140,8 +2140,20 @@ async function openComboView() {
     const tbody = document.getElementById("attachment-body");
     if (tbody) {
         _clearMarqueeTimers();
-        tbody.innerHTML = `<tr><td colspan="10" class="combo-status-row">${escapeHtml(t("ui.comboLoading"))}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="combo-status-row">
+            <div class="combo-loading-main" id="combo-loading-main">${escapeHtml(t("ui.comboLoading"))}</div>
+            <div class="combo-loading-progress" id="combo-loading-progress"></div>
+        </td></tr>`;
     }
+
+    // Animate the dots on the loading label
+    let _loadingDots = 1;
+    const _loadingBaseText = t("ui.comboLoading");
+    const _dotsInterval = setInterval(() => {
+        const el = document.getElementById("combo-loading-main");
+        if (el) el.textContent = _loadingBaseText + ".".repeat(_loadingDots);
+        _loadingDots = _loadingDots >= 3 ? 1 : _loadingDots + 1;
+    }, 500);
 
     _abortComboCalc();
     _comboAbortController = new AbortController();
@@ -2159,8 +2171,18 @@ async function openComboView() {
             exclude_child_slot_names:  (isLeftQueueRoot && typeof _AG_LEFT_ORDER !== "undefined")
                                            ? _AG_LEFT_ORDER.filter(n => n !== EFTForge.state.lastSlot?.slot_name) : [],
             exclude_item_ids:          EFTForge.config.COMBO_EXCLUDE_ITEM_IDS ?? [],
-        }, signal);
+        }, signal, (ev) => {
+            const progressEl = document.getElementById("combo-loading-progress");
+            if (!progressEl) return;
+            const text = t("ui.comboProgress")
+                .replace("{slot}",     ev.slot)
+                .replace("{parent}",   ev.parent)
+                .replace("{frontier}", ev.frontier)
+                .replace("{cap}",      ev.cap);
+            progressEl.textContent = text;
+        });
     } catch (err) {
+        clearInterval(_dotsInterval);
         if (err.name === "AbortError") return;
         console.error("Combo full failed:", err);
         if (tbody && EFTForge.state.comboMode) {
@@ -2169,6 +2191,12 @@ async function openComboView() {
         EFTForge.state.comboMode = false;
         _updateViewBtns();
         return;
+    }
+
+    clearInterval(_dotsInterval);
+
+    if (result.truncated) {
+        showToast(t("ui.comboTruncatedTitle"), t("ui.comboTruncatedMsg"), 8000, "#c8a84b");
     }
 
     if (!EFTForge.state.comboMode) return;

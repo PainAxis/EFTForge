@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import BackgroundTasks, FastAPI, Body, Depends, HTTPException, Header, Request
+from fastapi.responses import StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware as GZIPMiddleware
 from sqlalchemy import case, func, text
 from sqlalchemy.orm import Session
@@ -965,7 +966,10 @@ def combo_full(
     with _COMBO_FULL_CACHE_LOCK:
         cached = _COMBO_FULL_CACHE.get(_cache_key)
     if cached is not None:
-        return cached
+        def _cached_stream():
+            yield f"data: {json.dumps({'type': 'result', 'data': cached})}\n\n"
+        return StreamingResponse(_cached_stream(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     # 1. Base item
     base_item = db.query(Item).filter(Item.id == base_item_id).first()
@@ -1252,95 +1256,116 @@ def combo_full(
         return states
 
     # 10. Frontier expansion + stats (pure Python, no further DB queries)
-    all_combos = []
-    for parent in all_parents:
-        child_slots = child_slots_by_parent.get(parent.id, [])
-        parent_child_slot_ids = [cs.id for cs in child_slots]
-        parent_name = parent.name or parent.id
-        t0 = time.monotonic()
-        parent_conflict = parent_external_conflict.get(parent.id)
+    _FRONTIER_CAP = 10_000
 
-        if not child_slots:
-            combo_ids = installed_ids + [parent.id]
-            stats = _compute_stats(base_item, combo_ids, items_map, strength_level, equip_ergo_modifier)
-            all_combos.append({
-                "parent_item":                  _ser(parent),
-                "child_items":                  [],
-                "child_slot_ids":               [],
-                "child_slot_parent_item_ids":   [],
-                "all_child_slot_ids":           [],
-                "all_nested_slot_ids":          [],
-                "conflict":                     _ser_conflict(parent_conflict),
-                **stats,
-            })
-            continue
+    def _stream():
+        all_combos = []
+        any_truncated = False
 
-        # frontier: list of dicts { child_items, child_slot_ids, child_slot_parent_item_ids, installed_ids, conflict }
-        frontier = [{"child_items": [], "child_slot_ids": [], "child_slot_parent_item_ids": [], "installed_ids": installed_ids + [parent.id], "conflict": parent_conflict}]
+        for parent in all_parents:
+            child_slots = child_slots_by_parent.get(parent.id, [])
+            parent_child_slot_ids = [cs.id for cs in child_slots]
+            parent_name = parent.name or parent.id
+            t0 = time.monotonic()
+            parent_conflict = parent_external_conflict.get(parent.id)
 
-        for cs in child_slots:
-            raw_candidates = child_items_by_slot.get(cs.id, [])
-            if not raw_candidates:
+            if not child_slots:
+                combo_ids = installed_ids + [parent.id]
+                stats = _compute_stats(base_item, combo_ids, items_map, strength_level, equip_ergo_modifier)
+                all_combos.append({
+                    "parent_item":                  _ser(parent),
+                    "child_items":                  [],
+                    "child_slot_ids":               [],
+                    "child_slot_parent_item_ids":   [],
+                    "all_child_slot_ids":           [],
+                    "all_nested_slot_ids":          [],
+                    "conflict":                     _ser_conflict(parent_conflict),
+                    **stats,
+                })
                 continue
 
-            next_frontier = []
-            seen: dict = {}
+            # frontier: list of dicts { child_items, child_slot_ids, child_slot_parent_item_ids, installed_ids, conflict }
+            frontier = [{"child_items": [], "child_slot_ids": [], "child_slot_parent_item_ids": [], "installed_ids": installed_ids + [parent.id], "conflict": parent_conflict}]
+
+            for cs in child_slots:
+                raw_candidates = child_items_by_slot.get(cs.id, [])
+                if not raw_candidates:
+                    continue
+
+                next_frontier = []
+                seen: dict = {}
+                for state in frontier:
+                    inst_list = state["installed_ids"]
+                    key = tuple(sorted(inst_list))
+                    if key not in seen:
+                        seen[key] = _validated_children(cs.id, inst_list, raw_candidates)
+                    valid_children_with_conflicts = seen[key]
+
+                    next_frontier.append(state)  # "skip this child slot" is always valid
+                    for ci, ext_conflict in valid_children_with_conflicts:
+                        new_state = {
+                            "child_items":                state["child_items"] + [ci],
+                            "child_slot_ids":             state["child_slot_ids"] + [cs.id],
+                            "child_slot_parent_item_ids": state["child_slot_parent_item_ids"] + [parent.id],
+                            "installed_ids":              state["installed_ids"] + [ci.id],
+                            "conflict":                   state["conflict"] or ext_conflict,
+                        }
+                        if ci.id in nested_slots_by_item:
+                            _est = len(frontier)
+                            for _ns in nested_slots_by_item[ci.id]:
+                                _est *= (1 + len(nested_items_by_slot.get(_ns.id, [])))
+                            if _est > 50_000:
+                                next_frontier.append(new_state)
+                            else:
+                                next_frontier.extend(_expand_item(new_state, ci))
+                        else:
+                            next_frontier.append(new_state)
+
+                frontier = next_frontier
+                capped = False
+                if len(frontier) > _FRONTIER_CAP:
+                    frontier = frontier[:_FRONTIER_CAP]
+                    capped = True
+                    any_truncated = True
+                    print(f"    [{parent_name!r}] frontier capped at {_FRONTIER_CAP} after slot={cs.slot_name!r}")
+                print(f"    [{parent_name!r}] after slot={cs.slot_name!r} candidates={len(raw_candidates)} frontier={len(frontier)}")
+                yield f"data: {json.dumps({'type': 'progress', 'parent': parent_name, 'slot': cs.slot_name, 'frontier': len(frontier), 'cap': _FRONTIER_CAP, 'capped': capped})}\n\n"
+
+            print(f"  [{parent_name!r}] final frontier={len(frontier)} elapsed={time.monotonic()-t0:.2f}s")
+
             for state in frontier:
-                inst_list = state["installed_ids"]
-                key = tuple(sorted(inst_list))
-                if key not in seen:
-                    seen[key] = _validated_children(cs.id, inst_list, raw_candidates)
-                valid_children_with_conflicts = seen[key]
+                combo_ids = installed_ids + [parent.id] + [ci.id for ci in state["child_items"]]
+                stats = _compute_stats(base_item, combo_ids, items_map, strength_level, equip_ergo_modifier)
+                _nested_sid_set = set(parent_child_slot_ids)
+                for _ci in state["child_items"]:
+                    for _s in nested_slots_by_item.get(_ci.id, []):
+                        _nested_sid_set.add(_s.id)
+                all_combos.append({
+                    "parent_item":                  _ser(parent),
+                    "child_items":                  [_ser(ci) for ci in state["child_items"]],
+                    "child_slot_ids":               state["child_slot_ids"],
+                    "child_slot_parent_item_ids":   state["child_slot_parent_item_ids"],
+                    "all_child_slot_ids":           parent_child_slot_ids,
+                    "all_nested_slot_ids":          list(_nested_sid_set),
+                    "conflict":                     _ser_conflict(state["conflict"]),
+                    **stats,
+                })
 
-                next_frontier.append(state)  # "skip this child slot" is always valid
-                for ci, ext_conflict in valid_children_with_conflicts:
-                    new_state = {
-                        "child_items":                state["child_items"] + [ci],
-                        "child_slot_ids":             state["child_slot_ids"] + [cs.id],
-                        "child_slot_parent_item_ids": state["child_slot_parent_item_ids"] + [parent.id],
-                        "installed_ids":              state["installed_ids"] + [ci.id],
-                        "conflict":                   state["conflict"] or ext_conflict,
-                    }
-                    if ci.id in nested_slots_by_item:
-                        next_frontier.extend(_expand_item(new_state, ci))
-                    else:
-                        next_frontier.append(new_state)
+        clean      = _dedup_by_stats([c for c in all_combos if not c.get("conflict")])
+        conflicted = _dedup_by_stats([c for c in all_combos if c.get("conflict")])
+        result = {"base": base_stats, "combos": clean + conflicted, "timed_out": False, "truncated": any_truncated}
 
-            frontier = next_frontier
-            print(f"    [{parent_name!r}] after slot={cs.slot_name!r} candidates={len(raw_candidates)} frontier={len(frontier)}")
+        with _COMBO_FULL_CACHE_LOCK:
+            if len(_COMBO_FULL_CACHE) >= _COMBO_FULL_CACHE_MAX:
+                keys = list(_COMBO_FULL_CACHE.keys())
+                for k in keys[:len(keys) // 2]:
+                    del _COMBO_FULL_CACHE[k]
+            _COMBO_FULL_CACHE[_cache_key] = result
 
-        print(f"  [{parent_name!r}] final frontier={len(frontier)} elapsed={time.monotonic()-t0:.2f}s")
+        yield f"data: {json.dumps({'type': 'result', 'data': result})}\n\n"
 
-        for state in frontier:
-            combo_ids = installed_ids + [parent.id] + [ci.id for ci in state["child_items"]]
-            stats = _compute_stats(base_item, combo_ids, items_map, strength_level, equip_ergo_modifier)
-            _nested_sid_set = set(parent_child_slot_ids)
-            for _ci in state["child_items"]:
-                for _s in nested_slots_by_item.get(_ci.id, []):
-                    _nested_sid_set.add(_s.id)
-            all_combos.append({
-                "parent_item":                  _ser(parent),
-                "child_items":                  [_ser(ci) for ci in state["child_items"]],
-                "child_slot_ids":               state["child_slot_ids"],
-                "child_slot_parent_item_ids":   state["child_slot_parent_item_ids"],
-                "all_child_slot_ids":           parent_child_slot_ids,
-                "all_nested_slot_ids":          list(_nested_sid_set),
-                "conflict":                     _ser_conflict(state["conflict"]),
-                **stats,
-            })
-
-    clean      = _dedup_by_stats([c for c in all_combos if not c.get("conflict")])
-    conflicted = _dedup_by_stats([c for c in all_combos if c.get("conflict")])
-    result = {"base": base_stats, "combos": clean + conflicted, "timed_out": False}
-
-    with _COMBO_FULL_CACHE_LOCK:
-        if len(_COMBO_FULL_CACHE) >= _COMBO_FULL_CACHE_MAX:
-            keys = list(_COMBO_FULL_CACHE.keys())
-            for k in keys[:len(keys) // 2]:
-                del _COMBO_FULL_CACHE[k]
-        _COMBO_FULL_CACHE[_cache_key] = result
-
-    return result
+    return StreamingResponse(_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # ---------------------------------------------------
