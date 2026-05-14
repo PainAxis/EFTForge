@@ -194,6 +194,7 @@ QUERY = """
     accuracyModifier
     gridImageLink
     image512pxLink
+    baseImageLink
     iconLink
 
     conflictingItems { id }
@@ -490,6 +491,7 @@ def sync_items(sync_source: str = "scheduled"):
         accuracy_modifier = item.get("accuracyModifier")
 
         icon_link = item.get("iconLink")
+        base_image_link     = item.get("baseImageLink")
         image_512_link      = None
         bare_image_512_link = None
         preset_icon_link    = None
@@ -618,6 +620,7 @@ def sync_items(sync_source: str = "scheduled"):
             recoil_modifier=recoilmodifier,
             accuracy_modifier=accuracy_modifier,
             icon_link=icon_link,
+            base_image_link=base_image_link,
             image_512_link=image_512_link,
             bare_image_512_link=bare_image_512_link if is_weapon else None,
             preset_icon_link=preset_icon_link if is_weapon else None,

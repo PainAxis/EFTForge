@@ -1686,30 +1686,21 @@ function _buildGraphSVG(container) {
         s += `<text x="${ML-5}" y="${(toY(ty)+3.5).toFixed(1)}" text-anchor="end">${lbl}</text>`;
     }
     s += `</g>`;
-    s += `<text x="${(ML+PW/2).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="11" fill="#666" font-family="Bender,Arial,sans-serif">Recoil Modifier</text>`;
-    s += `<text x="10" y="${(MT+PH/2).toFixed(1)}" text-anchor="middle" font-size="11" fill="#666" font-family="Bender,Arial,sans-serif" transform="rotate(-90,10,${(MT+PH/2).toFixed(1)})">EvoErgo</text>`;
+    s += `<text x="${(ML+PW/2).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#666" font-family="Bender,Arial,sans-serif">${t("graph.xLabel")}</text>`;
+    s += `<text x="10" y="${(MT+PH/2).toFixed(1)}" text-anchor="middle" font-size="8" fill="#666" font-family="Bender,Arial,sans-serif" transform="rotate(-90,10,${(MT+PH/2).toFixed(1)})">${t("graph.yLabel")}</text>`;
 
+    const iw = 22, ih = 22;
+    const FONT_SZ = 4.5, LINE_H = 5.3, MAX_CHARS = 8;
+
+    const ICON_GAP = 3;
     const pts = [...items].sort((a, b) => (a.hasConflict ? 0 : 1) - (b.hasConflict ? 0 : 1));
-    s += `<g clip-path="url(#plot-clip)">`;
-    for (const e of pts) {
-        const cxN = toX(e.recoilPercent), cyN = toY(e.contribution);
-        const cx = cxN.toFixed(1), cy = cyN.toFixed(1);
-        const fill = e.hasConflict ? "#444"
-            : e.recoilPercent <= 0 && e.contribution >= 0 ? "#4CAF50"
-            : e.recoilPercent < 0  ? "#f5c542"
-            : e.contribution > 0   ? "#29b6f6"
-            : "#f44336";
-        const op = e.hasConflict ? 0.3 : 1;
+    const plotPts = pts.map(e => {
+        const ox = toX(e.recoilPercent), oy = toY(e.contribution);
         const r = `${e.recoilPercent>0?"+":""}${e.recoilPercent.toFixed(1)}%`;
         const v = `${e.contribution>0?"+":""}${e.contribution.toFixed(1)}`;
         const eg = `${e.ergoModifier>0?"+":""}${e.ergoModifier.toFixed(1)}`;
-        const tip = `${e.item.name}\nRecoil: ${r}  EvoErgo: ${v}\nErgo: ${eg}`;
+        const tip = `${e.item.name}\n${t("graph.tooltipRecoil")}: ${r}  ${t("graph.tooltipEvoErgo")}: ${v}\n${t("graph.tooltipErgo")}: ${eg}`;
         const cls = `att-graph-dot${e.hasConflict ? "" : " att-graph-dot-click"}`;
-        const iw = 22, ih = 22;
-        const ix = (cxN - iw / 2).toFixed(1), iy = (cyN - ih / 2).toFixed(1);
-
-        // Word-wrap short name to fit within icon width (~8 chars per line at font-size 4.5)
-        const FONT_SZ = 4.5, LINE_H = 5.3, MAX_CHARS = 8;
         const nameLines = [];
         let nameCur = '';
         for (const w of (e.item.short_name || e.item.name || '').split(' ')) {
@@ -1718,11 +1709,28 @@ function _buildGraphSVG(container) {
             else { nameLines.push(nameCur); nameCur = w; }
         }
         if (nameCur) nameLines.push(nameCur);
-        const txX = (cxN + iw / 2 - 1).toFixed(1);
-        const txY0 = cyN - ih / 2 + FONT_SZ;
+        return { e, ox, oy, tip, cls, nameLines };
+    });
 
-        s += `<g class="${cls}" data-item-id="${escapeHtml(String(e.item.id))}" data-tooltip="${escapeHtml(tip)}" opacity="${op}">`;
-        s += `<image href="${escapeHtml(e.item.icon_link)}" x="${ix}" y="${iy}" width="${iw}" height="${ih}" preserveAspectRatio="xMidYMid meet"/>`;
+    // Dots at exact data coordinates + hairlines to icon bottom-center
+    s += `<g clip-path="url(#plot-clip)" pointer-events="none">`;
+    for (const p of plotPts) {
+        const iconBottomY = p.oy - ICON_GAP;
+        s += `<line x1="${p.ox.toFixed(1)}" y1="${p.oy.toFixed(1)}" x2="${p.ox.toFixed(1)}" y2="${iconBottomY.toFixed(1)}" stroke="#555" stroke-width="0.6" stroke-dasharray="2,2"/>`;
+        s += `<circle cx="${p.ox.toFixed(1)}" cy="${p.oy.toFixed(1)}" r="2" fill="#888"/>`;
+    }
+    s += `</g>`;
+
+    // Icons above their dot
+    s += `<g clip-path="url(#plot-clip)">`;
+    for (const p of plotPts) {
+        const { e, ox, oy, tip, cls, nameLines } = p;
+        const x = ox, y = oy - ih / 2 - ICON_GAP;
+        const ix = (x - iw / 2).toFixed(1), iy = (y - ih / 2).toFixed(1);
+        const txX = (x + iw / 2 - 1).toFixed(1);
+        const txY0 = y - ih / 2 + FONT_SZ;
+        s += `<g class="${cls}" data-item-id="${escapeHtml(String(e.item.id))}" data-tooltip="${escapeHtml(tip)}">`;
+        s += `<image href="${escapeHtml(e.item.base_image_link || e.item.icon_link)}" x="${ix}" y="${iy}" width="${iw}" height="${ih}" preserveAspectRatio="xMidYMid meet"/>`;
         s += `<text class="graph-item-name" text-anchor="end" font-size="${FONT_SZ}">`;
         nameLines.forEach((line, i) => {
             s += `<tspan x="${txX}" y="${(txY0 + i * LINE_H).toFixed(1)}">${escapeHtml(line)}</tspan>`;
@@ -1750,15 +1758,15 @@ function _buildGraphSVG(container) {
     // Control hints watermark - top-right corner of plot
     const hintX = ML + PW - 5, hintY = MT + 9;
     s += `<g font-size="7" fill="#3a3a3a" font-family="Bender,Arial,sans-serif" text-anchor="end">`;
-    s += `<text x="${hintX}" y="${hintY}">Scroll to zoom</text>`;
-    s += `<text x="${hintX}" y="${hintY + 9}">Scroll wheel drag to pan</text>`;
-    s += `<text x="${hintX}" y="${hintY + 18}">Click and drag to box zoom</text>`;
-    s += `<text x="${hintX}" y="${hintY + 27}">Right click to reset</text>`;
+    s += `<text x="${hintX}" y="${hintY}">${t("graph.hintScroll")}</text>`;
+    s += `<text x="${hintX}" y="${hintY + 9}">${t("graph.hintPan")}</text>`;
+    s += `<text x="${hintX}" y="${hintY + 18}">${t("graph.hintBoxZoom")}</text>`;
+    s += `<text x="${hintX}" y="${hintY + 27}">${t("graph.hintReset")}</text>`;
     s += `</g>`;
 
     if (_graphView !== null) {
         const bx = ML + PW - 14;
-        s += `<g class="graph-reset-svg-btn" style="cursor:pointer" data-tooltip="Reset zoom">`;
+        s += `<g class="graph-reset-svg-btn" style="cursor:pointer" data-tooltip="${t("graph.resetZoom")}">`;
         s += `<rect x="${bx}" y="2" width="14" height="14" rx="2" fill="#1e1e1e" stroke="#3a3a3a" stroke-width="0.5"/>`;
         s += `<text x="${bx + 7}" y="12" text-anchor="middle" font-size="9" fill="#888" font-family="Arial,sans-serif">&#x21BA;</text>`;
         s += `</g>`;
@@ -1769,7 +1777,7 @@ function _buildGraphSVG(container) {
         const chActive = _graphCrosshairEnabled;
         const cx = ML;
         const ic = chActive ? "#f5c542" : "#555";
-        s += `<g class="graph-ch-toggle-btn" style="cursor:pointer" data-tooltip="${chActive ? "Hide crosshair" : "Show crosshair"}">`;
+        s += `<g class="graph-ch-toggle-btn" style="cursor:pointer" data-tooltip="${chActive ? t("graph.hideCrosshair") : t("graph.showCrosshair")}">`;
         s += `<rect x="${cx}" y="2" width="14" height="14" rx="2" fill="#1e1e1e" stroke="${chActive ? "#f5c542" : "#3a3a3a"}" stroke-width="0.5"/>`;
         s += `<svg x="${cx + 3}" y="5" width="8" height="8" viewBox="0 0 18 18" fill="none">`;
         s += `<circle cx="9" cy="9" r="7.5" stroke="${ic}" stroke-width="1.5"/>`;

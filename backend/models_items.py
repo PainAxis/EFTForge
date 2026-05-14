@@ -19,6 +19,7 @@ class Item(Base):
     image_512_link      = Column(String, nullable=True)
     bare_image_512_link = Column(String, nullable=True)  # item's own 512px image, not the preset
     icon_link           = Column(String, nullable=True)
+    base_image_link     = Column(String, nullable=True)
     preset_icon_link    = Column(String, nullable=True)
 
     weapon_category = Column(String, index=True)

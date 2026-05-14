@@ -99,6 +99,9 @@ def _migrate_items_db():
         if "accuracy_modifier" not in existing:
             conn.execute(text("ALTER TABLE items ADD COLUMN accuracy_modifier REAL"))
             conn.commit()
+        if "base_image_link" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN base_image_link TEXT"))
+            conn.commit()
 
 
 
@@ -636,6 +639,7 @@ def get_allowed_items(slot_id: str, lang: str = "en", db: Session = Depends(get_
             "deviation_max": item.deviation_max,
             "sighting_range": item.sighting_range,
             "icon_link": item.icon_link,
+            "base_image_link": item.base_image_link,
             "conflicting_item_ids": item.conflicting_item_ids,
             "conflicting_slot_ids": item.conflicting_slot_ids,
             "magazine_capacity": item.magazine_capacity,
@@ -1174,6 +1178,7 @@ def combo_full(
             "deviation_max":        item.deviation_max,
             "sighting_range":       item.sighting_range,
             "icon_link":            item.icon_link,
+            "base_image_link":      item.base_image_link,
             "conflicting_item_ids": item.conflicting_item_ids,
             "conflicting_slot_ids": item.conflicting_slot_ids,
             "magazine_capacity":    item.magazine_capacity,
@@ -1453,6 +1458,7 @@ def get_gun_init(
             "deviation_max": item.deviation_max,
             "sighting_range": item.sighting_range,
             "icon_link": item.icon_link,
+            "base_image_link": item.base_image_link,
             "conflicting_item_ids": item.conflicting_item_ids,
             "conflicting_slot_ids": item.conflicting_slot_ids,
             "magazine_capacity": item.magazine_capacity,
