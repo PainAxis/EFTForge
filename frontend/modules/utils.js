@@ -145,6 +145,7 @@ function showToast(title, message, duration = 3000, color = "#f44336", actions =
     }
 
     if (duration > 0) setTimeout(dismiss, duration);
+    return toast;
 }
 
 /* --- Modal factory --- */

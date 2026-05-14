@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://hm.baidu.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' http://127.0.0.1:8000 http://localhost:8000 https://api.tarkov.dev https://hm.baidu.com; frame-src https://player.bilibili.com http://player.bilibili.com">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://hm.baidu.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' http://127.0.0.1:8000 http://localhost:8000 https://api.tarkov.dev https://assets.tarkov.dev https://hm.baidu.com; frame-src https://player.bilibili.com http://player.bilibili.com">
 <title>EFTForge - Modding Lab</title>
 <link rel="icon" type="image/png" sizes="32x32" href="./assets/images/EFTForge32x32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="./assets/images/EFTForge1080x1080.png">
@@ -1550,6 +1550,32 @@ header:not(.header-expanded) .header-nav-btn-icon {
   animation: graph-row-flash 1s ease forwards;
 }
 
+.att-graph-scale-v {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 6px;
+  height: 100%;
+  cursor: pointer;
+  accent-color: #f5c542;
+  opacity: 0.45;
+  transition: opacity 0.15s;
+  -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
+}
+.att-graph-scale-v:hover,
+.att-graph-scale-v:focus {
+  opacity: 1;
+}
+
+.graph-export-preview {
+  width: 100%;
+  display: block;
+  border-radius: 4px;
+  border: 1px solid #2a2a2a;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+
 .graph-zoom-box {
   fill: rgba(245, 197, 66, 0.08);
   stroke: #f5c542;
@@ -1558,21 +1584,24 @@ header:not(.header-expanded) .header-nav-btn-icon {
   pointer-events: none;
 }
 
+.graph-ch-toggle-btn rect,
+.graph-lbl-toggle-btn rect,
+.graph-yaxis-toggle-btn rect,
+.graph-hints-toggle-btn rect,
+.graph-export-btn rect,
 .graph-reset-svg-btn rect {
-  transition: fill 0.1s ease, stroke 0.1s ease;
+  transition: fill 0.1s ease;
 }
+.graph-ch-toggle-btn:hover rect,
+.graph-lbl-toggle-btn:hover rect,
+.graph-yaxis-toggle-btn:hover rect,
+.graph-hints-toggle-btn:hover rect,
+.graph-export-btn:hover rect,
 .graph-reset-svg-btn:hover rect {
   fill: #2a2a2a;
-  stroke: #666;
 }
 .graph-reset-svg-btn:hover text {
   fill: #f5c542;
-}
-.graph-ch-toggle-btn rect {
-  transition: fill 0.1s ease, stroke 0.1s ease;
-}
-.graph-ch-toggle-btn:hover rect {
-  fill: #2a2a2a;
 }
 
 .combo-child-label {

@@ -1501,6 +1501,7 @@ let _graphCrosshairEnabled  = localStorage.getItem("eftforge_graph_crosshair") !
 let _graphLabelsEnabled     = localStorage.getItem("eftforge_graph_labels")    !== "0";
 let _graphYAxisEvo          = localStorage.getItem("eftforge_graph_y_axis") !== "ergo";
 let _graphHintsEnabled      = localStorage.getItem("eftforge_graph_hints")  !== "0";
+let _graphIconScale         = Math.min(1.6, Math.max(0.4, parseFloat(localStorage.getItem("eftforge_graph_icon_scale") || "1")));
 let _graphPanState          = null; // { last: {sx,sy} } while middle-button drag is active
 let _graphPanRaf            = null;
 let _graphPanDelta          = null;
@@ -1698,10 +1699,9 @@ function _buildGraphSVG(container) {
     s += `<text x="${(ML+PW/2).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#666" font-family="Bender,Arial,sans-serif" style="user-select:none;pointer-events:none">${t("graph.xLabel")}</text>`;
     s += `<text x="8" y="${(MT+PH/2).toFixed(1)}" text-anchor="middle" font-size="8" fill="#666" font-family="Bender,Arial,sans-serif" transform="rotate(-90,8,${(MT+PH/2).toFixed(1)})" style="user-select:none;pointer-events:none">${t(_graphYAxisEvo ? "graph.yLabel" : "graph.yLabelErgo")}</text>`;
 
-    const iw = 22, ih = 22;
-    const FONT_SZ = 4.5;
-
-    const ICON_GAP = 3;
+    const iw = 22 * _graphIconScale, ih = 22 * _graphIconScale;
+    const FONT_SZ = 4.5 * _graphIconScale;
+    const ICON_GAP = 3 * _graphIconScale;
     const pts = [...items].sort((a, b) => (a.hasConflict ? 0 : 1) - (b.hasConflict ? 0 : 1));
     const plotPts = pts.map(e => {
         const yVal = _graphYAxisEvo ? e.contribution : e.ergoModifier;
@@ -1772,8 +1772,8 @@ function _buildGraphSVG(container) {
             if (isMulti) {
                 const bx = (x + iw / 2).toFixed(1);
                 const by = (y - ih / 2).toFixed(1);
-                s += `<circle cx="${bx}" cy="${by}" r="3.5" fill="#f5c542" pointer-events="none"/>`;
-                s += `<text x="${bx}" y="${by}" text-anchor="middle" dominant-baseline="central" font-size="4.5" font-weight="bold" fill="#111" font-family="Bender,Arial,sans-serif" pointer-events="none">${cluster.length}</text>`;
+                s += `<circle cx="${bx}" cy="${by}" r="${(3.5 * _graphIconScale).toFixed(1)}" fill="#f5c542" pointer-events="none"/>`;
+                s += `<text x="${bx}" y="${by}" text-anchor="middle" dominant-baseline="central" font-size="${(4.5 * _graphIconScale).toFixed(1)}" font-weight="bold" fill="#111" font-family="Bender,Arial,sans-serif" pointer-events="none">${cluster.length}</text>`;
             }
             s += `</g>`;
         }
@@ -1798,7 +1798,7 @@ function _buildGraphSVG(container) {
     // Control hints watermark - top-right corner of plot
     if (_graphHintsEnabled) {
         const hintX = ML + PW - 5, hintY = MT + 9;
-        s += `<g font-size="7" fill="#3a3a3a" font-family="Bender,Arial,sans-serif" text-anchor="end" style="user-select:none;pointer-events:none">`;
+        s += `<g class="graph-hints-watermark" font-size="7" fill="#3a3a3a" font-family="Bender,Arial,sans-serif" text-anchor="end" style="user-select:none;pointer-events:none">`;
         s += `<text x="${hintX}" y="${hintY}">${t("graph.hintPan")}</text>`;
         s += `<text x="${hintX}" y="${hintY + 9}">${t("graph.hintScroll")}</text>`;
         s += `<text x="${hintX}" y="${hintY + 18}">${t("graph.hintBoxZoom")}</text>`;
@@ -1852,12 +1852,42 @@ function _buildGraphSVG(container) {
         s += `<text x="${bx + 7}" y="${by0 + bGap * 3 + 10.5}" text-anchor="middle" font-size="9" font-weight="bold" fill="${hc}" font-family="Bender,Arial,sans-serif">?</text>`;
         s += `</g>`;
 
+        s += `<g class="graph-export-btn" style="cursor:pointer" data-tooltip="${t("graph.export")}">`;
+        s += `<rect x="${bx}" y="${by0 + bGap * 4}" width="14" height="14" rx="2" fill="#1e1e1e" stroke="#3a3a3a" stroke-width="0.5"/>`;
+        s += `<svg x="${bx + 2}" y="${by0 + bGap * 4 + 2}" width="10" height="10" viewBox="0 0 18 18" fill="none">`;
+        s += `<line x1="9" y1="2" x2="9" y2="12" stroke="#aaa" stroke-width="1.8" stroke-linecap="round"/>`;
+        s += `<polyline points="5.5,9 9,13 12.5,9" stroke="#aaa" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`;
+        s += `<line x1="3" y1="16.5" x2="15" y2="16.5" stroke="#aaa" stroke-width="1.8" stroke-linecap="round"/>`;
+        s += `</svg>`;
+        s += `</g>`;
+
         if (_graphView !== null) {
             s += `<g class="graph-reset-svg-btn" style="cursor:pointer" data-tooltip="${t("graph.resetZoom")}">`;
-            s += `<rect x="${bx}" y="${by0 + bGap * 4}" width="14" height="14" rx="2" fill="#1e1e1e" stroke="#3a3a3a" stroke-width="0.5"/>`;
-            s += `<text x="${bx + 7}" y="${by0 + bGap * 4 + 10}" text-anchor="middle" font-size="9" fill="#888" font-family="Arial,sans-serif">&#x21BA;</text>`;
+            s += `<rect x="${bx}" y="${by0 + bGap * 5}" width="14" height="14" rx="2" fill="#1e1e1e" stroke="#3a3a3a" stroke-width="0.5"/>`;
+            s += `<text x="${bx + 7}" y="${by0 + bGap * 5 + 10}" text-anchor="middle" font-size="9" fill="#888" font-family="Arial,sans-serif">&#x21BA;</text>`;
             s += `</g>`;
         }
+
+        // Separator + scale icon + custom SVG vertical slider (always below reset slot)
+        const scaleIconY = by0 + bGap * 6;
+        const trackX     = bx + 7;
+        const trackTop   = scaleIconY + 18;
+        const trackBot   = H - MB + 8;
+        const trackH_sv  = trackBot - trackTop;
+        const scNorm     = (_graphIconScale - 0.4) / (1.6 - 0.4);
+        const thumbY     = trackTop + trackH_sv * (1 - scNorm); // top=max, bottom=min
+
+        s += `<g class="graph-scale-slider">`;
+        s += `<g class="graph-scale-icon-g" data-tooltip="${escapeHtml(t("graph.iconScale"))}" style="cursor:default">`;
+        s += `<rect x="${bx}" y="${scaleIconY}" width="14" height="14" fill="transparent" pointer-events="all"/>`;
+        s += `<svg x="${bx + 2}" y="${scaleIconY + 2}" width="10" height="10" viewBox="0 0 18 18" fill="none">`;
+        s += `<rect x="1" y="7" width="9" height="9" rx="1.5" stroke="#555" stroke-width="1.5"/>`;
+        s += `<rect x="7" y="1" width="10" height="10" rx="1.5" stroke="#888" stroke-width="1.5"/>`;
+        s += `</svg></g>`;
+        s += `<line x1="${trackX}" y1="${trackTop}" x2="${trackX}" y2="${trackBot}" stroke="#252525" stroke-width="1.5" stroke-linecap="round"/>`;
+        s += `<line x1="${trackX}" y1="${thumbY.toFixed(1)}" x2="${trackX}" y2="${trackBot}" stroke="#444" stroke-width="1.5" stroke-linecap="round"/>`;
+        s += `<circle class="graph-scale-thumb" cx="${trackX}" cy="${thumbY.toFixed(1)}" r="2.5" fill="#444" stroke="#666" stroke-width="0.6" style="cursor:grab"/>`;
+        s += `</g>`;
     }
 
     s += `</svg>`;
@@ -1916,6 +1946,59 @@ function _buildGraphSVG(container) {
         localStorage.setItem("eftforge_graph_hints", _graphHintsEnabled ? "1" : "0");
         _buildGraphSVG(container);
     });
+
+    // -- Export button --
+    container.querySelector(".graph-export-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        _exportGraph(container);
+    });
+
+    // -- Scale slider drag --
+    const scaleThumb = container.querySelector(".graph-scale-thumb");
+    if (scaleThumb) {
+        const TRACK_TOP = MT + 16 * 6 + 18; // 126
+        const TRACK_BOT = H - MB + 8;        // 288
+        const TRACK_H   = TRACK_BOT - TRACK_TOP;
+
+        scaleThumb.addEventListener("mousedown", (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            const startY   = e.clientY;
+            const startVal = _graphIconScale;
+            let latestY    = startY;
+            let rafPending = false;
+
+            function onMove(ev) {
+                latestY = ev.clientY;
+                if (rafPending) return;
+                rafPending = true;
+                requestAnimationFrame(() => {
+                    rafPending = false;
+                    const svgEl = container.querySelector("svg");
+                    if (!svgEl) return;
+                    const rect = svgEl.getBoundingClientRect();
+                    const dy = latestY - startY;
+                    const dScale = -dy / (TRACK_H * (rect.height / H)) * (1.6 - 0.4);
+                    const next = Math.min(1.6, Math.max(0.4, startVal + dScale));
+                    const snapped = Math.round(next * 20) / 20;
+                    if (snapped === _graphIconScale) return;
+                    _graphIconScale = snapped;
+                    _buildGraphSVG(container);
+                });
+            }
+
+            function onUp() {
+                window.removeEventListener("mousemove", onMove);
+                window.removeEventListener("mouseup",   onUp);
+                localStorage.setItem("eftforge_graph_icon_scale", String(_graphIconScale));
+            }
+
+            window.addEventListener("mousemove", onMove);
+            window.addEventListener("mouseup",   onUp);
+        }, { signal });
+    }
 
     // -- Cluster scroll: cycle active item, blocks zoom handler --
     container.querySelectorAll(".graph-cluster").forEach(clusterEl => {
@@ -2151,6 +2234,192 @@ function _buildGraphSVG(container) {
     }, { signal });
 
     if (_graphPanState) svg.style.cursor = 'grabbing';
+}
+
+async function _exportGraph(container) {
+    const svg = container.querySelector("svg");
+    if (!svg) return;
+
+    const toastEl = showToast(t("graph.exportGenerating"), "", 0, "#888");
+
+    try {
+        const W = 520, H = 320;
+        const WPAD = 22; // extra pixels below the graph for the watermark strip
+        const EH = H + WPAD; // total export height
+
+        // Clone SVG and extend dimensions for watermark strip
+        const clone = svg.cloneNode(true);
+        clone.setAttribute("width",  String(W));
+        clone.setAttribute("height", String(EH));
+        clone.setAttribute("viewBox", `0 0 ${W} ${EH}`);
+        for (const cls of [
+            ".graph-ch-toggle-btn", ".graph-lbl-toggle-btn", ".graph-yaxis-toggle-btn",
+            ".graph-hints-toggle-btn", ".graph-reset-svg-btn", ".graph-export-btn",
+            ".graph-hints-watermark", ".graph-scale-slider",
+        ]) clone.querySelector(cls)?.remove();
+
+        // Background covering full export height including watermark strip
+        const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        bg.setAttribute("x", "0"); bg.setAttribute("y", "0");
+        bg.setAttribute("width", String(W)); bg.setAttribute("height", String(EH));
+        bg.setAttribute("fill", "#111");
+        clone.insertBefore(bg, clone.firstChild);
+
+        // Fetch and inline title.svg; extract its embedded @font-face for item labels
+        let wFontStyleText = "";
+        try {
+            const wResp = await fetch("./assets/images/title.svg");
+            const wText = await wResp.text();
+            const parser = new DOMParser();
+            const wDoc = parser.parseFromString(wText, "image/svg+xml");
+            const wRoot = wDoc.documentElement;
+
+            // Pull @font-face out of title.svg defs so item-label text can use Bender
+            const wStyleEl = wRoot.querySelector("defs style");
+            if (wStyleEl) wFontStyleText = wStyleEl.textContent;
+
+            // Place watermark at bottom-left, overlaid on graph
+            const srcW = parseFloat(wRoot.getAttribute("width")  || "301");
+            const srcH = parseFloat(wRoot.getAttribute("height") || "88");
+            const wmScale = Math.min(28 / srcH, 100 / srcW);
+            const dw = srcW * wmScale, dh = srcH * wmScale;
+            const wmY = EH - dh - 10;
+            const nested = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            nested.setAttribute("x", "4");
+            nested.setAttribute("y", wmY.toFixed(1));
+            nested.setAttribute("width",   dw.toFixed(1));
+            nested.setAttribute("height",  dh.toFixed(1));
+            nested.setAttribute("viewBox", wRoot.getAttribute("viewBox") || `0 0 ${srcW} ${srcH}`);
+            [...wRoot.childNodes].forEach(n => nested.appendChild(document.importNode(n, true)));
+            clone.appendChild(nested);
+
+            // Date label below the logo
+            const now = new Date();
+            const mm = String(now.getMonth() + 1).padStart(2, "0");
+            const dd = String(now.getDate()).padStart(2, "0");
+            const yyyy = now.getFullYear();
+            const dateStr = (EFTForge.state.lang || "en") === "zh"
+                ? `生成于${mm}/${dd}/${yyyy}`
+                : `Generated: ${mm}/${dd}/${yyyy}`;
+            const dateTxt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            dateTxt.setAttribute("x", "6");
+            dateTxt.setAttribute("y", String((wmY + dh + 3).toFixed(1)));
+            dateTxt.setAttribute("font-size", "6");
+            dateTxt.setAttribute("fill", "#555");
+            dateTxt.setAttribute("font-family", "Bender,Arial,sans-serif");
+            dateTxt.setAttribute("style", "user-select:none;pointer-events:none");
+            dateTxt.textContent = dateStr;
+            clone.appendChild(dateTxt);
+        } catch {
+            const fb = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            fb.setAttribute("x", "6"); fb.setAttribute("y", String(EH - 14));
+            fb.setAttribute("font-size", "9"); fb.setAttribute("fill", "#555");
+            fb.setAttribute("font-family", "Arial,sans-serif");
+            fb.textContent = "EFTForge";
+            clone.appendChild(fb);
+            const now = new Date();
+            const mm = String(now.getMonth() + 1).padStart(2, "0");
+            const dd = String(now.getDate()).padStart(2, "0");
+            const yyyy = now.getFullYear();
+            const dateStr = (EFTForge.state.lang || "en") === "zh"
+                ? `生成于${mm}/${dd}/${yyyy}`
+                : `Generated: ${mm}/${dd}/${yyyy}`;
+            const fbDate = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            fbDate.setAttribute("x", "6"); fbDate.setAttribute("y", String(EH - 4));
+            fbDate.setAttribute("font-size", "6"); fbDate.setAttribute("fill", "#555");
+            fbDate.setAttribute("font-family", "Arial,sans-serif");
+            fbDate.textContent = dateStr;
+            clone.appendChild(fbDate);
+        }
+
+        // Inject styles into the SVG defs so class-based rules apply when rasterising
+        const defs = clone.querySelector("defs");
+        if (defs) {
+            const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+            style.textContent = `
+                ${wFontStyleText}
+                .graph-item-name {
+                    fill: #aaa;
+                    font-family: "Bender", Arial, sans-serif;
+                    font-weight: 600;
+                }
+            `;
+            defs.insertBefore(style, defs.firstChild);
+        }
+
+        // Inline item <image> hrefs as data URLs via the backend proxy (avoids CORS on assets.tarkov.dev)
+        const proxyBase = `${EFTForge.config.API_BASE}/proxy-asset?url=`;
+        const imgEls = [...clone.querySelectorAll("image")];
+        await Promise.allSettled(imgEls.map(async (imgEl) => {
+            const href = imgEl.getAttribute("href");
+            if (!href || href.startsWith("data:")) return;
+            try {
+                const resp = await fetch(proxyBase + encodeURIComponent(href));
+                if (!resp.ok) throw new Error("non-ok");
+                const blob = await resp.blob();
+                const dataUrl = await new Promise((res, rej) => {
+                    const fr = new FileReader();
+                    fr.onload = () => res(fr.result);
+                    fr.onerror = rej;
+                    fr.readAsDataURL(blob);
+                });
+                imgEl.setAttribute("href", dataUrl);
+            } catch {
+                imgEl.remove();
+            }
+        }));
+
+        // Rasterise at 4x for high-DPI output
+        const SCALE = 4;
+        const canvas = document.createElement("canvas");
+        canvas.width  = W  * SCALE;
+        canvas.height = EH * SCALE;
+        const ctx = canvas.getContext("2d");
+
+        const svgStr     = new XMLSerializer().serializeToString(clone);
+        const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgStr)}`;
+
+        await new Promise((resolve, reject) => {
+            const tmpImg = new Image();
+            // Explicit dest size so the SVG is always stretched to exactly W*SCALE x H*SCALE
+            // regardless of what naturalWidth the browser assigns to a dimensioned SVG img.
+            tmpImg.onload = () => { ctx.drawImage(tmpImg, 0, 0, W * SCALE, EH * SCALE); resolve(); };
+            tmpImg.onerror = reject;
+            tmpImg.src = svgDataUrl;
+        });
+
+        toastEl?.remove();
+        _showExportModal(canvas);
+    } catch (err) {
+        toastEl?.remove();
+        console.error("Graph export failed:", err);
+        showToast(t("graph.exportFailed"), "", 3000);
+    }
+}
+
+function _showExportModal(canvas) {
+    const overlay = _createModalOverlay("graph-export-modal", t("graph.exportTitle"), { maxWidth: "580px" });
+    if (!overlay) return;
+
+    const body = document.getElementById("graph-export-modal-body");
+    body.style.gap = "10px";
+
+    const preview = document.createElement("img");
+    preview.className = "graph-export-preview";
+    preview.src = canvas.toDataURL("image/png");
+
+    const dlBtn = document.createElement("button");
+    dlBtn.className = "modal-btn primary full-width";
+    dlBtn.textContent = t("graph.exportDownload");
+    dlBtn.addEventListener("click", () => {
+        const a = document.createElement("a");
+        a.download = `eftforge-graph-${Date.now()}.png`;
+        a.href = preview.src;
+        a.click();
+    });
+
+    body.appendChild(preview);
+    body.appendChild(dlBtn);
 }
 
 function setComboView(wantCombo) {

@@ -471,6 +471,27 @@ def health_check(request: Request, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------
+# Asset proxy (used by graph export to bypass CORS on assets.tarkov.dev)
+# ---------------------------------------------------
+
+_PROXY_ALLOWED_HOST = "assets.tarkov.dev"
+
+@app.get("/proxy-asset")
+def proxy_asset(url: str, request: Request):
+    from urllib.parse import urlparse
+    import requests as _req
+    parsed = urlparse(url)
+    if parsed.netloc != _PROXY_ALLOWED_HOST or parsed.scheme != "https":
+        raise HTTPException(status_code=400, detail="Only https://assets.tarkov.dev URLs are allowed")
+    try:
+        r = _req.get(url, timeout=8, stream=True)
+        r.raise_for_status()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    content_type = r.headers.get("content-type", "application/octet-stream")
+    return StreamingResponse(r.iter_content(chunk_size=65536), media_type=content_type)
+
+# ---------------------------------------------------
 # Traders
 # ---------------------------------------------------
 
