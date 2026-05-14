@@ -1078,58 +1078,77 @@ def combo_full(
         for s in combo_item_slots:
             slots_by_item.setdefault(s.parent_item_id, []).append(s)
 
-    # Load grandchild data: for mount items that survived the filter, load their
-    # child slots and items so the expansion can go parent -> mount -> foregrip.
-    _mount_slot_ids = {s.id for s in all_child_slots if s.slot_name == "Mount"}
-    _valid_mount_item_ids = {
+    # BFS: recursively load child slots/items for ALL child items, not just
+    # mount items. Stops when nothing new is found or the depth limit is hit.
+    nested_slots_by_item: dict = {}  # item_id -> [Slot]
+    nested_items_by_slot: dict = {}  # slot_id -> [Item]
+
+    _excl_ids = set(exclude_item_ids) if exclude_item_ids else set()
+    _already_expanded: set = set(all_parent_ids)
+    _to_expand: set = {
         item.id
-        for slot_id, items in child_items_by_slot.items()
-        if slot_id in _mount_slot_ids
+        for items in child_items_by_slot.values()
         for item in items
     }
-    grandchild_slots_by_mount: dict = {}  # mount_item_id -> [Slot]
-    grandchild_items_by_slot2: dict = {}  # slot_id -> [Item]
-    if _valid_mount_item_ids:
-        _gc_all_slots = db.query(Slot).filter(Slot.parent_item_id.in_(_valid_mount_item_ids)).all()
-        _gc_slot_ids  = [s.id for s in _gc_all_slots]
-        _gc_has_items: set = set()
-        if _gc_slot_ids:
-            _gc_counts = (
-                db.query(SlotAllowedItem.slot_id)
-                .filter(SlotAllowedItem.slot_id.in_(_gc_slot_ids))
-                .distinct()
-                .all()
-            )
-            _gc_has_items = {row[0] for row in _gc_counts}
-        for s in _gc_all_slots:
-            if s.id in _gc_has_items and s.slot_name not in exclude_names:
-                grandchild_slots_by_mount.setdefault(s.parent_item_id, []).append(s)
-        _active_gc_slot_ids = [s.id for slots in grandchild_slots_by_mount.values() for s in slots]
-        if _active_gc_slot_ids:
-            _gc_rows = (
-                db.query(SlotAllowedItem.slot_id, Item)
-                .join(Item, SlotAllowedItem.allowed_item_id == Item.id)
-                .filter(SlotAllowedItem.slot_id.in_(_active_gc_slot_ids))
-                .all()
-            )
-            for slot_id_col, item in _gc_rows:
-                grandchild_items_by_slot2.setdefault(slot_id_col, []).append(item)
-                items_map[item.id] = item
-        if exclude_item_ids:
-            _exclude_ids = set(exclude_item_ids)
-            grandchild_items_by_slot2 = {
-                sid: [i for i in items if i.id not in _exclude_ids]
-                for sid, items in grandchild_items_by_slot2.items()
-            }
-        grandchild_slots_by_mount = {
-            mid: [s for s in slots if grandchild_items_by_slot2.get(s.id)]
-            for mid, slots in grandchild_slots_by_mount.items()
+    _already_expanded |= _to_expand
+
+    _MAX_NEST_DEPTH = 4
+    for _depth in range(_MAX_NEST_DEPTH):
+        if not _to_expand:
+            break
+
+        _nest_slots = db.query(Slot).filter(Slot.parent_item_id.in_(_to_expand)).all()
+        _nest_slot_ids = [s.id for s in _nest_slots]
+        if not _nest_slot_ids:
+            break
+
+        _nest_has_items = {
+            row[0] for row in
+            db.query(SlotAllowedItem.slot_id)
+            .filter(SlotAllowedItem.slot_id.in_(_nest_slot_ids))
+            .distinct()
+            .all()
         }
-        _gc_item_ids = {i.id for items in grandchild_items_by_slot2.values() for i in items}
-        if _gc_item_ids:
-            _gc_item_slots = db.query(Slot).filter(Slot.parent_item_id.in_(_gc_item_ids)).all()
-            for s in _gc_item_slots:
+        _active_nest_slots = [
+            s for s in _nest_slots
+            if s.id in _nest_has_items and s.slot_name not in exclude_names
+        ]
+        for s in _active_nest_slots:
+            nested_slots_by_item.setdefault(s.parent_item_id, []).append(s)
+
+        _active_nest_slot_ids = [s.id for s in _active_nest_slots]
+        if not _active_nest_slot_ids:
+            break
+
+        _nest_rows = (
+            db.query(SlotAllowedItem.slot_id, Item)
+            .join(Item, SlotAllowedItem.allowed_item_id == Item.id)
+            .filter(SlotAllowedItem.slot_id.in_(_active_nest_slot_ids))
+            .all()
+        )
+        _next_expand: set = set()
+        for _slot_id_col, _nest_item in _nest_rows:
+            if _nest_item.id in _excl_ids:
+                continue
+            nested_items_by_slot.setdefault(_slot_id_col, []).append(_nest_item)
+            items_map[_nest_item.id] = _nest_item
+            if _nest_item.id not in _already_expanded:
+                _next_expand.add(_nest_item.id)
+                _already_expanded.add(_nest_item.id)
+
+        # Drop slots that ended up empty after exclusion
+        nested_slots_by_item = {
+            mid: [s for s in slots if nested_items_by_slot.get(s.id)]
+            for mid, slots in nested_slots_by_item.items()
+        }
+
+        # Load slots for newly found items (needed for conflict checking)
+        if _next_expand:
+            _new_item_slots = db.query(Slot).filter(Slot.parent_item_id.in_(_next_expand)).all()
+            for s in _new_item_slots:
                 slots_by_item.setdefault(s.parent_item_id, []).append(s)
+
+        _to_expand = _next_expand
 
     # Release the DB connection now - all data is loaded into memory.
     # The expansion below is CPU-only and can run for several seconds on large trees;
@@ -1206,28 +1225,29 @@ def combo_full(
         _valid_cache[key] = result
         return result
 
-    def _expand_mount(base_state, mount_item):
-        """Expand a state through a mount item's child slots (foregrip etc.), returning all variants."""
-        gc_slots = grandchild_slots_by_mount.get(mount_item.id, [])
-        if not gc_slots:
+    def _expand_item(base_state, item):
+        """Expand a state through all of item's nested child slots, returning all variants."""
+        child_slots = nested_slots_by_item.get(item.id, [])
+        if not child_slots:
             return [base_state]
         states = [base_state]
-        for gc_slot in gc_slots:
-            raw_gc = grandchild_items_by_slot2.get(gc_slot.id, [])
-            if not raw_gc:
+        for child_slot in child_slots:
+            raw_items = nested_items_by_slot.get(child_slot.id, [])
+            if not raw_items:
                 continue
             next_states = []
             for st in states:
-                inst_list = st["installed_ids"]
-                valid_gc = _validated_children(gc_slot.id, inst_list, raw_gc)
-                next_states.append(st)  # "skip grandchild slot" is always valid
-                for gc_item, gc_conflict in valid_gc:
-                    next_states.append({
-                        "child_items":    st["child_items"] + [gc_item],
-                        "child_slot_ids": st["child_slot_ids"] + [gc_slot.id],
-                        "installed_ids":  st["installed_ids"] + [gc_item.id],
-                        "conflict":       st["conflict"] or gc_conflict,
-                    })
+                valid = _validated_children(child_slot.id, st["installed_ids"], raw_items)
+                next_states.append(st)  # skip is always valid
+                for ci, ci_conflict in valid:
+                    new_st = {
+                        "child_items":                st["child_items"] + [ci],
+                        "child_slot_ids":             st["child_slot_ids"] + [child_slot.id],
+                        "child_slot_parent_item_ids": st["child_slot_parent_item_ids"] + [item.id],
+                        "installed_ids":              st["installed_ids"] + [ci.id],
+                        "conflict":                   st["conflict"] or ci_conflict,
+                    }
+                    next_states.extend(_expand_item(new_st, ci))
             states = next_states
         return states
 
@@ -1244,17 +1264,19 @@ def combo_full(
             combo_ids = installed_ids + [parent.id]
             stats = _compute_stats(base_item, combo_ids, items_map, strength_level, equip_ergo_modifier)
             all_combos.append({
-                "parent_item":          _ser(parent),
-                "child_items":          [],
-                "child_slot_ids":       [],
-                "all_child_slot_ids":   [],
-                "conflict":             _ser_conflict(parent_conflict),
+                "parent_item":                  _ser(parent),
+                "child_items":                  [],
+                "child_slot_ids":               [],
+                "child_slot_parent_item_ids":   [],
+                "all_child_slot_ids":           [],
+                "all_nested_slot_ids":          [],
+                "conflict":                     _ser_conflict(parent_conflict),
                 **stats,
             })
             continue
 
-        # frontier: list of dicts { child_items, child_slot_ids, installed_ids, conflict }
-        frontier = [{"child_items": [], "child_slot_ids": [], "installed_ids": installed_ids + [parent.id], "conflict": parent_conflict}]
+        # frontier: list of dicts { child_items, child_slot_ids, child_slot_parent_item_ids, installed_ids, conflict }
+        frontier = [{"child_items": [], "child_slot_ids": [], "child_slot_parent_item_ids": [], "installed_ids": installed_ids + [parent.id], "conflict": parent_conflict}]
 
         for cs in child_slots:
             raw_candidates = child_items_by_slot.get(cs.id, [])
@@ -1273,13 +1295,14 @@ def combo_full(
                 next_frontier.append(state)  # "skip this child slot" is always valid
                 for ci, ext_conflict in valid_children_with_conflicts:
                     new_state = {
-                        "child_items":    state["child_items"] + [ci],
-                        "child_slot_ids": state["child_slot_ids"] + [cs.id],
-                        "installed_ids":  state["installed_ids"] + [ci.id],
-                        "conflict":       state["conflict"] or ext_conflict,
+                        "child_items":                state["child_items"] + [ci],
+                        "child_slot_ids":             state["child_slot_ids"] + [cs.id],
+                        "child_slot_parent_item_ids": state["child_slot_parent_item_ids"] + [parent.id],
+                        "installed_ids":              state["installed_ids"] + [ci.id],
+                        "conflict":                   state["conflict"] or ext_conflict,
                     }
-                    if cs.slot_name == "Mount" and ci.id in grandchild_slots_by_mount:
-                        next_frontier.extend(_expand_mount(new_state, ci))
+                    if ci.id in nested_slots_by_item:
+                        next_frontier.extend(_expand_item(new_state, ci))
                     else:
                         next_frontier.append(new_state)
 
@@ -1291,12 +1314,18 @@ def combo_full(
         for state in frontier:
             combo_ids = installed_ids + [parent.id] + [ci.id for ci in state["child_items"]]
             stats = _compute_stats(base_item, combo_ids, items_map, strength_level, equip_ergo_modifier)
+            _nested_sid_set = set(parent_child_slot_ids)
+            for _ci in state["child_items"]:
+                for _s in nested_slots_by_item.get(_ci.id, []):
+                    _nested_sid_set.add(_s.id)
             all_combos.append({
-                "parent_item":          _ser(parent),
-                "child_items":          [_ser(ci) for ci in state["child_items"]],
-                "child_slot_ids":       state["child_slot_ids"],
-                "all_child_slot_ids":   parent_child_slot_ids,
-                "conflict":             _ser_conflict(state["conflict"]),
+                "parent_item":                  _ser(parent),
+                "child_items":                  [_ser(ci) for ci in state["child_items"]],
+                "child_slot_ids":               state["child_slot_ids"],
+                "child_slot_parent_item_ids":   state["child_slot_parent_item_ids"],
+                "all_child_slot_ids":           parent_child_slot_ids,
+                "all_nested_slot_ids":          list(_nested_sid_set),
+                "conflict":                     _ser_conflict(state["conflict"]),
                 **stats,
             })
 

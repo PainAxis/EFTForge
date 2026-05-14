@@ -557,6 +557,22 @@ function removeAttachment(parentNode, slotId, keepTableOpen = false) {
         }
 
         if (didClear) applyAttachmentSort();
+
+        // Same for combo mode: clear stale conflict on combo entries whose
+        // conflicting item was just removed, then update highlights in place.
+        if (EFTForge.state.comboMode && EFTForge.state.lastComboItems?.length > 0) {
+            let comboClear = false;
+            for (const entry of EFTForge.state.lastComboItems) {
+                if (entry.conflict && removedItemIds.has(entry.conflict.conflicting_item_id)) {
+                    entry.conflict = null;
+                    comboClear = true;
+                }
+            }
+            if (comboClear) {
+                EFTForge.state.combosCache = {};
+                if (typeof _refreshComboHighlights === "function") _refreshComboHighlights();
+            }
+        }
     }
 
     // Immediately patch the slot icon to empty
