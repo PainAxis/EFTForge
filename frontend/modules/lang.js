@@ -425,6 +425,7 @@ const _TRANSLATIONS = {
         "graph.metricErgo":          "Ergo",
         "graph.metricRecoilMod":     "Recoil Mod",
         "graph.metricEvoErgo":       "EvoErgo",
+        "graph.disabledMixType":     "Can't mix weapons and attachments on the same graph",
         // Weapon class display names
         "class.Assault rifle":    "Assault Rifles",
         "class.Assault carbine":  "Assault Carbines",
@@ -937,6 +938,7 @@ const _TRANSLATIONS = {
         "graph.metricErgo":          "人机功效",
         "graph.metricRecoilMod":     "后坐力修正",
         "graph.metricEvoErgo":       "Evo人机",
+        "graph.disabledMixType":     "不能在同一图表中混合枪械舆配件",
         // Weapon class display names
         "class.Assault rifle":    "突击步枪",
         "class.Assault carbine":  "突击卡宾枪",

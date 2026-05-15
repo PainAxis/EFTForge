@@ -21,6 +21,7 @@ let _graphPanState         = null;  // { last: {sx,sy} } while middle-button dra
 let _graphPanRaf           = null;
 let _graphPanDelta         = null;
 let _graphClusterState     = {};    // clusterKey -> activeIndex
+let _graphHoveredCluster   = null;  // { key, count } of cluster under pointer, for arrow-key cycling
 let _graphResizeTimer      = null;
 
 // -- Custom items (search & add feature) --
@@ -123,6 +124,8 @@ function setGraphView(wantGraph) {
                   '<div class="graph-search-panel" id="graph-search-panel" style="display:none"></div>' +
                 '</div>';
             table?.parentNode.insertBefore(graphDiv, table);
+            graphDiv.classList.add("table-slide-in");
+            graphDiv.addEventListener("animationend", () => graphDiv.classList.remove("table-slide-in"), { once: true });
         }
         _updateGraphTopBar();
         _buildGraphSVG(document.getElementById("graph-svg-wrap"));
@@ -147,7 +150,13 @@ function _closeGraphPanel() {
     _graphSearchOpen = false;
     _updateGraphTopBar();
     const panel = document.getElementById("graph-search-panel");
-    if (panel) panel.style.display = "none";
+    if (!panel) return;
+    panel.classList.remove("graph-panel-open");
+    panel.classList.add("graph-panel-closing");
+    panel.addEventListener("animationend", () => {
+        panel.style.display = "none";
+        panel.classList.remove("graph-panel-closing");
+    }, { once: true });
 }
 
 function _updateGraphTopBar() {
@@ -280,13 +289,11 @@ function _buildGraphAxisStrip(panel) {
 
     for (const axisId of ["x", "y"]) {
         const currentId = axisId === "x" ? xCur : yCur;
-        const otherId   = axisId === "x" ? yCur : xCur;
         html += `<div class="graph-axis-section">`;
         html += `<div class="graph-axis-label">${escapeHtml(t(axisId === "x" ? "graph.xAxis" : "graph.yAxis"))}</div>`;
         for (const m of metrics) {
             const isSel = m.id === currentId;
-            const isOth = m.id === otherId;
-            const cls   = `graph-axis-btn${isSel ? ` gab-${axisId}-sel` : ""}${isOth ? " gab-dis" : ""}`;
+            const cls   = `graph-axis-btn${isSel ? ` gab-${axisId}-sel` : ""}`;
             html += `<button class="${cls}" data-axis="${axisId}" data-metric="${m.id}">${escapeHtml(t(m.shortKey))}</button>`;
         }
         html += `</div>`;
@@ -295,17 +302,26 @@ function _buildGraphAxisStrip(panel) {
     html += `</div>`;
     strip.innerHTML = html;
 
-    strip.querySelectorAll(".graph-axis-btn:not(.gab-dis)").forEach(btn => {
+    strip.querySelectorAll(".graph-axis-btn").forEach(btn => {
         btn.addEventListener("click", () => {
             const axis   = btn.dataset.axis;
             const metric = btn.dataset.metric;
             const isGun  = _graphCustomMode === "guns";
+            let newX = isGun ? _graphGunXMetric : _graphAttXMetric;
+            let newY = isGun ? _graphGunYMetric : _graphAttYMetric;
             if (axis === "x") {
-                if (isGun) { _graphGunXMetric = metric; localStorage.setItem("eftforge_graph_gun_x",  metric); }
-                else       { _graphAttXMetric = metric; localStorage.setItem("eftforge_graph_att_x",  metric); }
+                if (metric === newY) newY = newX;  // swap
+                newX = metric;
             } else {
-                if (isGun) { _graphGunYMetric = metric; localStorage.setItem("eftforge_graph_gun_y",  metric); }
-                else       { _graphAttYMetric = metric; localStorage.setItem("eftforge_graph_att_y",  metric); }
+                if (metric === newX) newX = newY;  // swap
+                newY = metric;
+            }
+            if (isGun) {
+                _graphGunXMetric = newX; localStorage.setItem("eftforge_graph_gun_x", newX);
+                _graphGunYMetric = newY; localStorage.setItem("eftforge_graph_gun_y", newY);
+            } else {
+                _graphAttXMetric = newX; localStorage.setItem("eftforge_graph_att_x", newX);
+                _graphAttYMetric = newY; localStorage.setItem("eftforge_graph_att_y", newY);
             }
             _graphView = null;
             _rebuildCustomGraph();
@@ -370,7 +386,8 @@ function _renderGraphSearchResults(panel, query) {
                 const icon   = escapeHtml(variant === "factory"
                     ? (gun.image_512_link      || gun.icon_link || "")
                     : (gun.bare_image_512_link || gun.base_image_link || gun.icon_link || ""));
-                catHtml += `<div class="graph-search-item${isDis ? " gsi-disabled" : ""}" data-custom-id="${escapeHtml(customId)}" data-item-type="gun" data-variant="${variant}">`;
+                const disTip = isDis ? ` data-tooltip="${escapeHtml(t("graph.disabledMixType"))}"` : "";
+                catHtml += `<div class="graph-search-item${isDis ? " gsi-disabled" : ""}"${disTip} data-custom-id="${escapeHtml(customId)}" data-item-type="gun" data-variant="${variant}">`;
                 catHtml += `<img src="${icon}" onerror="this.style.visibility='hidden'">`;
                 catHtml += `<span class="graph-search-item-name">${escapeHtml(name)}</span>`;
                 catHtml += `<span class="graph-search-item-badge">${badge}</span>`;
@@ -387,7 +404,8 @@ function _renderGraphSearchResults(panel, query) {
             const name     = dispName(att);
             const icon     = escapeHtml(att.base_image_link || att.icon_link || "");
             const isDis    = _graphCustomMode === "guns";
-            html += `<div class="graph-search-item${isDis ? " gsi-disabled" : ""}" data-custom-id="${escapeHtml(att.id)}" data-item-type="attachment">`;
+            const disTip   = isDis ? ` data-tooltip="${escapeHtml(t("graph.disabledMixType"))}"` : "";
+            html += `<div class="graph-search-item${isDis ? " gsi-disabled" : ""}"${disTip} data-custom-id="${escapeHtml(att.id)}" data-item-type="attachment">`;
             html += `<img src="${icon}" onerror="this.style.visibility='hidden'">`;
             html += `<span class="graph-search-item-name">${escapeHtml(name)}</span>`;
             html += `</div>`;
@@ -764,7 +782,7 @@ function _buildGraphSVG(container) {
                 const txY = (y + ih / 2 + FONT_SZ - 7).toFixed(1);
                 s += `<text class="graph-item-name" x="${x.toFixed(1)}" y="${txY}" text-anchor="middle" font-size="${FONT_SZ}">${escapeHtml(shortName)}</text>`;
             }
-            if (isMulti) {
+            if (isMulti && _graphLabelsEnabled) {
                 const bx = (x + iw / 2).toFixed(1);
                 const by = (y - ih / 2).toFixed(1);
                 s += `<circle cx="${bx}" cy="${by}" r="${(3.5 * _graphIconScale).toFixed(1)}" fill="#f5c542" pointer-events="none"/>`;
@@ -946,8 +964,21 @@ function _buildGraphSVG(container) {
             _graphSearchOpen = !_graphSearchOpen;
             const panel = document.getElementById("graph-search-panel");
             if (panel) {
-                panel.style.display = _graphSearchOpen ? "" : "none";
-                if (_graphSearchOpen) _buildGraphSearchPanel(panel);
+                if (_graphSearchOpen) {
+                    panel.style.display = "";
+                    panel.classList.remove("graph-panel-closing");
+                    void panel.offsetWidth;
+                    panel.classList.add("graph-panel-open");
+                    panel.addEventListener("animationend", () => panel.classList.remove("graph-panel-open"), { once: true });
+                    _buildGraphSearchPanel(panel);
+                } else {
+                    panel.classList.remove("graph-panel-open");
+                    panel.classList.add("graph-panel-closing");
+                    panel.addEventListener("animationend", () => {
+                        panel.style.display = "none";
+                        panel.classList.remove("graph-panel-closing");
+                    }, { once: true });
+                }
             }
             _buildGraphSVG(container);
         });
@@ -1025,7 +1056,7 @@ function _buildGraphSVG(container) {
         }, { signal });
     }
 
-    // Cluster scroll
+    // Cluster scroll + arrow-key cycling
     container.querySelectorAll(".graph-cluster").forEach(clusterEl => {
         clusterEl.addEventListener("wheel", (e) => {
             e.preventDefault(); e.stopPropagation();
@@ -1034,7 +1065,22 @@ function _buildGraphSVG(container) {
             _graphClusterState[key] = ((_graphClusterState[key] ?? 0) + (e.deltaY > 0 ? 1 : -1) + count) % count;
             _buildGraphSVG(container);
         }, { passive: false, signal });
+        clusterEl.addEventListener("mouseenter", () => {
+            _graphHoveredCluster = { key: clusterEl.dataset.clusterKey, count: parseInt(clusterEl.dataset.clusterCount, 10) };
+        }, { signal });
+        clusterEl.addEventListener("mouseleave", () => {
+            _graphHoveredCluster = null;
+        }, { signal });
     });
+
+    document.addEventListener("keydown", (e) => {
+        if (!_graphHoveredCluster) return;
+        if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+        e.preventDefault();
+        const { key, count } = _graphHoveredCluster;
+        _graphClusterState[key] = ((_graphClusterState[key] ?? 0) + (e.key === "ArrowDown" ? 1 : -1) + count) % count;
+        _buildGraphSVG(container);
+    }, { signal });
 
     svg.addEventListener("contextmenu", (e) => {
         e.preventDefault();

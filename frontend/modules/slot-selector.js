@@ -1547,6 +1547,15 @@ function setListView() {
 
     _updateViewBtns();
     _updateGraphHeader();
+
+    const slideTable = document.querySelector(".attachment-table");
+    if (slideTable) {
+        slideTable.classList.remove("table-slide-in");
+        void slideTable.offsetWidth;
+        slideTable.classList.add("table-slide-in");
+        slideTable.addEventListener("animationend", () => slideTable.classList.remove("table-slide-in"), { once: true });
+    }
+
     applyAttachmentSort();
 }
 
@@ -1568,6 +1577,14 @@ function setComboView(wantCombo) {
     EFTForge.state.comboMode = true;
     _updateViewBtns();
     _updateGraphHeader();
+
+    const slideTableCombo = document.querySelector(".attachment-table");
+    if (slideTableCombo) {
+        slideTableCombo.classList.remove("table-slide-in");
+        void slideTableCombo.offsetWidth;
+        slideTableCombo.classList.add("table-slide-in");
+        slideTableCombo.addEventListener("animationend", () => slideTableCombo.classList.remove("table-slide-in"), { once: true });
+    }
 
     if (EFTForge.state.compareMode) {
         EFTForge.state.compareMode = false;

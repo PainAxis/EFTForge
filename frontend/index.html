@@ -1753,12 +1753,6 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .graph-axis-btn.gab-y-sel:hover {
   background: #252000;
 }
-.graph-axis-btn.gab-dis {
-  color: #2a2a2a;
-  border-color: #181818;
-  cursor: not-allowed;
-}
-
 
 .graph-search-bar {
   display: flex;
@@ -1839,6 +1833,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
   padding: 3px 8px;
   cursor: pointer;
   user-select: none;
+  transition: background 0.12s ease;
 }
 .graph-search-item:hover {
   background: #181818;
@@ -1847,11 +1842,11 @@ header:not(.header-expanded) .header-nav-btn-icon {
   background: #1a1800;
 }
 .graph-search-item.gsi-selected:hover {
-  background: #252000;
+  background: #1f0808;
 }
 .graph-search-item.gsi-disabled {
-  opacity: 0.25;
-  pointer-events: none;
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 .graph-search-item img {
   width: 20px;
@@ -1872,6 +1867,10 @@ header:not(.header-expanded) .header-nav-btn-icon {
 }
 .graph-search-item.gsi-selected .graph-search-item-name {
   color: #f5c542;
+  transition: color 0.12s ease;
+}
+.graph-search-item.gsi-selected:hover .graph-search-item-name {
+  color: #e84040;
 }
 
 .graph-search-item-badge {
@@ -1886,6 +1885,11 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .graph-search-item.gsi-selected .graph-search-item-badge {
   background: #2a2000;
   color: #f5c542;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.graph-search-item.gsi-selected:hover .graph-search-item-badge {
+  background: #2a0a0a;
+  color: #e84040;
 }
 
 .graph-no-results {
@@ -2400,6 +2404,24 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
 
 .placeholder-slide-in {
   animation: placeholderSlideIn 0.18s ease forwards;
+}
+
+@keyframes graphPanelSlideIn {
+  from { opacity: 0; transform: translateX(-60px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes graphPanelSlideOut {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(-60px); }
+}
+
+.graph-panel-open {
+  animation: graphPanelSlideIn 0.2s ease forwards;
+}
+
+.graph-panel-closing {
+  animation: graphPanelSlideOut 0.18s ease forwards;
 }
 
 .gun-card-entering {
