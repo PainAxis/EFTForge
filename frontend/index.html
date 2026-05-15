@@ -1490,11 +1490,31 @@ header:not(.header-expanded) .header-nav-btn-icon {
   cursor: crosshair;
 }
 
-.att-graph-dot circle:first-of-type {
-  transition: fill 0.12s ease;
+.att-graph-dot {
+  transition: opacity 0.15s ease;
 }
-.att-graph-dot:hover circle:first-of-type {
+.att-graph-dot circle:first-of-type {
+  transition: fill 0.12s ease, transform 0.12s ease;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.att-graph-dot:hover circle:first-of-type,
+.att-graph-dot.graph-dot-hovered circle:first-of-type {
   fill: #ffe566;
+  transform: scale(0.6);
+}
+.att-graph-dot:hover .graph-dot-ring,
+.att-graph-dot.graph-dot-hovered .graph-dot-ring {
+  stroke-opacity: 0.55;
+  transition: stroke-opacity 0.12s ease;
+}
+
+/* Dim all non-hovered items when any item is hovered */
+.att-graph-svg.has-hover .att-graph-dot:not(.graph-dot-hovered) {
+  opacity: 0.2;
+}
+.att-graph-svg.graph-instant .att-graph-dot {
+  transition: none;
 }
 
 .att-graph-dot-click {
@@ -1552,6 +1572,57 @@ header:not(.header-expanded) .header-nav-btn-icon {
 
 .graph-row-highlight {
   animation: graph-row-flash 1s ease forwards;
+}
+
+.graph-scroll-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0);
+  pointer-events: none;
+  z-index: 20;
+  transition: background 0.15s ease;
+}
+.graph-scroll-hint.graph-scroll-hint-active {
+  background: rgba(0, 0, 0, 0.45);
+}
+.graph-scroll-hint span {
+  color: #fff;
+  font-family: "Bender", Arial, sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.graph-scroll-hint.graph-scroll-hint-active span {
+  opacity: 1;
+}
+
+@keyframes graph-grid-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes graph-dot-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.graph-grid-init {
+  animation: graph-grid-in 0.4s ease both;
+}
+
+.graph-labels-init {
+  animation: graph-grid-in 0.35s ease both;
+  animation-delay: 0.09s;
+}
+
+.graph-dot-appear {
+  animation: graph-dot-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--dot-i, 0) * 28ms + 160ms);
 }
 
 .att-graph-scale-v {
