@@ -569,6 +569,58 @@ def get_guns(lang: str = "en", db: Session = Depends(get_db)):
 
     return result
 
+@app.get("/graph/searchable-items")
+def get_graph_searchable_items(db: Session = Depends(get_db)):
+    from sqlalchemy import exists as sa_exists
+    guns = db.query(Item).filter(
+        Item.is_weapon == True,
+        Item.caliber != "Caliber26x75",
+        ~Item.name.ilike("%rocket%"),
+        ~Item.name.ilike("%rshg%"),
+    ).order_by(Item.weapon_category, Item.name).all()
+    attachments = db.query(Item).filter(
+        Item.is_weapon == False,
+        Item.is_ammo == False,
+        sa_exists().where(SlotAllowedItem.allowed_item_id == Item.id),
+    ).order_by(Item.name).all()
+    return {
+        "guns": [
+            {
+                "id":                        g.id,
+                "name":                      g.name,
+                "short_name":                g.short_name,
+                "name_zh":                   g.name_zh,
+                "short_name_zh":             g.short_name_zh,
+                "weapon_category":           g.weapon_category,
+                "base_ergonomics":           g.base_ergonomics,
+                "factory_ergonomics":        g.factory_ergonomics,
+                "recoil_vertical":           g.recoil_vertical,
+                "recoil_horizontal":         g.recoil_horizontal,
+                "factory_recoil_vertical":   g.factory_recoil_vertical,
+                "factory_recoil_horizontal": g.factory_recoil_horizontal,
+                "icon_link":                 g.icon_link,
+                "base_image_link":           g.base_image_link,
+                "image_512_link":            g.image_512_link,
+                "bare_image_512_link":       g.bare_image_512_link,
+            }
+            for g in guns
+        ],
+        "attachments": [
+            {
+                "id":                  a.id,
+                "name":                a.name,
+                "short_name":          a.short_name,
+                "name_zh":             a.name_zh,
+                "short_name_zh":       a.short_name_zh,
+                "ergonomics_modifier": a.ergonomics_modifier,
+                "recoil_modifier":     a.recoil_modifier,
+                "icon_link":           a.icon_link,
+                "base_image_link":     a.base_image_link,
+            }
+            for a in attachments
+        ],
+    }
+
 @app.get("/ammo/{caliber}")
 def get_ammo_for_caliber(caliber: str, lang: str = "en", db: Session = Depends(get_db)):
     ammo = db.query(Item).filter(

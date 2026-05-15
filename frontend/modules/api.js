@@ -42,6 +42,12 @@ async function fetchGuns() {
     return res.json();
 }
 
+async function fetchGraphSearchableItems() {
+    const res = await fetch(`${_base()}/graph/searchable-items`);
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    return res.json();
+}
+
 async function fetchAmmo(caliber) {
     const res = await fetch(`${_base()}/ammo/${caliber}?lang=${_lang()}`);
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
