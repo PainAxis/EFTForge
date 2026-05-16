@@ -735,6 +735,7 @@ function updateSortIndicators() {
 
 function updateComboBalance(value) {
     EFTForge.state.comboErgoWeight = parseInt(value, 10);
+    localStorage.setItem("eftforge_combo_ergo_weight", value);
     const label = document.getElementById("balance-value");
     if (label) label.textContent = `${value}%`;
     const slider = document.getElementById("balance-slider");

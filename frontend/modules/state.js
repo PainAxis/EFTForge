@@ -45,7 +45,7 @@ window.EFTForge.state = {
     // Attachment table
     attachmentSort: { key: "recoil", direction: "asc" },
     comboSort:      { key: "recoil", direction: "asc" },
-    comboErgoWeight: 25,
+    comboErgoWeight: parseInt(localStorage.getItem("eftforge_combo_ergo_weight") ?? "25", 10),
     lastProcessedItems: [],
     lastParentNode:     null,
     lastSlot:           null,

@@ -1,6 +1,19 @@
 {
   "posts": [
     {
+      "id": "2026-05-16-v120-release",
+      "title": "v1.2.0 - Combo Calculator, Attachment Graph & Build Image Export",
+      "title_zh": "v1.2.0 - 组合计算器、配件图表、舆配置图片导出",
+      "date": "2026-05-16",
+      "tags": ["patch-notes", "major-update"],
+      "title_media": "./news/images/v120/v120Tmedia.mp4",
+      "thumbnail": "./news/images/v120/v120Thumbnail.png",
+      "thumbnail_style": "width: 80%;",
+      "thumbnail_img_style": "object-position: center 20%; transform: translateX(60px);",
+      "file": "2026-05-16-v120-release.md",
+      "file_zh": "2026-05-16-v120-release.zh.md"
+    },
+    {
       "id": "2026-04-20-v1110-release",
       "title": "v1.1.10 - UI Overhaul, Accuracy Stat & Tracker Improvements",
       "title_zh": "v1.1.10 - UI 全面翻新、精准度数据、舆数据追踪器改进",
@@ -41,7 +54,7 @@
       "title": "v1.1.0 - Grid View Modding Interface",
       "title_zh": "v1.1.0 - 网格视图改枪UI",
       "date": "2026-04-04",
-      "tags": ["patch-notes", "minor-update"],
+      "tags": ["patch-notes", "major-update"],
       "title_media": "./news/images/v110/v110Thumbnail.webp",
       "thumbnail": "./news/images/v110/v110Thumbnail.webp",
       "thumbnail_style": "width: 80%;",

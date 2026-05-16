@@ -294,7 +294,7 @@ def _check_client_ban(client_id_hash: str, db: Session) -> None:
 
 def _validate_pairs(pairs: list, db_main: Session) -> None:
     """Validate that pairs has at least one attachment and all item IDs exist."""
-    if len(pairs) <= 1:
+    if len(pairs) < 1:
         raise HTTPException(status_code=422, detail="Build must have at least one attachment.")
     item_ids = [p[1] for p in pairs]
     found = {r[0] for r in db_main.query(Item.id).filter(Item.id.in_(item_ids)).all()}
@@ -1149,12 +1149,6 @@ def combo_full(
         for pid, slots in child_slots_by_parent.items()
     }
 
-    print(f"[combo-full] root_slot={root_slot_id} all_parents={len(all_parents)} conflicting={len(parent_external_conflict)}")
-    for pid, slots in child_slots_by_parent.items():
-        parent_name = next((p.name or p.id for p in all_parents if p.id == pid), pid)
-        slot_details = [(s.slot_name, len(child_items_by_slot.get(s.id, []))) for s in slots]
-        print(f"  parent={parent_name!r} child_slots={slot_details}")
-
     # 7. Load slots for all parent + child items (needed for slot-conflict checks during expansion)
     all_combo_item_ids = set(all_parent_ids) | {
         item.id for items in child_items_by_slot.values() for item in items
@@ -1349,7 +1343,6 @@ def combo_full(
             child_slots = child_slots_by_parent.get(parent.id, [])
             parent_child_slot_ids = [cs.id for cs in child_slots]
             parent_name = parent.name or parent.id
-            t0 = time.monotonic()
             parent_conflict = parent_external_conflict.get(parent.id)
 
             if not child_slots:
@@ -1410,11 +1403,7 @@ def combo_full(
                     frontier = frontier[:_FRONTIER_CAP]
                     capped = True
                     any_truncated = True
-                    print(f"    [{parent_name!r}] frontier capped at {_FRONTIER_CAP} after slot={cs.slot_name!r}")
-                print(f"    [{parent_name!r}] after slot={cs.slot_name!r} candidates={len(raw_candidates)} frontier={len(frontier)}")
                 yield f"data: {json.dumps({'type': 'progress', 'parent': parent_name, 'slot': cs.slot_name, 'frontier': len(frontier), 'cap': _FRONTIER_CAP, 'capped': capped})}\n\n"
-
-            print(f"  [{parent_name!r}] final frontier={len(frontier)} elapsed={time.monotonic()-t0:.2f}s")
 
             for state in frontier:
                 combo_ids = installed_ids + [parent.id] + [ci.id for ci in state["child_items"]]
@@ -3497,7 +3486,6 @@ def get_stat_changelog(
         changelog_db.query(StatChangeLog)
         .filter(StatChangeLog.detected_at >= cutoff)
         .order_by(StatChangeLog.detected_at.desc())
-        .limit(5000)
         .all()
     )
 

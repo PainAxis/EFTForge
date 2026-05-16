@@ -1609,6 +1609,10 @@ function _showExportModal(canvas) {
     const preview = document.createElement("img");
     preview.className = "graph-export-preview";
     preview.src = canvas.toDataURL("image/png");
+    preview.style.cursor = "zoom-in";
+    preview.addEventListener("click", () => {
+        if (window.EFTForge && EFTForge.mediaViewer) EFTForge.mediaViewer.open(preview.src);
+    });
 
     const dlBtn = document.createElement("button");
     dlBtn.className = "modal-btn primary full-width";

@@ -4062,6 +4062,47 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
 }
 
 /* =========================
+   MEDIA VIEWER
+========================= */
+
+.mv-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: rgba(0, 0, 0, 0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease;
+}
+
+.mv-overlay.mv-visible {
+  background: rgba(0, 0, 0, 0.88);
+}
+
+.mv-overlay.mv-panning,
+.mv-overlay.mv-panning * {
+  cursor: grabbing !important;
+}
+
+.mv-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.8);
+  transform-origin: center center;
+  user-select: none;
+  -webkit-user-drag: none;
+  animation: mv-img-in 0.2s ease forwards;
+}
+
+@keyframes mv-img-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* =========================
    SAVED BUILDS
 ========================= */
 
@@ -6223,6 +6264,7 @@ var _hmt = _hmt || [];
 <script src="modules/state.js?v=12"></script>
 <script src="modules/lang.js?v=16"></script>
 <script src="modules/utils.js?v=10"></script>
+<script src="modules/media-viewer.js?v=1"></script>
 <script src="modules/calculations.js?v=10"></script>
 <div id="eft-tooltip"></div>
 <script src="modules/api.js?v=12"></script>

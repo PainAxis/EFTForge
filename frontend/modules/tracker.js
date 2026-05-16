@@ -5,6 +5,8 @@ window.EFTForge = window.EFTForge || {};
    Displays stat changes in a 3-column layout: BUFFS / NERFS / MIXED.
    Supports search and weapon/attachment category filtering.
    Data window: last 7 days. Badge shows total combined items.
+   Each column renders incrementally via IntersectionObserver so
+   large changelogs never block the main thread.
 ============================================================ */
 
 window.EFTForge.tracker = (function () {
@@ -14,6 +16,11 @@ window.EFTForge.tracker = (function () {
     var _typeFilter  = 'all'; // 'all' | 'weapons' | 'attachments'
     var _searchTimer = null;
     var _WINDOW_DAYS = 7;
+    var _PAGE_SIZE   = 40;   // items rendered per IntersectionObserver trigger
+
+    // Per-column incremental render state
+    var _colObservers = {};  // type -> IntersectionObserver
+    var _colState     = {};  // type -> { flat: [], cursor: 0, lang: '' }
 
     var _LOWER_IS_BETTER = {
         weight:            true,
@@ -181,6 +188,7 @@ window.EFTForge.tracker = (function () {
         if (columns) columns.style.display = '';
         var msg = EFTForge.lang.t('tracker.loading');
         ['buff', 'nerf', 'mixed'].forEach(function (col) {
+            _destroyColumnObserver(col);
             var el = document.getElementById('tracker-body-' + col);
             if (el) el.innerHTML = '<div class="tracker-empty">' + _esc(msg) + '</div>';
             var cnt = document.getElementById('tracker-count-' + col);
@@ -191,6 +199,7 @@ window.EFTForge.tracker = (function () {
     function _showError() {
         var msg = EFTForge.lang.t('tracker.loadError');
         ['buff', 'nerf', 'mixed'].forEach(function (col) {
+            _destroyColumnObserver(col);
             var el = document.getElementById('tracker-body-' + col);
             if (el) el.innerHTML = '<div class="tracker-empty">' + _esc(msg) + '</div>';
         });
@@ -226,8 +235,8 @@ window.EFTForge.tracker = (function () {
     }
 
     function _renderEntries(data) {
-        var lang     = EFTForge.state && EFTForge.state.lang;
-        var items    = _combineByItem(data);
+        var lang  = EFTForge.state && EFTForge.state.lang;
+        var items = _combineByItem(data);
 
         var hint    = document.getElementById('tracker-no-change-hint');
         var columns = document.getElementById('tracker-columns');
@@ -237,6 +246,7 @@ window.EFTForge.tracker = (function () {
                 hint.style.display = '';
             }
             if (columns) columns.style.display = 'none';
+            ['buff', 'nerf', 'mixed'].forEach(function (col) { _destroyColumnObserver(col); });
             return;
         }
         if (hint)    hint.style.display = 'none';
@@ -261,82 +271,148 @@ window.EFTForge.tracker = (function () {
         setCount('tracker-count-mixed', mixed.length);
     }
 
+    /* ===========================
+       PRIVATE - INCREMENTAL COLUMN RENDERING
+    =========================== */
+
+    function _destroyColumnObserver(type) {
+        if (_colObservers[type]) {
+            _colObservers[type].disconnect();
+            _colObservers[type] = null;
+        }
+    }
+
+    // Build a flat list of {kind:'date',label} | {kind:'item',entry,globalIdx}
+    // preserving the date-group order but allowing O(1) cursor advancement.
+    function _buildFlat(items) {
+        var groups   = [];
+        var groupMap = {};
+        items.forEach(function (item) {
+            var dateKey = item.detected_at ? item.detected_at.slice(0, 10) : 'unknown';
+            if (!groupMap[dateKey]) { groupMap[dateKey] = []; groups.push(dateKey); }
+            groupMap[dateKey].push(item);
+        });
+        var flat = [];
+        var globalIdx = 0;
+        groups.forEach(function (dateKey) {
+            flat.push({ kind: 'date', label: _formatDate(dateKey) });
+            groupMap[dateKey].forEach(function (entry) {
+                flat.push({ kind: 'item', entry: entry, globalIdx: globalIdx });
+                globalIdx++;
+            });
+        });
+        return flat;
+    }
+
+    function _entryHtml(entry, globalIdx, lang) {
+        var name = (lang === 'zh' && entry.item_name_zh)
+            ? entry.item_name_zh
+            : (entry.item_name || entry.item_id);
+        var animIdx  = Math.min(globalIdx, 25);
+        var iconHtml = entry.icon_link
+            ? '<img class="tracker-item-icon" src="' + _esc(entry.icon_link) + '" alt="" loading="lazy">'
+            : '<div class="tracker-item-icon tracker-item-icon-placeholder"></div>';
+
+        var t = EFTForge.lang.t;
+        var statsHtml = '';
+        entry.stats.forEach(function (s) {
+            var statLabel   = t('tracker.statLabel.' + s.stat_name) || s.stat_name;
+            var lowerBetter = !!_LOWER_IS_BETTER[s.stat_name];
+            var improved    = (s.old_value != null && s.new_value != null)
+                              ? (lowerBetter ? s.new_value < s.old_value : s.new_value > s.old_value)
+                              : false;
+            var changeClass = improved ? 'tracker-stat-up' : 'tracker-stat-down';
+            var oldStr      = _fmtValForStat(s.stat_name, s.old_value);
+            var newStr      = _fmtValForStat(s.stat_name, s.new_value);
+            var pctStr      = _fmtPct(s.old_value, s.new_value);
+            statsHtml += (
+                '<div class="tracker-stat-row">' +
+                '<span class="tracker-stat-label">' + _esc(statLabel) + '</span>' +
+                '<span class="tracker-stat-change ' + changeClass + '">' +
+                _esc(oldStr) + ' → ' + _esc(newStr) +
+                '<span class="tracker-stat-pct">(' + _esc(pctStr) + ')</span>' +
+                '</span>' +
+                '</div>'
+            );
+        });
+
+        return (
+            '<div class="tracker-entry" style="--tr-i:' + animIdx + '">' +
+            iconHtml +
+            '<div class="tracker-entry-info">' +
+            '<div class="tracker-item-name">' + _esc(name) + '</div>' +
+            statsHtml +
+            '</div>' +
+            '</div>'
+        );
+    }
+
+    function _appendItems(type) {
+        var body = document.getElementById('tracker-body-' + type);
+        if (!body) return;
+        var state = _colState[type];
+        if (!state) return;
+
+        // Remove existing sentinel before appending more content
+        var sentinel = body.querySelector('.tracker-sentinel');
+        if (sentinel) sentinel.remove();
+
+        var flat   = state.flat;
+        var cursor = state.cursor;
+        var end    = Math.min(cursor + _PAGE_SIZE, flat.length);
+
+        if (cursor >= flat.length) return;
+
+        var html = '';
+        for (var i = cursor; i < end; i++) {
+            var f = flat[i];
+            if (f.kind === 'date') {
+                html += '<div class="tracker-date-label">' + _esc(f.label) + '</div>';
+            } else {
+                html += _entryHtml(f.entry, f.globalIdx, state.lang);
+            }
+        }
+
+        if (html) {
+            // insertAdjacentHTML is faster than innerHTML for appending
+            body.insertAdjacentHTML('beforeend', html);
+        }
+
+        state.cursor = end;
+
+        if (end < flat.length) {
+            var s = document.createElement('div');
+            s.className = 'tracker-sentinel';
+            body.appendChild(s);
+
+            _destroyColumnObserver(type);
+            // Use the column body as root so intersection is relative to
+            // the column's own scroll viewport, not the window.
+            var observer = new IntersectionObserver(function (entries) {
+                if (entries[0].isIntersecting) {
+                    _destroyColumnObserver(type);
+                    _appendItems(type);
+                }
+            }, { root: body, rootMargin: '120px' });
+            observer.observe(s);
+            _colObservers[type] = observer;
+        }
+    }
+
     function _renderColumn(type, items, lang) {
         var body = document.getElementById('tracker-body-' + type);
         if (!body) return;
+
+        _destroyColumnObserver(type);
 
         if (!items.length) {
             body.innerHTML = '<div class="tracker-empty">-</div>';
             return;
         }
 
-        var groups   = [];
-        var groupMap = {};
-
-        items.forEach(function (item) {
-            var dateKey = item.detected_at ? item.detected_at.slice(0, 10) : 'unknown';
-            if (!groupMap[dateKey]) {
-                groupMap[dateKey] = [];
-                groups.push(dateKey);
-            }
-            groupMap[dateKey].push(item);
-        });
-
-        var t        = EFTForge.lang.t;
-        var html     = '';
-        var globalIdx = 0;
-
-        groups.forEach(function (dateKey) {
-            html += '<div class="tracker-date-label">' + _esc(_formatDate(dateKey)) + '</div>';
-
-            groupMap[dateKey].forEach(function (entry) {
-                var name = (lang === 'zh' && entry.item_name_zh)
-                    ? entry.item_name_zh
-                    : (entry.item_name || entry.item_id);
-
-                var animIdx  = Math.min(globalIdx, 25);
-                var iconHtml = entry.icon_link
-                    ? '<img class="tracker-item-icon" src="' + _esc(entry.icon_link) + '" alt="" loading="lazy">'
-                    : '<div class="tracker-item-icon tracker-item-icon-placeholder"></div>';
-
-                var statsHtml = '';
-                entry.stats.forEach(function (s) {
-                    var statLabel   = t('tracker.statLabel.' + s.stat_name) || s.stat_name;
-                    var lowerBetter = !!_LOWER_IS_BETTER[s.stat_name];
-                    var improved    = (s.old_value != null && s.new_value != null)
-                                      ? (lowerBetter ? s.new_value < s.old_value : s.new_value > s.old_value)
-                                      : false;
-                    var changeClass = improved ? 'tracker-stat-up' : 'tracker-stat-down';
-                    var oldStr      = s.old_value != null ? _fmtValForStat(s.stat_name, s.old_value) : '?';
-                    var newStr      = s.new_value != null ? _fmtValForStat(s.stat_name, s.new_value) : '?';
-                    var pctStr      = _fmtPct(s.old_value, s.new_value);
-
-                    statsHtml += (
-                        '<div class="tracker-stat-row">' +
-                        '<span class="tracker-stat-label">' + _esc(statLabel) + '</span>' +
-                        '<span class="tracker-stat-change ' + changeClass + '">' +
-                        _esc(oldStr) + ' → ' + _esc(newStr) +
-                        '<span class="tracker-stat-pct">(' + _esc(pctStr) + ')</span>' +
-                        '</span>' +
-                        '</div>'
-                    );
-                });
-
-                html += (
-                    '<div class="tracker-entry" style="--tr-i:' + animIdx + '">' +
-                    iconHtml +
-                    '<div class="tracker-entry-info">' +
-                    '<div class="tracker-item-name">' + _esc(name) + '</div>' +
-                    statsHtml +
-                    '</div>' +
-                    '</div>'
-                );
-
-                globalIdx++;
-            });
-        });
-
-        body.innerHTML = html;
+        body.innerHTML = '';
+        _colState[type] = { flat: _buildFlat(items), cursor: 0, lang: lang };
+        _appendItems(type);
     }
 
     /* ===========================

@@ -43,8 +43,9 @@ window.EFTForge.news = (function () {
         _dev:        true
     };
 
-    var _manifest = null;
-    var _currentView = 'list'; // 'list' | 'post'
+    var _manifest     = null;
+    var _postCache    = {};    // file path -> markdown string
+    var _currentView  = 'list'; // 'list' | 'post'
     var _currentPostId = null;
 
     /* ===========================
@@ -146,15 +147,18 @@ window.EFTForge.news = (function () {
         var lang = EFTForge.state.lang;
         var file = (lang === 'zh' && post.file_zh) ? post.file_zh : post.file;
 
-        var markdown;
-        try {
-            var res = await fetch('./news/posts/' + file, { cache: 'no-cache' });
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            markdown = await res.text();
-        } catch (err) {
-            console.error('[news] Failed to load post:', err);
-            _showError(EFTForge.lang.t('news.loadError'));
-            return;
+        var markdown = _postCache[file];
+        if (!markdown) {
+            try {
+                var res = await fetch('./news/posts/' + file, { cache: 'no-cache' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                markdown = await res.text();
+                _postCache[file] = markdown;
+            } catch (err) {
+                console.error('[news] Failed to load post:', err);
+                _showError(EFTForge.lang.t('news.loadError'));
+                return;
+            }
         }
 
         _animateOut('forward', function () { _renderPost(post, markdown); });
@@ -435,6 +439,13 @@ window.EFTForge.news = (function () {
             v.loop     = v.dataset.loop     !== 'false';
             v.muted    = true;
             v.setAttribute('playsinline', '');
+        });
+
+        body.querySelectorAll('.news-post-content img, .news-title-hero img').forEach(function (img) {
+            img.style.cursor = 'zoom-in';
+            img.addEventListener('click', function () {
+                if (window.EFTForge && EFTForge.mediaViewer) EFTForge.mediaViewer.open(img.src);
+            });
         });
     }
 
