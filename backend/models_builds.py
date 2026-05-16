@@ -70,11 +70,12 @@ class PendingNotification(BuildsBase):
 class ServerAnnouncement(BuildsBase):
     __tablename__ = "server_announcements"
 
-    id         = Column(Integer, primary_key=True, autoincrement=True)
-    message    = Column(String, nullable=False)
-    level      = Column(String, nullable=False, default="info")  # "info" | "warning" | "error"
-    created_at = Column(DateTime, nullable=False, default=_utcnow)
-    expires_at = Column(DateTime, nullable=True)   # None = never expires
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    message     = Column(String, nullable=False)
+    level       = Column(String, nullable=False, default="info")  # "info" | "warning" | "error"
+    created_at  = Column(DateTime, nullable=False, default=_utcnow)
+    expires_at  = Column(DateTime, nullable=True)    # None = never expires
+    dismissible = Column(Boolean, nullable=False, default=True)  # False = toast cannot be click-dismissed
 
 
 class BuildVote(BuildsBase):

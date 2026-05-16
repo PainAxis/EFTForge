@@ -1590,12 +1590,13 @@ async function _pollAnnouncements() {
     for (const item of items) {
         if (seen.has(item.id)) continue;
         _markAnnouncementSeen(item.id);
-        const persistent = item.level === "error" || item.level === "critical";
         showToast(
             t("notify.announcementTitle"),
             item.message,
-            persistent ? 0 : 12000,
-            levelColor[item.level] || "#4a90d9"
+            0,
+            levelColor[item.level] || "#4a90d9",
+            null,
+            item.dismissible ?? true
         );
     }
 }

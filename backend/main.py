@@ -77,6 +77,11 @@ def _migrate_builds_db():
             conn.execute(text("ALTER TABLE public_builds ADD COLUMN is_rotating INTEGER NOT NULL DEFAULT 0"))
             conn.commit()
 
+        ann_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(server_announcements)"))}
+        if "dismissible" not in ann_cols:
+            conn.execute(text("ALTER TABLE server_announcements ADD COLUMN dismissible INTEGER NOT NULL DEFAULT 1"))
+            conn.commit()
+
 
 def _migrate_items_db():
     with engine.connect() as conn:
@@ -3702,11 +3707,12 @@ def get_announcements(db: Session = Depends(get_builds_db)):
     )
     return [
         {
-            "id":         r.id,
-            "message":    r.message,
-            "level":      r.level,
-            "created_at": r.created_at.isoformat(),
-            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+            "id":          r.id,
+            "message":     r.message,
+            "level":       r.level,
+            "created_at":  r.created_at.isoformat(),
+            "expires_at":  r.expires_at.isoformat() if r.expires_at else None,
+            "dismissible": r.dismissible,
         }
         for r in rows
     ]
@@ -3741,6 +3747,10 @@ def admin_create_announcement(
         ),
     ),
     expires_in_hours: int | None = Body(default=None),
+    dismissible:      bool       = Body(
+        default=True,
+        description="When false, the toast cannot be dismissed by clicking - user must wait for it to expire or for an admin to delete it. Use for critical notices that must not be accidentally cleared.",
+    ),
     db: Session = Depends(get_builds_db),
 ):
     """
@@ -3754,21 +3764,24 @@ def admin_create_announcement(
     - **critical** (purple) - Urgent and severe: data loss risk, security issue, immediate action required. Toast stays until dismissed.
 
     **expires_in_hours:** leave null for a permanent announcement; set a value (e.g. 2) for time-sensitive ones that should auto-expire.
+
+    **dismissible:** set to false to prevent users from clicking the toast away - useful for critical alerts you need everyone to see.
     """
     _require_admin(request, x_admin_key)
     expires_at = None
     if expires_in_hours is not None:
         expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
-    row = ServerAnnouncement(message=message, level=level, expires_at=expires_at)
+    row = ServerAnnouncement(message=message, level=level, expires_at=expires_at, dismissible=dismissible)
     db.add(row)
     db.commit()
     db.refresh(row)
     return {
-        "id":         row.id,
-        "message":    row.message,
-        "level":      row.level,
-        "created_at": row.created_at.isoformat(),
-        "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+        "id":          row.id,
+        "message":     row.message,
+        "level":       row.level,
+        "created_at":  row.created_at.isoformat(),
+        "expires_at":  row.expires_at.isoformat() if row.expires_at else None,
+        "dismissible": row.dismissible,
     }
 
 
@@ -3798,12 +3811,13 @@ def admin_list_announcements(
     rows = db.query(ServerAnnouncement).order_by(ServerAnnouncement.created_at.desc()).all()
     return [
         {
-            "id":         r.id,
-            "message":    r.message,
-            "level":      r.level,
-            "created_at": r.created_at.isoformat(),
-            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
-            "is_active":  r.expires_at is None or r.expires_at > now,
+            "id":          r.id,
+            "message":     r.message,
+            "level":       r.level,
+            "created_at":  r.created_at.isoformat(),
+            "expires_at":  r.expires_at.isoformat() if r.expires_at else None,
+            "is_active":   r.expires_at is None or r.expires_at > now,
+            "dismissible": r.dismissible,
         }
         for r in rows
     ]

@@ -1454,7 +1454,7 @@ async function _exportGraph(container) {
     const svg = container.querySelector("svg");
     if (!svg) return;
 
-    const toastEl = showToast(t("graph.exportGenerating"), "", 0, "#888");
+    const toastEl = showToast(t("graph.exportGenerating"), t("graph.exportStatus1"), 0, "#888", null, false);
 
     try {
         const vb   = svg.getAttribute("viewBox")?.split(" ").map(Number) || [0, 0, 520, 320];
@@ -1554,6 +1554,7 @@ async function _exportGraph(container) {
 
         const proxyBase = `${EFTForge.config.API_BASE}/proxy-asset?url=`;
         const imgEls = [...clone.querySelectorAll("image")];
+        setToastStatus(toastEl, tFmt("graph.exportStatus2", { n: imgEls.length }));
         await Promise.allSettled(imgEls.map(async (imgEl) => {
             const href = imgEl.getAttribute("href");
             if (!href || href.startsWith("data:")) return;
@@ -1570,6 +1571,8 @@ async function _exportGraph(container) {
                 imgEl.setAttribute("href", dataUrl);
             } catch { imgEl.remove(); }
         }));
+
+        setToastStatus(toastEl, t("graph.exportStatus3"));
 
         const SCALE = 4;
         const canvas = document.createElement("canvas");

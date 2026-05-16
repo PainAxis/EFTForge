@@ -1641,7 +1641,7 @@ async function _exportBuildImage() {
     }
     if (!gridEl) return;
 
-    const toastEl = showToast(t("build.exportGenerating"), "", 0, "#888");
+    const toastEl = showToast(t("build.exportGenerating"), t("build.exportStatus1"), 0, "#888", null, false);
 
     try {
         const CELL_W = 48, CELL_H = 58, GRID_COLS = 10;
@@ -1671,6 +1671,8 @@ async function _exportBuildImage() {
             const icon = cell.querySelector(".ag-icon");
             if (icon?.src && icon.src.startsWith("http")) allExternalSrcs.add(icon.src);
         }
+
+        setToastStatus(toastEl, tFmt("build.exportStatus2", { n: allExternalSrcs.size }));
 
         // Proxy attachment icons in parallel
         const proxyBase = `${EFTForge.config.API_BASE}/proxy-asset?url=`;
@@ -1948,6 +1950,8 @@ async function _exportBuildImage() {
             style.textContent = wFontStyleText;
             defs.appendChild(style);
         }
+
+        setToastStatus(toastEl, t("build.exportStatus3"));
 
         // Render SVG to canvas at 4x scale
         const SCALE  = 4;

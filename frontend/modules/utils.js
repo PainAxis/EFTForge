@@ -96,7 +96,7 @@ function _updateBlobColor() {
     }
 }
 
-function showToast(title, message, duration = 3000, color = "#f44336", actions = null) {
+function showToast(title, message, duration = 3000, color = "#f44336", actions = null, dismissible = true) {
     const container = document.getElementById("toast-container");
 
     const toast = document.createElement("div");
@@ -107,7 +107,17 @@ function showToast(title, message, duration = 3000, color = "#f44336", actions =
     const titleEl = document.createElement("div");
     titleEl.className = "toast-title";
     titleEl.style.color = color;
-    titleEl.textContent = title;
+    if (duration === 0 && title.endsWith("...")) {
+        titleEl.textContent = title.slice(0, -3);
+        for (let i = 0; i < 3; i++) {
+            const dot = document.createElement("span");
+            dot.className = "toast-dot";
+            dot.textContent = ".";
+            titleEl.appendChild(dot);
+        }
+    } else {
+        titleEl.textContent = title;
+    }
 
     const bodyEl = document.createElement("div");
     bodyEl.className = "toast-body";
@@ -132,6 +142,17 @@ function showToast(title, message, duration = 3000, color = "#f44336", actions =
         toast.appendChild(actionsEl);
     }
 
+    if (dismissible) {
+        toast.classList.add("dismissible");
+        const hint = document.createElement("span");
+        hint.className = "toast-dismiss-hint";
+        hint.textContent = "×";
+        toast.appendChild(hint);
+        toast.addEventListener("click", (e) => {
+            if (!e.target.closest(".toast-action-btn")) dismiss();
+        });
+    }
+
     container.appendChild(toast);
 
     setTimeout(() => { toast.classList.add("show"); _updateBlobColor(); }, 10);
@@ -146,6 +167,11 @@ function showToast(title, message, duration = 3000, color = "#f44336", actions =
 
     if (duration > 0) setTimeout(dismiss, duration);
     return toast;
+}
+
+function setToastStatus(toastEl, text) {
+    const body = toastEl?.querySelector(".toast-body");
+    if (body) body.textContent = text;
 }
 
 /* --- Modal factory --- */
