@@ -49,7 +49,7 @@ function toggleImgGen() {
         if (gun) {
             const staticSrc  = gun.image_512_link || gun.icon_link || "";
             const gunCellImg = document.querySelector(".ag-gun-cell img");
-            if (gunCellImg) { gunCellImg.src = staticSrc; gunCellImg.style.opacity = "1"; }
+            if (gunCellImg) { gunCellImg.src = staticSrc; gunCellImg.style.opacity = ""; gunCellImg.style.filter = ""; }
             const tableImg = _bpGetListViewImg();
             if (tableImg) { tableImg.src = staticSrc; tableImg.style.opacity = "1"; }
             const placeholder = document.getElementById("gun-display-image");
@@ -166,7 +166,8 @@ function _bpApplyImageUrl(url) {
         const gunCellImg = document.querySelector(".ag-gun-cell img");
         if (gunCellImg) {
             gunCellImg.src           = url || fallback;
-            gunCellImg.style.opacity = "1";
+            gunCellImg.style.opacity = "";
+            gunCellImg.style.filter  = "";
         }
     } else {
         // List view: target the gun img in the attachment table header
@@ -196,7 +197,8 @@ function _bpApplyStatic(staticUrl) {
         const gunCellImg = document.querySelector(".ag-gun-cell img");
         if (gunCellImg) {
             gunCellImg.src           = staticUrl || "";
-            gunCellImg.style.opacity = "1";
+            gunCellImg.style.opacity = "";
+            gunCellImg.style.filter  = "";
         }
     } else {
         const tableImg = _bpGetListViewImg();
@@ -215,7 +217,10 @@ function _bpSetLoading(isLoading) {
 
     if (EFTForge.state.gridView) {
         const gunCellImg = document.querySelector(".ag-gun-cell img");
-        if (gunCellImg) gunCellImg.style.opacity = isLoading ? "0.35" : "1";
+        if (gunCellImg) {
+            gunCellImg.style.opacity = isLoading ? "0.35" : "";
+            gunCellImg.style.filter  = isLoading ? "brightness(0.85)" : "";
+        }
     } else {
         const tableImg = _bpGetListViewImg();
         if (tableImg) tableImg.style.opacity = isLoading ? "0.35" : "1";
@@ -482,7 +487,8 @@ function resetBuildPreview() {
                         const gunCellImg = document.querySelector(".ag-gun-cell img");
                         if (gunCellImg) {
                             gunCellImg.src           = _bpLastImageUrl;
-                            gunCellImg.style.opacity = _bpInflight ? "0.35" : "1";
+                            gunCellImg.style.opacity = _bpInflight ? "0.35" : "";
+                            gunCellImg.style.filter  = _bpInflight ? "brightness(0.85)" : "";
                         }
                     } else {
                         // Re-stamp the table header gun img - updateAttTableHeaderImg()
