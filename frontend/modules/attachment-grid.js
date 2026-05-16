@@ -1586,6 +1586,7 @@ async function renderAttachmentGrid(preserveScroll = true) {
                         ${t("ui.imgGen")}
                         <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
                     </button>
+                    <button class="toggle-btn ag-export-img-btn" data-tooltip="${t("build.exportImg")}" onclick="exportBuildImage()" style="margin-right:4px;"><svg width="13" height="13" viewBox="0 0 13 13" fill="none" style="display:block"><polyline points="6.5,1 6.5,8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><polyline points="3.5,6 6.5,9 9.5,6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="1.5" y="10.5" width="10" height="1" rx="0.5" fill="currentColor"/></svg></button>
                     <button id="view-list-btn" class="toggle-btn${!EFTForge.state.gridView ? ' active' : ''}" onclick="showListView()">&#9776;</button>
                     <button id="view-grid-btn" class="toggle-btn${EFTForge.state.gridView  ? ' active' : ''}" onclick="showGridView()">&#9783;</button>
                 </span>
@@ -1616,6 +1617,345 @@ async function renderAttachmentGrid(preserveScroll = true) {
         container.scrollTop = previousScroll;
     }
 }
+
+// ============================================================
+// BUILD IMAGE EXPORT
+// ============================================================
+
+async function _exportBuildImage() {
+    if (!EFTForge.state.currentGun) return;
+
+    const gridEl  = document.getElementById("attachment-grid");
+    const statsEl = document.getElementById("stats")?.querySelector(".stats-section");
+    if (!gridEl) return;
+
+    const toastEl = showToast(t("build.exportGenerating"), "", 0, "#888");
+
+    try {
+        const CELL_W = 48, CELL_H = 58, GRID_COLS = 10;
+        const IMG_W  = GRID_COLS * CELL_W; // 480
+
+        const rowsMatch = gridEl.style.gridTemplateRows.match(/repeat\((\d+)/);
+        const GRID_ROWS = rowsMatch ? parseInt(rowsMatch[1]) : 5;
+
+        const gridCells  = [...gridEl.querySelectorAll(".ag-cell")];
+        const gunCell    = document.getElementById("ag-gun-cell");
+        const extrasEl   = gridEl.closest(".attachment-grid-wrapper")?.querySelector(".ag-extras");
+        const extraCells = extrasEl ? [...extrasEl.querySelectorAll(".ag-cell")] : [];
+
+        // Collect all external image URLs that need proxying
+        const allExternalSrcs = new Set();
+        const gunImgEl = gunCell?.querySelector("img");
+        if (gunImgEl?.src && gunImgEl.src.startsWith("http")) allExternalSrcs.add(gunImgEl.src);
+        for (const cell of [...gridCells, ...extraCells]) {
+            const icon = cell.querySelector(".ag-icon");
+            if (icon?.src && icon.src.startsWith("http")) allExternalSrcs.add(icon.src);
+        }
+
+        // Proxy all external images to data URLs in parallel
+        const proxyBase = `${EFTForge.config.API_BASE}/proxy-asset?url=`;
+        const dataUrls  = new Map();
+        await Promise.allSettled([...allExternalSrcs].map(async (src) => {
+            try {
+                const resp = await fetch(proxyBase + encodeURIComponent(src));
+                if (!resp.ok) throw new Error("non-ok");
+                const blob = await resp.blob();
+                const du = await new Promise((res, rej) => {
+                    const fr = new FileReader();
+                    fr.onload = () => res(fr.result);
+                    fr.onerror = rej;
+                    fr.readAsDataURL(blob);
+                });
+                dataUrls.set(src, du);
+            } catch { /* image will be omitted */ }
+        }));
+
+        const resolveImg = (src) => (src ? (dataUrls.get(src) || null) : null);
+
+        // Layout heights
+        const GRID_H   = GRID_ROWS * CELL_H;
+        const EXTRAS_H = extraCells.length > 0
+            ? Math.ceil(extraCells.length / GRID_COLS) * CELL_H + 4
+            : 0;
+
+        const STATS_PAD_X = 16, STATS_PAD_T = 14, STATS_PAD_B = 12;
+        const TITLE_H     = 30, BAR_ROW_H = 22, DIVIDER_H = 14, SUB_ROW_H = 20;
+        const barRows = statsEl ? [...statsEl.querySelectorAll(".stat-bar-row")] : [];
+        const subRows = statsEl ? [...statsEl.querySelectorAll(".stat-subsection .stat-row")] : [];
+        const STATS_H = statsEl
+            ? STATS_PAD_T + TITLE_H + barRows.length * BAR_ROW_H + DIVIDER_H + subRows.length * SUB_ROW_H + STATS_PAD_B
+            : 0;
+
+        const WPAD    = 28;
+        const TOTAL_H = GRID_H + EXTRAS_H + STATS_H + WPAD;
+
+        // Build SVG
+        const ns  = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(ns, "svg");
+        svg.setAttribute("width",   String(IMG_W));
+        svg.setAttribute("height",  String(TOTAL_H));
+        svg.setAttribute("viewBox", `0 0 ${IMG_W} ${TOTAL_H}`);
+        svg.setAttribute("xmlns", ns);
+
+        const defs = document.createElementNS(ns, "defs");
+        svg.appendChild(defs);
+
+        // Helpers
+        const mkRect = (parent, x, y, w, h, fill, stroke, sw, rx) => {
+            const r = document.createElementNS(ns, "rect");
+            r.setAttribute("x", String(x)); r.setAttribute("y", String(y));
+            r.setAttribute("width", String(w)); r.setAttribute("height", String(h));
+            if (fill)   r.setAttribute("fill", fill);
+            if (stroke) { r.setAttribute("stroke", stroke); r.setAttribute("stroke-width", String(sw || 1)); }
+            if (rx)     r.setAttribute("rx", String(rx));
+            parent.appendChild(r);
+        };
+        const mkImg = (parent, src, x, y, w, h, opacity) => {
+            const du = resolveImg(src);
+            if (!du) return;
+            const el = document.createElementNS(ns, "image");
+            el.setAttribute("x", String(x)); el.setAttribute("y", String(y));
+            el.setAttribute("width", String(w)); el.setAttribute("height", String(h));
+            el.setAttribute("href", du);
+            el.setAttribute("preserveAspectRatio", "xMidYMid meet");
+            if (opacity != null && opacity !== 1) el.setAttribute("opacity", String(opacity));
+            parent.appendChild(el);
+        };
+        const mkText = (parent, text, x, y, fontSize, fill, opts = {}) => {
+            if (!text) return;
+            const el = document.createElementNS(ns, "text");
+            el.setAttribute("x", String(x)); el.setAttribute("y", String(y));
+            el.setAttribute("font-size", String(fontSize));
+            el.setAttribute("fill", fill);
+            el.setAttribute("font-family", "Bender, Arial, sans-serif");
+            el.setAttribute("style", "user-select:none;pointer-events:none");
+            if (opts.weight) el.setAttribute("font-weight", opts.weight);
+            if (opts.anchor) el.setAttribute("text-anchor", opts.anchor);
+            el.textContent = text;
+            parent.appendChild(el);
+        };
+
+        // Background
+        mkRect(svg, 0, 0, IMG_W, TOTAL_H, "#111");
+
+        // Draw a single slot cell (grid or extras)
+        const drawCell = (parent, cx, cy, cell) => {
+            const isGun  = cell.id === "ag-gun-cell";
+            const spanCols = isGun
+                ? parseInt((cell.style.gridColumn.split("/")[1] || "10").trim()) -
+                  parseInt(cell.style.gridColumn.split("/")[0].trim())
+                : 1;
+            const cw = spanCols * CELL_W;
+
+            mkRect(parent, cx, cy, cw, CELL_H, isGun ? "#161616" : "#1a1a1a", "#2a2a2a", 0.5);
+
+            const icon = cell.querySelector(".ag-icon, img:not(.slot-placeholder-img)");
+            if (icon?.src && icon.src.startsWith("http")) {
+                const iconH = CELL_H - 14;
+                mkImg(parent, icon.src, cx + 2, cy + 2, cw - 4, iconH, isGun ? 0.7 : 1);
+            }
+
+            const shortName = cell.querySelector(".slot-shortname")?.textContent || "";
+            if (shortName) mkText(parent, shortName, cx + 2, cy + 9, 8, "#aaa", { weight: "700" });
+
+            const label = cell.querySelector(".ag-label, .ag-gun-label")?.textContent || "";
+            if (label) mkText(parent, label, cx + cw / 2, cy + CELL_H - 3, 7, "#666", { anchor: "middle" });
+        };
+
+        // Gun cell
+        if (gunCell) {
+            const col1 = parseInt(gunCell.style.gridColumn.split("/")[0].trim());
+            const row1 = parseInt(gunCell.style.gridRow.trim());
+            drawCell(svg, (col1 - 1) * CELL_W, (row1 - 1) * CELL_H, gunCell);
+        }
+
+        // Main grid slot cells
+        for (const cell of gridCells) {
+            if (!cell.style.gridColumn || !cell.style.gridRow) continue;
+            const col1 = parseInt(cell.style.gridColumn);
+            const row1 = parseInt(cell.style.gridRow);
+            drawCell(svg, (col1 - 1) * CELL_W, (row1 - 1) * CELL_H, cell);
+        }
+
+        // Extras
+        extraCells.forEach((cell, idx) => {
+            drawCell(svg,
+                (idx % GRID_COLS) * CELL_W,
+                GRID_H + 4 + Math.floor(idx / GRID_COLS) * CELL_H,
+                cell);
+        });
+
+        // Stats section
+        if (statsEl && STATS_H > 0) {
+            const sY = GRID_H + EXTRAS_H;
+            mkRect(svg, 0, sY, IMG_W, STATS_H, "#181818");
+
+            // Title accent + text
+            const titleText = statsEl.querySelector(".section-title span")?.textContent?.trim()
+                || t("stats.title");
+            mkRect(svg, STATS_PAD_X, sY + STATS_PAD_T + 4, 3, TITLE_H - 10, "#f5c542");
+            mkText(svg, titleText, STATS_PAD_X + 10, sY + STATS_PAD_T + TITLE_H - 6, 15, "#f5c542", { weight: "700" });
+
+            // Stat bars
+            const BAR_LABEL_W = 88;
+            const BAR_X       = STATS_PAD_X + BAR_LABEL_W;
+            const BAR_W       = IMG_W - BAR_X - STATS_PAD_X - 50;
+            let   barY        = sY + STATS_PAD_T + TITLE_H;
+
+            for (const row of barRows) {
+                const label   = row.querySelector(".stat-bar-label")?.textContent || "";
+                const fill    = row.querySelector(".stat-bar-fill");
+                const value   = row.querySelector(".stat-bar-value")?.textContent || "";
+                const pct     = fill ? parseFloat(fill.dataset.target || "0") : 0;
+                const midY    = barY + BAR_ROW_H / 2;
+
+                mkText(svg, label, STATS_PAD_X, midY + 4, 11, "#aaa");
+                mkRect(svg, BAR_X, midY - 3, BAR_W, 6, "#2a2a2a", null, null, 3);
+                const fillW = BAR_W * (pct / 100);
+                if (fillW > 1) mkRect(svg, BAR_X, midY - 3, fillW, 6, "#555", null, null, 3);
+                mkText(svg, value, IMG_W - STATS_PAD_X, midY + 4, 12, "#eee", { weight: "700", anchor: "end" });
+
+                barY += BAR_ROW_H;
+            }
+
+            // Divider
+            barY += 4;
+            const divEl = document.createElementNS(ns, "line");
+            divEl.setAttribute("x1", String(STATS_PAD_X));  divEl.setAttribute("y1", String(barY));
+            divEl.setAttribute("x2", String(IMG_W - STATS_PAD_X)); divEl.setAttribute("y2", String(barY));
+            divEl.setAttribute("stroke", "#222"); divEl.setAttribute("stroke-width", "1");
+            svg.appendChild(divEl);
+            barY += DIVIDER_H - 4;
+
+            // Sub stat rows
+            for (const row of subRows) {
+                const labelEl  = row.querySelector(".stat-label");
+                const labelTxt = labelEl
+                    ? [...labelEl.childNodes]
+                        .filter(n => n.nodeType === Node.TEXT_NODE)
+                        .map(n => n.textContent.trim())
+                        .join("").replace(/:$/, "").trim()
+                    : "";
+                const valueSpans = [...row.children].filter(el =>
+                    el.tagName === "SPAN" &&
+                    !el.classList.contains("stat-label") &&
+                    !el.classList.contains("eed-warning-icon") &&
+                    !el.classList.contains("deprecated-group-note") &&
+                    !el.classList.contains("stamina-info-btn")
+                );
+                const valueTxt = valueSpans.map(s => s.textContent.trim()).filter(Boolean).join(" ");
+
+                mkText(svg, labelTxt + ":", STATS_PAD_X, barY + 14, 12, "#aaa");
+                if (valueTxt) mkText(svg, valueTxt, STATS_PAD_X + 145, barY + 14, 12, "#eee");
+                barY += SUB_ROW_H;
+            }
+        }
+
+        // Watermark (same approach as _exportGraph)
+        let wFontStyleText = "";
+        try {
+            const wResp = await fetch("./assets/images/title.svg");
+            const wText = await wResp.text();
+            const parser = new DOMParser();
+            const wDoc  = parser.parseFromString(wText, "image/svg+xml");
+            const wRoot = wDoc.documentElement;
+
+            const wStyleEl = wRoot.querySelector("defs style");
+            if (wStyleEl) wFontStyleText = wStyleEl.textContent;
+
+            const srcW    = parseFloat(wRoot.getAttribute("width")  || "301");
+            const srcH    = parseFloat(wRoot.getAttribute("height") || "88");
+            const wmScale = Math.min(28 / srcH, 100 / srcW);
+            const dw = srcW * wmScale, dh = srcH * wmScale;
+            const wmY = TOTAL_H - dh - 10;
+
+            const nested = document.createElementNS(ns, "svg");
+            nested.setAttribute("x", "4");
+            nested.setAttribute("y", wmY.toFixed(1));
+            nested.setAttribute("width",   dw.toFixed(1));
+            nested.setAttribute("height",  dh.toFixed(1));
+            nested.setAttribute("viewBox", wRoot.getAttribute("viewBox") || `0 0 ${srcW} ${srcH}`);
+            [...wRoot.childNodes].forEach(n => nested.appendChild(document.importNode(n, true)));
+            svg.appendChild(nested);
+
+            const now = new Date();
+            const mm  = String(now.getMonth() + 1).padStart(2, "0");
+            const dd  = String(now.getDate()).padStart(2, "0");
+            const yyyy = now.getFullYear();
+            const dateStr = (EFTForge.state.lang || "en") === "zh"
+                ? `生成于${mm}/${dd}/${yyyy}`
+                : `Generated: ${mm}/${dd}/${yyyy}`;
+            mkText(svg, dateStr, 6, (wmY + dh + 3).toFixed(1), 6, "#555");
+        } catch {
+            mkText(svg, "EFTForge", 6, TOTAL_H - 14, 9, "#555");
+            const now = new Date();
+            const mm  = String(now.getMonth() + 1).padStart(2, "0");
+            const dd  = String(now.getDate()).padStart(2, "0");
+            const yyyy = now.getFullYear();
+            const dateStr = (EFTForge.state.lang || "en") === "zh"
+                ? `生成于${mm}/${dd}/${yyyy}`
+                : `Generated: ${mm}/${dd}/${yyyy}`;
+            mkText(svg, dateStr, 6, TOTAL_H - 4, 6, "#555");
+        }
+
+        if (wFontStyleText) {
+            const style = document.createElementNS(ns, "style");
+            style.textContent = wFontStyleText;
+            defs.appendChild(style);
+        }
+
+        // Render SVG to canvas at 4x scale
+        const SCALE  = 4;
+        const canvas = document.createElement("canvas");
+        canvas.width  = IMG_W  * SCALE;
+        canvas.height = TOTAL_H * SCALE;
+        const ctx = canvas.getContext("2d");
+
+        const svgStr     = new XMLSerializer().serializeToString(svg);
+        const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgStr)}`;
+
+        await new Promise((resolve, reject) => {
+            const tmp = new Image();
+            tmp.onload = () => { ctx.drawImage(tmp, 0, 0, IMG_W * SCALE, TOTAL_H * SCALE); resolve(); };
+            tmp.onerror = reject;
+            tmp.src = svgDataUrl;
+        });
+
+        toastEl?.remove();
+        _showBuildExportModal(canvas);
+    } catch (err) {
+        toastEl?.remove();
+        console.error("Build image export failed:", err);
+        showToast(t("build.exportFailed"), "", 3000);
+    }
+}
+
+function _showBuildExportModal(canvas) {
+    const overlay = _createModalOverlay("build-export-modal", t("build.exportTitle"), { maxWidth: "min(90vw, 860px)" });
+    if (!overlay) return;
+
+    const body = document.getElementById("build-export-modal-body");
+    body.style.gap = "10px";
+
+    const preview = document.createElement("img");
+    preview.className = "graph-export-preview";
+    preview.src = canvas.toDataURL("image/png");
+
+    const dlBtn = document.createElement("button");
+    dlBtn.className = "modal-btn primary full-width";
+    dlBtn.textContent = t("graph.exportDownload");
+    dlBtn.addEventListener("click", () => {
+        const a = document.createElement("a");
+        a.download = `eftforge-build-${Date.now()}.png`;
+        a.href = preview.src;
+        a.click();
+    });
+
+    body.appendChild(preview);
+    body.appendChild(dlBtn);
+}
+
+window.exportBuildImage = _exportBuildImage;
 
 // ============================================================
 // VIEW TOGGLE (List / Grid)

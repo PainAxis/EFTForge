@@ -3274,6 +3274,30 @@ def admin_migration_clear_errors(
     return {"cleared": count}
 
 
+@app.post("/admin/migration/regenerate-image/{build_id}")
+def admin_migration_regenerate_image(
+    build_id:         int,
+    request:          Request,
+    background_tasks: BackgroundTasks,
+    x_admin_key:      str = Header(None),
+    db:               Session = Depends(get_builds_db),
+):
+    """Force-regenerate the card image for a single build.
+    Bypasses DISABLE_BG_MIGRATE - always runs regardless of env config."""
+    _require_admin(request, x_admin_key)
+    build = db.query(PublicBuild).filter(PublicBuild.id == build_id).first()
+    if not build:
+        raise HTTPException(status_code=404, detail="Build not found.")
+    pairs = json.loads(build.pairs_json)
+    build.card_image_url = None
+    db.commit()
+    background_tasks.add_task(
+        _generate_and_save_build_image,
+        build.id, build.gun_id, build.gun_name, pairs,
+    )
+    return {"queued": True, "id": build_id}
+
+
 @app.get("/admin/builds")
 def admin_list_builds(
     request: Request,

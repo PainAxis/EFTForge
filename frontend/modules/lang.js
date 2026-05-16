@@ -64,7 +64,7 @@ const _TRANSLATIONS = {
         "stats.selectWeapon":       "Select a weapon to begin",
         "stats.beta":               "BETA",
         "stats.staminaDisclaimer":  "Seconds until arm stamina depletes while standing.\nExpected deviation \u00B10.5s",
-        "stats.eedDesc":            "How far your build is from the overswing threshold at EED = 0, higher is better. Two builds with the same EED behave identically for overswing; being overweight affects ADS speed but not overswing.",
+        "stats.eedDesc":            "Unlike base ergonomics, EED accounts for equipment weight. Two builds with the same EED will handle identically (same overswing behavior and ADS speed, excluding variables such as your character's skill levels, etc). Your character's weight affects ADS speed but not overswing. Set your Equipment Ergonomics Modifier to get accurate results.",
         "stats.overswingDesc":      "Whether the gun will swing over the center point of aiming after ADS. Occurs when EED is negative. Estimated inaccuracy of \u00B12 EED.",
         "stats.equipErgoLabel":     "Equipment Ergonomics Modifier",
         "stats.equipErgoDisclaimer":"The total Ergonomics penalty from worn equipment (headgear, armor, backpack, rig, facecover, eyewear) - set this to match your in-game gear.",
@@ -401,6 +401,11 @@ const _TRANSLATIONS = {
         "graph.exportDownload":      "Download PNG",
         "graph.exportGenerating":    "Generating image...",
         "graph.exportFailed":        "Export failed",
+        // Build image export
+        "build.exportImg":           "Export build image",
+        "build.exportTitle":         "Export Build Image",
+        "build.exportGenerating":    "Generating image...",
+        "build.exportFailed":        "Export failed",
         // Graph custom item search
         "graph.graphProperties":     "Graph Properties",
         "graph.clearItems":          "Clear All",
@@ -577,7 +582,7 @@ const _TRANSLATIONS = {
         "stats.selectWeapon":       "请选择武器以开始",
         "stats.beta":               "BETA",
         "stats.staminaDisclaimer":  "站立时手臂耐力耗尽所需秒数。\n预计偏差 \u00B10.5s",    
-        "stats.eedDesc":            "EED表示当前配置距过摆阈值（EED = 0）的距离，此值越高越好。相同EED的两种配置过摆表现相同；超重会影响开镜速度，但不影响过摆。",
+        "stats.eedDesc":            "与纸面人机不同，Evo人机工效将装备重量一并纳入计算。两把Evo人机相同的枪操纵性理论上完全一致（过摆行为与开镜速度均相同，除去技能等级等变量影响）。人物重量会影响开镜速度，但不影响过摆。请设置装备人机工效修正以获得准确结果。",
         "stats.overswingDesc":      "表示开镜后准星是否会摆过中心点。当EED为负时发生。预计偏差 \u00B12 EED。",
         "stats.equipErgoLabel":     "装备人机工效修正",
         "stats.equipErgoDisclaimer":"所佩戴装备（头盔、防弹衣、背包、战术背心、面罩、护目镜）的人机工效惩罚总和 - 请根据游戏中的实际装备进行设置。",
@@ -914,6 +919,11 @@ const _TRANSLATIONS = {
         "graph.exportDownload":      "下载 PNG",
         "graph.exportGenerating":    "生成中...",
         "graph.exportFailed":        "导出失败",
+        // Build image export
+        "build.exportImg":           "导出配件方案图",
+        "build.exportTitle":         "导出配件方案图",
+        "build.exportGenerating":    "生成中...",
+        "build.exportFailed":        "导出失败",
         // Graph custom item search
         "graph.graphProperties":     "图表设置",
         "graph.clearItems":          "全部清空",
