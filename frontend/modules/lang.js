@@ -933,7 +933,7 @@ const _TRANSLATIONS = {
         "build.exportTitle":         "导出配件方案图",
         "build.exportGenerating":    "生成中...",
         "build.exportFailed":        "导出失败",
-        "build.exportStatus1":       "正在获取武器图像...",
+        "build.exportStatus1":       "正在生成武器图像...",
         "build.exportStatus2":       "正在加载 {n} 个图标...",
         "build.exportStatus3":       "正在渲染图像...",
         // Graph custom item search

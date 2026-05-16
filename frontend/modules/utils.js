@@ -107,7 +107,7 @@ function showToast(title, message, duration = 3000, color = "#f44336", actions =
     const titleEl = document.createElement("div");
     titleEl.className = "toast-title";
     titleEl.style.color = color;
-    if (duration === 0 && title.endsWith("...")) {
+    if (title.endsWith("...")) {
         titleEl.textContent = title.slice(0, -3);
         for (let i = 0; i < 3; i++) {
             const dot = document.createElement("span");
@@ -121,7 +121,17 @@ function showToast(title, message, duration = 3000, color = "#f44336", actions =
 
     const bodyEl = document.createElement("div");
     bodyEl.className = "toast-body";
-    bodyEl.textContent = message;
+    if (message.endsWith("...")) {
+        bodyEl.textContent = message.slice(0, -3);
+        for (let i = 0; i < 3; i++) {
+            const dot = document.createElement("span");
+            dot.className = "toast-dot";
+            dot.textContent = ".";
+            bodyEl.appendChild(dot);
+        }
+    } else {
+        bodyEl.textContent = message;
+    }
 
     toast.appendChild(titleEl);
     toast.appendChild(bodyEl);

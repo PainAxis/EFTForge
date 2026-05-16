@@ -770,6 +770,11 @@ function toggleCompareMode() {
 // Helper: animate a delta bar in using double-rAF to avoid forced reflow
 function _animateDeltaBarIn(deltaEl) {
     if (deltaEl._showRaf != null) { cancelAnimationFrame(deltaEl._showRaf); deltaEl._showRaf = null; }
+    if (parseFloat(deltaEl.style.left) < 0) {
+        deltaEl.style.transform = "scaleX(0)";
+        deltaEl.style.opacity = "0";
+        return;
+    }
     deltaEl.style.transform = "scaleX(0)";
     deltaEl.style.opacity = "0";
     deltaEl._showRaf = requestAnimationFrame(() => {
