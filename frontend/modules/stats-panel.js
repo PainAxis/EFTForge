@@ -455,9 +455,7 @@ function _insertHiddenStatsPanel() {
     [t("hidden.recAngle"),      fmtInt(gun.recoil_angle) + (gun.recoil_angle != null ? "\u00b0" : ""),           t("hidden.tip.recAngle")],
     [t("hidden.recHandRot"),    gun.rec_hand_rot   != null ? "\u00d7" + parseFloat(gun.rec_hand_rot).toFixed(2)  : "?", t("hidden.tip.recHandRot")],
     [t("hidden.recDispersion"), fmtInt(gun.recoil_dispersion),                                                    t("hidden.tip.recDispersion")],
-    [t("hidden.recForceBack"),  gun.rec_force_back != null ? gun.rec_force_back : "?",                            t("hidden.tip.recForceBack")],
-    [t("hidden.recForceUp"),    gun.rec_force_up   != null ? gun.rec_force_up   : "?",                            t("hidden.tip.recForceUp")],
-    [t("hidden.recReturnSpeed"), fmt(gun.rec_return_speed, 1, true),                                              t("hidden.tip.recReturnSpeed")],
+[t("hidden.recReturnSpeed"), fmt(gun.rec_return_speed, 1, true),                                              t("hidden.tip.recReturnSpeed")],
   ];
   const rowsHtml = rows.map(([label, val, tip]) =>
     `<div class="hidden-stat-row" data-tooltip="${escapeHtml(tip)}"><span class="hidden-stat-label">${label}</span><span class="hidden-stat-value">${val}</span></div>`
