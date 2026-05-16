@@ -324,7 +324,15 @@ async function openSlotSelector(parentNode, slot) {
             class="search-input"
         />
 
-        <table class="attachment-table hide-col-ree hide-col-rub-recoil hide-col-eer">
+        <div id="balance-controls" class="balance-controls" style="display:none;">
+            <span class="balance-label">${escapeHtml(t("ui.balanceRecoil"))}</span>
+            <input type="range" id="balance-slider" min="0" max="100" value="${EFTForge.state.comboErgoWeight}"
+                   oninput="updateComboBalance(this.value)" onclick="event.stopPropagation()">
+            <span class="balance-label">${escapeHtml(t("ui.balanceErgo"))}</span>
+            <span id="balance-value" class="balance-value">${EFTForge.state.comboErgoWeight}%</span>
+        </div>
+
+        <table class="attachment-table hide-col-rub-recoil hide-col-eer hide-col-balance">
 
             <thead>
                 <tr>
@@ -352,8 +360,8 @@ async function openSlotSelector(parentNode, slot) {
                     <th id="th-evo" onclick="changeSort('evo')">
                         ${t("th.evoErgo")} <span class="sort-indicator"></span>
                     </th>
-                    <th id="th-ree" onclick="changeSort('ree')" data-tooltip="${escapeHtml(t('th.reeTooltip'))}">
-                        ${t("th.ree")} <span class="sort-indicator"></span>
+                    <th id="th-balance" onclick="changeSort('balance')" data-tooltip="${escapeHtml(t('th.balanceTooltip'))}">
+                        ${t("th.balance")} <span class="sort-indicator"></span>
                     </th>
                     <th id="th-eer" onclick="changeSort('eer')" data-tooltip="${escapeHtml(t('th.eerTooltip'))}">
                         ${t("th.eer")} <span class="sort-indicator"></span>
@@ -664,12 +672,12 @@ function _updateColumnVisibility(items) {
     table.classList.toggle("hide-col-evo",    !hasEvo);
     table.classList.toggle("hide-col-price",  !hasPrice);
     // Combo-only columns - always hidden in list mode
-    table.classList.add("hide-col-ree", "hide-col-rub-recoil", "hide-col-eer");
+    table.classList.add("hide-col-rub-recoil", "hide-col-eer", "hide-col-balance");
 }
 
 function changeSort(key) {
   if (EFTForge.state.comboMode) {
-    const bestDir = { recoil: "asc", weight: "asc", ergo: "desc", evo: "desc", price: "asc", name: "asc", ree: "asc", "rub-recoil": "asc", eer: "asc" };
+    const bestDir = { recoil: "asc", weight: "asc", ergo: "desc", evo: "desc", price: "asc", name: "asc", "rub-recoil": "asc", eer: "asc", balance: "desc" };
     if (EFTForge.state.comboSort.key === key) {
       EFTForge.state.comboSort.direction = EFTForge.state.comboSort.direction === "asc" ? "desc" : "asc";
     } else {
@@ -704,7 +712,7 @@ function updateSortIndicators() {
       ? EFTForge.state.comboSort
       : EFTForge.state.attachmentSort;
 
-  const headers = ["name", "weight", "recoil", "ergo", "acc", "evo", "ree", "rub-recoil", "eer", "price"];
+  const headers = ["name", "weight", "recoil", "ergo", "acc", "evo", "rub-recoil", "eer", "price", "balance"];
   headers.forEach(key => {
     const th = document.getElementById(`th-${key}`);
     if (!th) return;
@@ -717,6 +725,21 @@ function updateSortIndicators() {
   activeTh.classList.add("active-sort");
   activeTh.querySelector(".sort-indicator").textContent =
       sortState.direction === "asc" ? " ▲" : " ▼";
+
+  const balanceControls = document.getElementById("balance-controls");
+  if (balanceControls) {
+      const show = EFTForge.state.comboMode && sortState.key === "balance";
+      balanceControls.style.display = show ? "flex" : "none";
+  }
+}
+
+function updateComboBalance(value) {
+    EFTForge.state.comboErgoWeight = parseInt(value, 10);
+    const label = document.getElementById("balance-value");
+    if (label) label.textContent = `${value}%`;
+    const slider = document.getElementById("balance-slider");
+    if (slider) slider.value = value;
+    applyComboSort();
 }
 
 function togglePurchasableOnly() {
@@ -1778,9 +1801,6 @@ async function openComboView() {
         }
         const finalPrice = hasPrice ? totalPrice : null;
 
-        // R+EE/3: combined recoil+evo score; more negative = better (lower = more recoil reduction)
-        const comboREE = comboRecoilPct + comboEEDDelta / 3;
-
         // ₽/Recoil: rubles per 1% recoil reduction; null when no price or no recoil reduction
         const comboRublePerRecoil = (finalPrice !== null && comboRecoilPct < 0)
             ? finalPrice / Math.abs(comboRecoilPct)
@@ -1814,7 +1834,7 @@ async function openComboView() {
             sortName, simEED, simErgo, simWeight, simRecoilV, simRecoilH,
             comboEEDDelta, comboErgoDelta, comboWeightDelta, comboRecoilPct,
             totalPrice: finalPrice,
-            comboREE, comboRublePerRecoil, comboEERDisplay, comboEERSort,
+            comboRublePerRecoil, comboEERDisplay, comboEERSort,
         };
     });
 
@@ -1862,7 +1882,6 @@ function applyComboSort() {
                 if (bp === null) return -1;
                 primary = ap - bp; break;
             }
-            case "ree":   primary = a.comboREE - b.comboREE; break;
             case "rub-recoil": {
                 const ap = a.comboRublePerRecoil; const bp = b.comboRublePerRecoil;
                 if (ap === null && bp === null) { primary = 0; break; }
@@ -1876,6 +1895,12 @@ function applyComboSort() {
                 if (as === null) return 1;
                 if (bs === null) return -1;
                 primary = as - bs; break;
+            }
+            case "balance": {
+                const w = EFTForge.state.comboErgoWeight / 100;
+                const scoreA = (-a.comboRecoilPct * (1 - w)) + (a.comboErgoDelta * w);
+                const scoreB = (-b.comboRecoilPct * (1 - w)) + (b.comboErgoDelta * w);
+                primary = scoreA - scoreB; break;
             }
             default: primary = 0;
         }
@@ -1914,9 +1939,9 @@ function _updateComboColumnVisibility(items) {
     table.classList.toggle("hide-col-ergo",   !hasErgo);
     table.classList.toggle("hide-col-evo",         !hasEvo);
     table.classList.toggle("hide-col-price",       !hasPrice);
-    table.classList.toggle("hide-col-ree",         !hasRecoil);
     table.classList.toggle("hide-col-rub-recoil",  !(hasRecoil && hasPrice));
     table.classList.toggle("hide-col-eer",         !(hasRecoil && hasEvo));
+    table.classList.toggle("hide-col-balance",     !(hasRecoil && hasErgo));
 }
 
 function _isComboInstalled(entry) {
@@ -2010,10 +2035,13 @@ function _buildComboRow(entry) {
     const ergoCls   = entry.comboErgoDelta >= 0 ? "ergo-positive" : "ergo-negative";
     const evoCls    = entry.comboEEDDelta  >= 0 ? "positive" : "negative";
 
-    const reeCls  = entry.comboREE <= 0 ? "positive" : "negative";
     const rrCellHtml = entry.comboRublePerRecoil !== null
         ? `<div class="att-price-wrap"><span>${_formatPrice(Math.round(entry.comboRublePerRecoil))}</span></div>`
         : `-`;
+
+    const bw = EFTForge.state.comboErgoWeight / 100;
+    const balanceScore = (-entry.comboRecoilPct * (1 - bw)) + (entry.comboErgoDelta * bw);
+    const balanceCls = balanceScore >= 0 ? "positive" : "negative";
 
     row.innerHTML = `
         <td class="name-cell combo-name-cell"><div class="combo-icon-scroll"><div class="combo-marquee">${iconAreaHtml}</div></div></td>
@@ -2024,7 +2052,7 @@ function _buildComboRow(entry) {
         <td class="acc-cell"></td>
         <td class="${ergoCls}">${entry.comboErgoDelta >= 0 ? "+" : ""}${formatStat(entry.comboErgoDelta)}</td>
         <td class="${evoCls}">${fmtSign(entry.comboEEDDelta)}</td>
-        <td class="${reeCls}">${fmtSign(entry.comboREE, 1)}</td>
+        <td class="${balanceCls}">${fmtSign(balanceScore)}</td>
         <td>${entry.comboEERDisplay ?? `-`}</td>
     `;
 

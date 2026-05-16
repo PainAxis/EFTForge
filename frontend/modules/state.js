@@ -45,6 +45,7 @@ window.EFTForge.state = {
     // Attachment table
     attachmentSort: { key: "recoil", direction: "asc" },
     comboSort:      { key: "recoil", direction: "asc" },
+    comboErgoWeight: 25,
     lastProcessedItems: [],
     lastParentNode:     null,
     lastSlot:           null,

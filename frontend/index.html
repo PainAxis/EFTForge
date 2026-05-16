@@ -1104,7 +1104,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
 }
 
 /* Auto-hide empty columns */
-/* Column order: 1=name 2=price 3=₽/recoil 4=weight 5=recoil 6=acc 7=ergo 8=evo 9=R+EE/3 10=EE:R */
+/* Column order: 1=name 2=price 3=₽/recoil 4=weight 5=recoil 6=acc 7=ergo 8=evo 9=R+E 10=EE:R */
 .attachment-table.hide-col-price th:nth-child(2),
 .attachment-table.hide-col-price td:nth-child(2) { display: none; }
 .attachment-table.hide-col-rub-recoil th:nth-child(3),
@@ -1119,10 +1119,39 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .attachment-table.hide-col-ergo td:nth-child(7) { display: none; }
 .attachment-table.hide-col-evo th:nth-child(8),
 .attachment-table.hide-col-evo td:nth-child(8) { display: none; }
-.attachment-table.hide-col-ree th:nth-child(9),
-.attachment-table.hide-col-ree td:nth-child(9) { display: none; }
+.attachment-table.hide-col-balance th:nth-child(9),
+.attachment-table.hide-col-balance td:nth-child(9) { display: none; }
 .attachment-table.hide-col-eer th:nth-child(10),
 .attachment-table.hide-col-eer td:nth-child(10) { display: none; }
+
+/* Balance controls: slider shown when R+E sort is active */
+.balance-controls {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 0;
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.balance-controls .balance-label {
+  color: #888;
+  white-space: nowrap;
+}
+.balance-controls input[type="range"] {
+  flex: 1;
+  height: 4px;
+  cursor: pointer;
+  accent-color: #c8a84b;
+}
+.balance-value {
+  color: #c8a84b;
+  font-weight: 700;
+  min-width: 32px;
+  text-align: right;
+  font-family: "Bender", Arial, sans-serif;
+}
 
 /* Price cell display in attachment table */
 .att-price-wrap {
