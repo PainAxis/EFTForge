@@ -1625,8 +1625,20 @@ async function renderAttachmentGrid(preserveScroll = true) {
 async function _exportBuildImage() {
     if (!EFTForge.state.currentGun) return;
 
-    const gridEl  = document.getElementById("attachment-grid");
     const statsEl = document.getElementById("stats")?.querySelector(".stats-section");
+
+    // Use the live grid if in grid view; otherwise build a detached grid for export
+    let gridEl = document.getElementById("attachment-grid");
+    let _detachedRoot = null;
+    if (!gridEl && EFTForge.state.buildTree) {
+        _detachedRoot = document.createElement("div");
+        const treeBox = document.createElement("div");
+        _detachedRoot.appendChild(treeBox);
+        const slotEntries = await collectAllVisibleSlots(EFTForge.state.buildTree);
+        const { positions, gunRow, totalRows } = computeGridPositions(slotEntries);
+        _buildGridDOM(slotEntries, positions, gunRow, totalRows, treeBox);
+        gridEl = treeBox.querySelector("#attachment-grid");
+    }
     if (!gridEl) return;
 
     const toastEl = showToast(t("build.exportGenerating"), "", 0, "#888");
@@ -1638,21 +1650,29 @@ async function _exportBuildImage() {
         const rowsMatch = gridEl.style.gridTemplateRows.match(/repeat\((\d+)/);
         const GRID_ROWS = rowsMatch ? parseInt(rowsMatch[1]) : 5;
 
-        const gridCells  = [...gridEl.querySelectorAll(".ag-cell")];
-        const gunCell    = document.getElementById("ag-gun-cell");
-        const extrasEl   = gridEl.closest(".attachment-grid-wrapper")?.querySelector(".ag-extras");
-        const extraCells = extrasEl ? [...extrasEl.querySelectorAll(".ag-cell")] : [];
+        const gridCells      = [...gridEl.querySelectorAll(".ag-cell")];
+        const gunCell        = gridEl.querySelector("#ag-gun-cell");
+        const extrasEl       = gridEl.closest(".attachment-grid-wrapper")?.querySelector(".ag-extras");
+        const extraCells     = extrasEl ? [...extrasEl.querySelectorAll(".ag-cell")] : [];
+        const filledExtras   = extraCells.filter(c => c.querySelector(".ag-icon"));
 
-        // Collect all external image URLs that need proxying
+        // Fetch generated build image (always, regardless of imgGen toggle)
+        const genGunUrl = await (window.fetchBuildImageForExport?.() ?? Promise.resolve(null));
+        const gunImgEl  = gunCell?.querySelector("img");
+        const gunSrc    = genGunUrl
+            || EFTForge.state.currentGun?.image_512_link
+            || EFTForge.state.currentGun?.icon_link
+            || gunImgEl?.src
+            || "";
+
+        // Collect attachment icon URLs that go through the backend proxy
         const allExternalSrcs = new Set();
-        const gunImgEl = gunCell?.querySelector("img");
-        if (gunImgEl?.src && gunImgEl.src.startsWith("http")) allExternalSrcs.add(gunImgEl.src);
-        for (const cell of [...gridCells, ...extraCells]) {
+        for (const cell of [...gridCells, ...filledExtras]) {
             const icon = cell.querySelector(".ag-icon");
             if (icon?.src && icon.src.startsWith("http")) allExternalSrcs.add(icon.src);
         }
 
-        // Proxy all external images to data URLs in parallel
+        // Proxy attachment icons in parallel
         const proxyBase = `${EFTForge.config.API_BASE}/proxy-asset?url=`;
         const dataUrls  = new Map();
         await Promise.allSettled([...allExternalSrcs].map(async (src) => {
@@ -1670,24 +1690,44 @@ async function _exportBuildImage() {
             } catch { /* image will be omitted */ }
         }));
 
+        // Gun image: route through proxy (now allowlisted for both tarkov.dev and image-gen)
+        if (gunSrc?.startsWith("http")) {
+            try {
+                const resp = await fetch(proxyBase + encodeURIComponent(gunSrc));
+                if (!resp.ok) throw new Error("non-ok");
+                const blob = await resp.blob();
+                const du = await new Promise((res, rej) => {
+                    const fr = new FileReader();
+                    fr.onload = () => res(fr.result);
+                    fr.onerror = rej;
+                    fr.readAsDataURL(blob);
+                });
+                dataUrls.set(gunSrc, du);
+            } catch { /* gun image omitted, cell will be empty */ }
+        }
+
         const resolveImg = (src) => (src ? (dataUrls.get(src) || null) : null);
 
-        // Layout heights
-        const GRID_H   = GRID_ROWS * CELL_H;
-        const EXTRAS_H = extraCells.length > 0
-            ? Math.ceil(extraCells.length / GRID_COLS) * CELL_H + 4
+        // Effective grid height: only up to the last row that has any filled cell or the gun cell
+        let maxFilledRow = gunCell?.style.gridRow ? parseInt(gunCell.style.gridRow) : 0;
+        for (const cell of gridCells) {
+            if (!cell.querySelector(".ag-icon") || !cell.style.gridRow) continue;
+            maxFilledRow = Math.max(maxFilledRow, parseInt(cell.style.gridRow));
+        }
+        const GRID_H   = (maxFilledRow > 0 ? maxFilledRow : GRID_ROWS) * CELL_H;
+        const EXTRAS_H = filledExtras.length > 0
+            ? Math.ceil(filledExtras.length / GRID_COLS) * CELL_H + 4
             : 0;
 
-        const STATS_PAD_X = 16, STATS_PAD_T = 14, STATS_PAD_B = 12;
-        const TITLE_H     = 30, BAR_ROW_H = 22, DIVIDER_H = 14, SUB_ROW_H = 20;
+        const STATS_PAD_X = 16, STATS_PAD_T = 8, STATS_PAD_B = 10;
+        const BAR_ROW_H = 22, DIVIDER_H = 14, SUB_ROW_H = 20;
         const barRows = statsEl ? [...statsEl.querySelectorAll(".stat-bar-row")] : [];
         const subRows = statsEl ? [...statsEl.querySelectorAll(".stat-subsection .stat-row")] : [];
         const STATS_H = statsEl
-            ? STATS_PAD_T + TITLE_H + barRows.length * BAR_ROW_H + DIVIDER_H + subRows.length * SUB_ROW_H + STATS_PAD_B
+            ? STATS_PAD_T + barRows.length * BAR_ROW_H + DIVIDER_H + subRows.length * SUB_ROW_H + STATS_PAD_B
             : 0;
 
-        const WPAD    = 28;
-        const TOTAL_H = GRID_H + EXTRAS_H + STATS_H + WPAD;
+        const TOTAL_H = GRID_H + EXTRAS_H + STATS_H;
 
         // Build SVG
         const ns  = "http://www.w3.org/2000/svg";
@@ -1735,8 +1775,8 @@ async function _exportBuildImage() {
             parent.appendChild(el);
         };
 
-        // Background
-        mkRect(svg, 0, 0, IMG_W, TOTAL_H, "#111");
+        // Background - uniform color across all sections
+        mkRect(svg, 0, 0, IMG_W, TOTAL_H, "#181818");
 
         // Draw a single slot cell (grid or extras)
         const drawCell = (parent, cx, cy, cell) => {
@@ -1747,7 +1787,7 @@ async function _exportBuildImage() {
                 : 1;
             const cw = spanCols * CELL_W;
 
-            mkRect(parent, cx, cy, cw, CELL_H, isGun ? "#161616" : "#1a1a1a", "#2a2a2a", 0.5);
+            mkRect(parent, cx, cy, cw, CELL_H, "#222", "#2e2e2e", 0.5);
 
             const icon = cell.querySelector(".ag-icon, img:not(.slot-placeholder-img)");
             if (icon?.src && icon.src.startsWith("http")) {
@@ -1762,23 +1802,33 @@ async function _exportBuildImage() {
             if (label) mkText(parent, label, cx + cw / 2, cy + CELL_H - 3, 7, "#666", { anchor: "middle" });
         };
 
-        // Gun cell
+        // Gun cell - use gunSrc (generated image preferred over static)
         if (gunCell) {
-            const col1 = parseInt(gunCell.style.gridColumn.split("/")[0].trim());
-            const row1 = parseInt(gunCell.style.gridRow.trim());
-            drawCell(svg, (col1 - 1) * CELL_W, (row1 - 1) * CELL_H, gunCell);
+            const col1     = parseInt(gunCell.style.gridColumn.split("/")[0].trim());
+            const col2     = parseInt((gunCell.style.gridColumn.split("/")[1] || "10").trim());
+            const row1     = parseInt(gunCell.style.gridRow.trim());
+            const spanCols = col2 - col1;
+            const cw       = spanCols * CELL_W;
+            const cx       = (col1 - 1) * CELL_W;
+            const cy       = (row1 - 1) * CELL_H;
+
+            mkRect(svg, cx, cy, cw, CELL_H, "#222", "#2e2e2e", 0.5);
+            if (gunSrc) mkImg(svg, gunSrc, cx + 2, cy + 2, cw - 4, CELL_H - 14, genGunUrl ? 1 : 0.7);
+            const gunLabel = gunCell.querySelector(".ag-gun-label")?.textContent || "";
+            if (gunLabel) mkText(svg, gunLabel, cx + cw / 2, cy + CELL_H - 3, 7, "#666", { anchor: "middle" });
         }
 
-        // Main grid slot cells
+        // Main grid slot cells - skip empty (no installed icon)
         for (const cell of gridCells) {
             if (!cell.style.gridColumn || !cell.style.gridRow) continue;
+            if (!cell.querySelector(".ag-icon")) continue;
             const col1 = parseInt(cell.style.gridColumn);
             const row1 = parseInt(cell.style.gridRow);
             drawCell(svg, (col1 - 1) * CELL_W, (row1 - 1) * CELL_H, cell);
         }
 
-        // Extras
-        extraCells.forEach((cell, idx) => {
+        // Extras - skip empty, reindex so filled cells pack tightly
+        filledExtras.forEach((cell, idx) => {
             drawCell(svg,
                 (idx % GRID_COLS) * CELL_W,
                 GRID_H + 4 + Math.floor(idx / GRID_COLS) * CELL_H,
@@ -1788,19 +1838,12 @@ async function _exportBuildImage() {
         // Stats section
         if (statsEl && STATS_H > 0) {
             const sY = GRID_H + EXTRAS_H;
-            mkRect(svg, 0, sY, IMG_W, STATS_H, "#181818");
-
-            // Title accent + text
-            const titleText = statsEl.querySelector(".section-title span")?.textContent?.trim()
-                || t("stats.title");
-            mkRect(svg, STATS_PAD_X, sY + STATS_PAD_T + 4, 3, TITLE_H - 10, "#f5c542");
-            mkText(svg, titleText, STATS_PAD_X + 10, sY + STATS_PAD_T + TITLE_H - 6, 15, "#f5c542", { weight: "700" });
 
             // Stat bars
             const BAR_LABEL_W = 88;
             const BAR_X       = STATS_PAD_X + BAR_LABEL_W;
             const BAR_W       = IMG_W - BAR_X - STATS_PAD_X - 50;
-            let   barY        = sY + STATS_PAD_T + TITLE_H;
+            let   barY        = sY + STATS_PAD_T;
 
             for (const row of barRows) {
                 const label   = row.querySelector(".stat-bar-label")?.textContent || "";
@@ -1834,7 +1877,7 @@ async function _exportBuildImage() {
                     ? [...labelEl.childNodes]
                         .filter(n => n.nodeType === Node.TEXT_NODE)
                         .map(n => n.textContent.trim())
-                        .join("").replace(/:$/, "").trim()
+                        .join("").replace(/[:：]$/, "").trim()
                     : "";
                 const valueSpans = [...row.children].filter(el =>
                     el.tagName === "SPAN" &&
@@ -1867,10 +1910,12 @@ async function _exportBuildImage() {
             const srcH    = parseFloat(wRoot.getAttribute("height") || "88");
             const wmScale = Math.min(28 / srcH, 100 / srcW);
             const dw = srcW * wmScale, dh = srcH * wmScale;
+            // Anchor watermark to bottom-right (inside stats section's empty right space)
+            const wmX = IMG_W - dw - 4;
             const wmY = TOTAL_H - dh - 10;
 
             const nested = document.createElementNS(ns, "svg");
-            nested.setAttribute("x", "4");
+            nested.setAttribute("x", wmX.toFixed(1));
             nested.setAttribute("y", wmY.toFixed(1));
             nested.setAttribute("width",   dw.toFixed(1));
             nested.setAttribute("height",  dh.toFixed(1));
@@ -1885,9 +1930,8 @@ async function _exportBuildImage() {
             const dateStr = (EFTForge.state.lang || "en") === "zh"
                 ? `生成于${mm}/${dd}/${yyyy}`
                 : `Generated: ${mm}/${dd}/${yyyy}`;
-            mkText(svg, dateStr, 6, (wmY + dh + 3).toFixed(1), 6, "#555");
+            mkText(svg, dateStr, IMG_W - 4, (wmY + dh + 3).toFixed(1), 6, "#555", { anchor: "end" });
         } catch {
-            mkText(svg, "EFTForge", 6, TOTAL_H - 14, 9, "#555");
             const now = new Date();
             const mm  = String(now.getMonth() + 1).padStart(2, "0");
             const dd  = String(now.getDate()).padStart(2, "0");
@@ -1895,7 +1939,8 @@ async function _exportBuildImage() {
             const dateStr = (EFTForge.state.lang || "en") === "zh"
                 ? `生成于${mm}/${dd}/${yyyy}`
                 : `Generated: ${mm}/${dd}/${yyyy}`;
-            mkText(svg, dateStr, 6, TOTAL_H - 4, 6, "#555");
+            mkText(svg, "EFTForge", IMG_W - 4, TOTAL_H - 14, 9, "#555", { anchor: "end" });
+            mkText(svg, dateStr, IMG_W - 4, TOTAL_H - 4, 6, "#555", { anchor: "end" });
         }
 
         if (wFontStyleText) {

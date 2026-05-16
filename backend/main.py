@@ -474,15 +474,15 @@ def health_check(request: Request, db: Session = Depends(get_db)):
 # Asset proxy (used by graph export to bypass CORS on assets.tarkov.dev)
 # ---------------------------------------------------
 
-_PROXY_ALLOWED_HOST = "assets.tarkov.dev"
+_PROXY_ALLOWED_HOSTS = {"assets.tarkov.dev", "image-gen.tarkov-changes.com"}
 
 @app.get("/proxy-asset")
 def proxy_asset(url: str, request: Request):
     from urllib.parse import urlparse
     import requests as _req
     parsed = urlparse(url)
-    if parsed.netloc != _PROXY_ALLOWED_HOST or parsed.scheme != "https":
-        raise HTTPException(status_code=400, detail="Only https://assets.tarkov.dev URLs are allowed")
+    if parsed.netloc not in _PROXY_ALLOWED_HOSTS or parsed.scheme != "https":
+        raise HTTPException(status_code=400, detail="URL not in proxy allowlist")
     try:
         r = _req.get(url, timeout=8, stream=True)
         r.raise_for_status()

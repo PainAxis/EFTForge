@@ -58,6 +58,7 @@ async function renderFullTree(preserveScroll = true) {
                         ${t("ui.imgGen")}
                         <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
                     </button>
+                    <button class="toggle-btn ag-export-img-btn" data-tooltip="${t("build.exportImg")}" onclick="exportBuildImage()" style="margin-right:4px;"><svg width="13" height="13" viewBox="0 0 13 13" fill="none" style="display:block"><polyline points="6.5,1 6.5,8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><polyline points="3.5,6 6.5,9 9.5,6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="1.5" y="10.5" width="10" height="1" rx="0.5" fill="currentColor"/></svg></button>
                     <button id="view-list-btn" class="toggle-btn${!EFTForge.state.gridView ? ' active' : ''}" onclick="showListView()">&#9776;</button>
                     <button id="view-grid-btn" class="toggle-btn${EFTForge.state.gridView  ? ' active' : ''}" onclick="showGridView()">&#9783;</button>
                 </span>

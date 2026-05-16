@@ -416,6 +416,43 @@ function scheduleBuildPreview() {
     }, 350);
 }
 
+// Fetch the generated build image URL for export purposes.
+// Always fires a fresh API request regardless of the _bpEnabled toggle.
+// Returns the generated URL on success, or the appropriate static fallback.
+async function _bpFetchForExport() {
+    const gun = EFTForge.state.currentGun;
+    if (!gun) return null;
+
+    const key = _bpPairsKey();
+
+    // Already have a valid generated URL for this exact build - reuse it.
+    if (key === _bpLastKey && _bpLastImageUrl) return _bpLastImageUrl;
+
+    // Bare/stripped build
+    if (key === "") return gun.bare_image_512_link || gun.image_512_link || gun.icon_link || null;
+
+    // Factory configuration
+    if (key === EFTForge.state.factoryPairsKey) return gun.image_512_link || gun.icon_link || null;
+
+    // Custom build - fire a dedicated export request (does not interfere with the
+    // normal inflight since it uses its own fetch and doesn't update shared state).
+    const sptData = _bpBuildSptItems();
+    if (!sptData) return null;
+    try {
+        const resp = await fetch(
+            `${EFTForge.config.API_BASE}/build-image`,
+            { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sptData) }
+        );
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return data.image_url || null;
+    } catch {
+        return null;
+    }
+}
+
+window.fetchBuildImageForExport = _bpFetchForExport;
+
 // Reset state when the gun changes
 function resetBuildPreview() {
     clearTimeout(_bpDebounceTimer);
