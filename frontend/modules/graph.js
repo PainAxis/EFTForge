@@ -29,6 +29,7 @@ let _graphZoomLerpRaf      = null;  // rAF handle for zoom lerp loop
 let _graphSVGInitDone      = false; // whether intro animation has played for this session
 let _graphLerpEndNull      = false; // whether the current lerp should end with _graphView = null (reset)
 let _graphScrollHintTimer  = null;  // debounce timer for plain-scroll hint overlay
+let _graphScrollHintShown  = false; // true after hint has fired once this session
 
 // -- Custom items (search & add feature) --
 let _graphCustomItems      = [];    // array of custom plot items (see _addCustomGun/_addCustomAttachment)
@@ -1428,9 +1429,10 @@ function _buildGraphSVG(container, { fromLerp = false } = {}) {
 // ===================================================================
 
 function _showGraphScrollHint(container) {
-    if (!_graphHintsEnabled) return;
+    if (!_graphHintsEnabled || _graphScrollHintShown) return;
     const body = container.closest(".graph-body");
     if (!body) return;
+    _graphScrollHintShown = true;
     let hint = body.querySelector(".graph-scroll-hint");
     if (!hint) {
         hint = document.createElement("div");
