@@ -2216,7 +2216,33 @@ function _buildComboRow(entry) {
             if (rhVal) { const dt = rhDelta !== 0 ? ` <span style="color:${rhDelta <= 0 ? "#4CAF50" : "#f44336"}">(${rhDelta > 0 ? "+" : ""}${Math.round(rhDelta)})</span>` : ""; rhVal.innerHTML = `<span style="color:#eee">${Math.round(refRecoilH)}</span>${dt}`; }
         }
 
-        _setExtraStats(entry.simWeight, entry.simEED);
+        let displayWeight = entry.simWeight;
+        let displayEED    = entry.simEED;
+        if (EFTForge.state.assumeFullMag) {
+            // Find which magazine would be loaded after installing the combo
+            let magCap = entry.parentEntry.item.magazine_capacity > 0
+                ? entry.parentEntry.item.magazine_capacity
+                : (entry.childItems.find(ci => ci.magazine_capacity > 0)?.magazine_capacity ?? null);
+            // If combo doesn't include a magazine, find the currently installed one
+            if (magCap == null && EFTForge.state.buildTree) {
+                const stack = [EFTForge.state.buildTree];
+                outer: while (stack.length) {
+                    const node = stack.pop();
+                    for (const id in node.children) {
+                        const child = node.children[id];
+                        if (child.item?.magazine_capacity > 0) { magCap = child.item.magazine_capacity; break outer; }
+                        stack.push(child);
+                    }
+                }
+            }
+            if (magCap != null) {
+                const ammoSelect = document.getElementById("ammo-select");
+                const ammoWeightPerRound = EFTForge.state.ammoWeightMap?.[ammoSelect?.value] ?? 0;
+                displayWeight += ammoWeightPerRound * magCap;
+                displayEED    -= 15 * ammoWeightPerRound * magCap;
+            }
+        }
+        _setExtraStats(displayWeight, displayEED);
     });
 
     row.addEventListener("mouseleave", () => {
