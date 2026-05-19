@@ -108,6 +108,7 @@ function _cleanupGraphState() {
 }
 
 function setGraphView(wantGraph) {
+    if (isMobileLayout() && wantGraph) return;
     if (EFTForge.state.graphMode === wantGraph) return;
     EFTForge.state.graphMode = wantGraph;
 

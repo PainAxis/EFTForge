@@ -2035,6 +2035,7 @@ function _animateWorkbench() {
 }
 
 function showGridView() {
+    if (isMobileLayout()) return;
     if (EFTForge.state.gridView) return;
     EFTForge.state.gridView = true;
     try { localStorage.setItem("eftforge_grid_view", "1"); } catch (_) {}
@@ -2069,7 +2070,8 @@ function _updateTreeViewToggle() {
 window._updateTreeViewToggle = _updateTreeViewToggle;
 
 // Restore preference from localStorage on load. Grid is the default for first-time visitors.
-EFTForge.state.gridView = localStorage.getItem("eftforge_grid_view") !== "0";
+// Mobile always uses list view.
+EFTForge.state.gridView = !isMobileLayout() && localStorage.getItem("eftforge_grid_view") !== "0";
 
 // ============================================================
 // Grid conflict flash

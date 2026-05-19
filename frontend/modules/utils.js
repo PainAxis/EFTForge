@@ -2,6 +2,15 @@ window.EFTForge = window.EFTForge || {};
 
 window.EFTForge.utils = {};
 
+/* --- Mobile detection --- */
+
+function isMobileLayout() {
+    const hasTouch = navigator.maxTouchPoints > 0;
+    const hasCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+    const mobileUA = /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent);
+    return (hasTouch && hasCoarsePointer) || (hasTouch && mobileUA);
+}
+
 /* --- Cache --- */
 
 const CACHE_MAX = 300;

@@ -9,8 +9,8 @@ window.EFTForge.config = {
 
     IS_LOCAL_DEV: _isLocalDev,
 
-    APP_VERSION:    "v1.2.1",
-    APP_BUILD_DATE: "2026-05-18T04:28:45.722Z", // UTC - run new Date().toISOString() in console when bumping version
+    APP_VERSION:    "Development Build",
+    APP_BUILD_DATE: "2026-05-19T04:52:42.758Z", // UTC - run new Date().toISOString() in console when bumping version
 
     CALIBER_DISPLAY_MAP: {
         "Caliber20x1mm":      "20x1mm disk",

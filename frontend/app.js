@@ -183,21 +183,11 @@ async function init() {
 }
 
 /* ===========================
-   MOBILE WARNING
-=========================== */
-
-function isMobileLayout() {
-    const hasTouch = navigator.maxTouchPoints > 0;
-    const hasCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
-    const mobileUA = /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent);
-    return (hasTouch && hasCoarsePointer) || (hasTouch && mobileUA);
-}
-
-/* ===========================
    HEADER EXPAND
 =========================== */
 
 function _setHeaderExpanded(expanded) {
+    if (isMobileLayout() && expanded) return;
     // Skip if already animating or already in the target state
     const header = document.querySelector("header");
     const alreadyExpanded = header.classList.contains("header-expanded");
@@ -232,7 +222,8 @@ function _syncHeaderExpand() {
 
     const container = document.getElementById("main-container");
     const isGunSelect = container.classList.contains("no-gun");
-    document.querySelector("header").classList.toggle("header-expanded", isGunSelect);
+    // Mobile always stays collapsed
+    document.querySelector("header").classList.toggle("header-expanded", isGunSelect && !isMobileLayout());
     const ws = document.getElementById("weapon-selector");
     _headerLastScroll = ws ? ws.scrollTop : 0;
 }

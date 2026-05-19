@@ -5656,6 +5656,7 @@ body[data-mobile="true"] .right-panel {
 }
 
 body[data-mobile="true"].mobile-right-open .right-panel { transform: translateY(0); }
+body[data-mobile="true"] .container:not(.no-gun) .right-panel { background-color: #111; }
 
 /* Dim backdrop behind the open drawer */
 body[data-mobile="true"].mobile-right-open::before {
@@ -5789,6 +5790,28 @@ body[data-mobile="true"] .cb-stat { padding: 3px 4px; }
 body[data-mobile="true"] .cb-stat-label { font-size: 8px; }
 body[data-mobile="true"] .cb-stat-val { font-size: 11px; }
 body[data-mobile="true"] .cb-card-footer { padding: 4px 6px; }
+
+/* Mobile: attachment table - name column only */
+body[data-mobile="true"] .attachment-table th:not(:first-child),
+body[data-mobile="true"] .attachment-table td:not(:first-child) { display: none !important; }
+
+/* Mobile: attachment table header */
+body[data-mobile="true"] .att-table-header h3 { font-size: 13px; }
+body[data-mobile="true"] .att-table-header-toggles { flex-direction: column; align-items: center; gap: 6px; }
+
+/* Mobile: disabled features */
+body[data-mobile="true"] #view-grid-btn { display: none !important; }
+body[data-mobile="true"] #graph-view-btn { display: none !important; }
+body[data-mobile="true"] .ag-export-img-btn { display: none !important; }
+body[data-mobile="true"] #compare-toggle-btn { display: none !important; }
+
+/* Mobile: prevent horizontal overflow in left panel */
+body[data-mobile="true"] #left-build-area { overflow-x: hidden; max-width: 100%; }
+body[data-mobile="true"] #stats { overflow-x: hidden; max-width: 100%; }
+body[data-mobile="true"] #slots { max-width: 100%; }
+body[data-mobile="true"] .stats-section { overflow-x: hidden; }
+body[data-mobile="true"] #build-controls { flex-wrap: wrap; }
+body[data-mobile="true"] #build-controls .back-button { white-space: normal; min-width: 0; }
 
 /* =============================================
    PORTRAIT PHONE - cosmetic only

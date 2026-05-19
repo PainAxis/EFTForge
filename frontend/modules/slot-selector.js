@@ -228,8 +228,9 @@ async function openSlotSelector(parentNode, slot) {
     const seq = ++_slotLoadSeq;
     const _stale = () => seq !== _slotLoadSeq;
 
-    // If this slot is already open, do nothing
+    // If this slot is already open, just re-open the mobile drawer and return
     if (EFTForge.state.lastParentNode === parentNode && EFTForge.state.lastSlot && EFTForge.state.lastSlot.id === slot.id) {
+        openMobileRightPanel();
         return;
     }
 
@@ -752,6 +753,7 @@ function togglePurchasableOnly() {
 }
 
 function toggleCompareMode() {
+    if (isMobileLayout()) return;
     // Disable combo mode if enabling compare
     if (!EFTForge.state.compareMode && EFTForge.state.comboMode) {
         _abortComboCalc();
@@ -1448,7 +1450,7 @@ function renderAttachmentRows(items) {
   }
 
   tbody.appendChild(fragment);
-  _initMarqueeText(tbody, { hoverOnly: true });
+  _initMarqueeText(tbody, { hoverOnly: !isMobileLayout() });
   _cacheStatBarEls();
 }
 
@@ -2352,7 +2354,7 @@ function _renderComboRows(items) {
                 if (s) s.remove();
                 if (_comboSpacer) { _comboSpacer.remove(); _comboSpacer = null; }
                 _disconnectComboObserver();
-                _initMarqueeText(tbody, { hoverOnly: true });
+                _initMarqueeText(tbody, { hoverOnly: !isMobileLayout() });
                 _cacheStatBarEls();
                 return;
             }
@@ -2370,7 +2372,7 @@ function _renderComboRows(items) {
         requestAnimationFrame(_tryRenderMore);
     }
 
-    _initMarqueeText(tbody, { hoverOnly: true });
+    _initMarqueeText(tbody, { hoverOnly: !isMobileLayout() });
     _cacheStatBarEls();
 }
 
