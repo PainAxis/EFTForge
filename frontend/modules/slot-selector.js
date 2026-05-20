@@ -349,8 +349,8 @@ async function openSlotSelector(parentNode, slot) {
                     <th id="th-weight" onclick="changeSort('weight')">
                         ${t("th.weight")} <span class="sort-indicator"></span>
                     </th>
-                    <th id="th-recoil" onclick="changeSort('recoil')">
-                        ${t("th.recoil")} <span class="sort-indicator"></span>
+                    <th id="th-recoil" onclick="changeSort('recoil')" data-tooltip="${escapeHtml(t('th.recoilTooltipList'))}">
+                        <span id="th-recoil-label">${t("th.recoilList")}</span> <span class="sort-indicator"></span>
                     </th>
                     <th id="th-acc" onclick="changeSort('acc')">
                         ${t("th.accuracy")} <span class="sort-indicator"></span>
@@ -1578,6 +1578,9 @@ function setListView() {
 
     _updateViewBtns();
     _updateGraphHeader();
+    document.getElementById("th-recoil")?.setAttribute("data-tooltip", EFTForge.lang.t("th.recoilTooltipList"));
+    const _recoilLabelList = document.getElementById("th-recoil-label");
+    if (_recoilLabelList) _recoilLabelList.textContent = EFTForge.lang.t("th.recoilList");
 
     const slideTable = document.querySelector(".attachment-table");
     if (slideTable) {
@@ -1608,6 +1611,9 @@ function setComboView(wantCombo) {
     EFTForge.state.comboMode = true;
     _updateViewBtns();
     _updateGraphHeader();
+    document.getElementById("th-recoil")?.setAttribute("data-tooltip", EFTForge.lang.t("th.recoilTooltipCombo"));
+    const _recoilLabelCombo = document.getElementById("th-recoil-label");
+    if (_recoilLabelCombo) _recoilLabelCombo.textContent = EFTForge.lang.t("th.recoilCombo");
 
     const slideTableCombo = document.querySelector(".attachment-table");
     if (slideTableCombo) {
