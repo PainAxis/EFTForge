@@ -942,7 +942,7 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
           panel.className = "stamina-panel";
           panel.id = "equip-ergo-panel";
           panel.innerHTML = `
-                <div class="stamina-disclaimer"><strong style="color:#eee;">${t("stats.eedLabel")}</strong> ${t("stats.eedDesc")}${_lang() === "zh" ? ` <a href="https://www.bilibili.com/video/BV19uAGz1EFX" target="_blank" rel="noopener" style="color:#aad4f5;">MAJ_Kelvin 的视频详解</a>` : ""}</div>
+                <div class="stamina-disclaimer"><strong style="color:#eee;">${t("stats.eedLabel")}</strong> ${t("stats.eedDesc")}${_lang() === "zh" ? ` <a href="https://www.bilibili.com/video/BV19uAGz1EFX" target="_blank" rel="noopener" style="color:#aad4f5;">MAJ_Kelvin 的视频详解</a>` : ` <a href="https://www.youtube.com/watch?v=zVZ8gSk666g&t" target="_blank" rel="noopener" style="color:#aad4f5;">SpaceMonkey37's video</a>`}</div>
                 <div class="stamina-disclaimer"><strong style="color:#eee;">${t("stats.overswing")}</strong> ${t("stats.overswingDesc")}</div>
               <div class="strength-control">
                   <label style="color:#eee;">${t("stats.equipErgoLabel")}</label>
