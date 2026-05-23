@@ -226,9 +226,14 @@ window.EFTForge.leaderboard = (function () {
                 return;
             }
             html += buildData.map(function (entry, idx) {
-                var authorName = lang === 'zh'
-                    ? (entry.author_display_name_zh || entry.author_display_name || 'Tarkov Citizen')
-                    : (entry.author_display_name || 'Tarkov Citizen');
+                var authorName;
+                if (entry.is_admin_build) {
+                    authorName = lang === 'zh'
+                        ? (entry.author_display_name_zh || entry.author_display_name || 'Morph1ne')
+                        : (entry.author_display_name || 'Morph1ne');
+                } else {
+                    authorName = entry.user_display_name || t('modal.anonymousAuthor');
+                }
                 var rankClass = entry.rank === 1 ? ' lb-rank-gold' : entry.rank === 2 ? ' lb-rank-silver' : entry.rank === 3 ? ' lb-rank-bronze' : '';
                 var gunObj    = allGuns.find(function (g) { return g.id === entry.gun_id; });
                 var gunName   = (gunObj && gunObj.name) || entry.gun_name || entry.gun_id;
@@ -236,8 +241,10 @@ window.EFTForge.leaderboard = (function () {
                 var imgHtml   = imgSrc
                     ? '<img class="lb-build-img" src="' + _escHtml(imgSrc) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
                     : '<div class="lb-build-img-placeholder"></div>';
-                var avatarSrc = entry.author_avatar_url || (entry.is_admin_build ? './news/images/devProfilePic.jpg' : './assets/images/tarkovcitizen.jpg');
-                var avatarHtml = '<img class="lb-author-avatar" src="' + _escHtml(avatarSrc) + '" alt="" loading="lazy" referrerpolicy="no-referrer">';
+                var avatarSrc = entry.is_admin_build
+                    ? (entry.author_avatar_url || './news/images/devProfilePic.jpg')
+                    : (entry.user_avatar_url   || './assets/images/tarkovcitizen.jpg');
+                var avatarHtml = '<img class="lb-author-avatar" src="' + _escHtml(avatarSrc) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.src=\'./assets/images/tarkovcitizen.jpg\';this.onerror=null;">';
                 return (
                     '<li class="lb-entry lb-entry-build" style="--lb-i:' + idx + '" data-idx="' + (_cache[_cacheKey()].indexOf(entry)) + '">' +
                     '<span class="lb-rank' + rankClass + '">' + entry.rank + '</span>' +
@@ -302,10 +309,16 @@ window.EFTForge.leaderboard = (function () {
 
         var t    = EFTForge.lang.t;
         var lang = EFTForge.state && EFTForge.state.lang;
-        var authorName = lang === 'zh'
-            ? (build.author_display_name_zh || build.author_display_name || (build.is_admin_build ? 'Morph1ne' : t('modal.anonymousAuthor')))
-            : (build.author_display_name || (build.is_admin_build ? 'Morph1ne' : t('modal.anonymousAuthor')));
-        var avatarUrl = build.author_avatar_url || (build.is_admin_build ? './news/images/devProfilePic.jpg' : null);
+        var authorName, avatarUrl;
+        if (build.is_admin_build) {
+            authorName = lang === 'zh'
+                ? (build.author_display_name_zh || build.author_display_name || 'Morph1ne')
+                : (build.author_display_name || 'Morph1ne');
+            avatarUrl = build.author_avatar_url || './news/images/devProfilePic.jpg';
+        } else {
+            authorName = build.user_display_name || t('modal.anonymousAuthor');
+            avatarUrl  = build.user_avatar_url   || null;
+        }
 
         var communityBuildInfo = {
             pairsKey:     _pairsKey(build.pairs),

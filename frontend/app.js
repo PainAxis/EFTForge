@@ -1,6 +1,8 @@
 
 // Guard variables - declared at top to avoid TDZ errors from hoisted function calls below.
 let _syncNoticeInterval = null;
+let _syncStatusInterval = null;
+let _syncStatusToast    = null;
 let _clockInterval      = null;
 let _langSwitching      = false;
 let _headerLastScroll   = 0;
@@ -116,6 +118,23 @@ async function init() {
         return;
     }
 
+    // Undo / Redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z)
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        const tag2 = document.activeElement.tagName;
+        if (tag2 !== "INPUT" && tag2 !== "TEXTAREA") {
+            if (e.key === "z" && !e.shiftKey) {
+                e.preventDefault();
+                undoBuildAction();
+                return;
+            }
+            if ((e.key === "y") || (e.key === "z" && e.shiftKey)) {
+                e.preventDefault();
+                redoBuildAction();
+                return;
+            }
+        }
+    }
+
     // Ignore if user is already typing in an input
     const tag = document.activeElement.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA") return;
@@ -178,6 +197,7 @@ async function init() {
     renderSavedBuildsList();
 
     scheduleSyncNotice();
+    startSyncStatusPolling();
 
     initPanelResizer();
 }
@@ -372,6 +392,35 @@ function scheduleSyncNotice() {
 
     checkAndNotify();
     _syncNoticeInterval = setInterval(checkAndNotify, 60000);
+}
+
+/* ===========================
+   LIVE SYNC STATUS POLLING
+=========================== */
+
+async function _checkSyncStatus() {
+    try {
+        const res = await fetch(`${EFTForge.config.API_BASE}/sync-status`, { cache: "no-store" });
+        if (!res.ok) return;
+        const { sync_running } = await res.json();
+        if (sync_running) {
+            if (!_syncStatusToast || !_syncStatusToast.isConnected) {
+                const { t } = EFTForge.lang;
+                _syncStatusToast = showToast(t("toast.syncRunningTitle"), t("toast.syncRunningMsg"), 0, "#f5a623");
+            }
+        } else if (_syncStatusToast && _syncStatusToast.isConnected) {
+            _syncStatusToast.remove();
+            _syncStatusToast = null;
+        }
+    } catch {
+        // ignore - backend temporarily unreachable
+    }
+}
+
+function startSyncStatusPolling() {
+    if (_syncStatusInterval !== null) return;
+    _checkSyncStatus();
+    _syncStatusInterval = setInterval(_checkSyncStatus, 15000);
 }
 
 /* ===========================
@@ -776,7 +825,9 @@ function showAboutDialog() {
 
     document.body.appendChild(overlay);
     document.getElementById("about-modal-close").addEventListener("click", () => overlay.remove());
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+    let _mdOnBackdrop = false;
+    overlay.addEventListener("mousedown", e => { _mdOnBackdrop = e.target === overlay; });
+    overlay.addEventListener("click", (e) => { if (e.target === overlay && _mdOnBackdrop) overlay.remove(); });
 
     document.getElementById("about-donate-toggle").addEventListener("click", function () {
         const { t: _t } = EFTForge.lang;
@@ -928,6 +979,7 @@ function applyStaticTranslations() {
     setNavLabel("builds-btn",      "btn.builds");
     setNavLabel("leaderboard-btn", "btn.leaderboard");
     setNavLabel("tracker-btn",     "btn.tracker");
+    if (EFTForge.profile) EFTForge.profile.updateBtn();
 
     if (EFTForge.leaderboard) EFTForge.leaderboard.onLangChange();
     if (EFTForge.tracker)     EFTForge.tracker.onLangChange();
@@ -1616,7 +1668,9 @@ async function switchLang(lang) {
         document.body.appendChild(overlay);
 
         document.getElementById("dev-modal-close").addEventListener("click", () => overlay.remove());
-        overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+        let _mdOnBackdrop = false;
+        overlay.addEventListener("mousedown", e => { _mdOnBackdrop = e.target === overlay; });
+        overlay.addEventListener("click", (e) => { if (e.target === overlay && _mdOnBackdrop) overlay.remove(); });
 
         document.getElementById("dev-grid-tool-toggle").addEventListener("click", function () {
             const tb = document.getElementById("ag-dev-toolbar");

@@ -287,4 +287,124 @@ async function fetchStatChangelog() {
     return res.json();
 }
 
-EFTForge.api = { fetchTraders, fetchGuns, fetchGunInit, fetchAmmo, fetchItemSlots, fetchSlotAllowedItems, calculateBuild, validateBuild, batchProcessCandidates, comboBatchProcess, comboFull, fetchFleaPrices, fetchBulkRatings, postVote, deleteVote, fetchBulkBuildRatings, postBuildVote, deleteBuildVote, publishBuild, fetchPublicBuilds, recordBuildLoad, unlistBuild, fetchBanStatus, fetchNotifications, fetchAnnouncements, fetchLeaderboardBuilds, fetchLeaderboardAttachments, fetchStatChangelog };
+async function fetchBuildComments(buildId) {
+    const res = await fetch(`${_base()}/builds/${encodeURIComponent(buildId)}/comments`, {
+        headers: { "X-Client-ID": _getClientId() },
+    });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    return res.json();
+}
+
+async function deleteOwnComment(buildId, commentId) {
+    const res = await fetch(`${_base()}/builds/${encodeURIComponent(buildId)}/comments/${encodeURIComponent(commentId)}`, {
+        method:  "DELETE",
+        headers: { "X-Client-ID": _getClientId() },
+    });
+    if (!res.ok) throw new Error(`Delete comment failed: ${res.status}`);
+    return res.json();
+}
+
+async function postBuildComment(buildId, content) {
+    const profile = (EFTForge.profile && EFTForge.profile.getProfile()) || {};
+    const res = await fetch(`${_base()}/builds/${encodeURIComponent(buildId)}/comments`, {
+        method:  "POST",
+        headers: _clientHeaders(),
+        body:    JSON.stringify({
+            content,
+            user_display_name: profile.username   || null,
+            user_avatar_url:   profile.avatar_url || null,
+        }),
+    });
+    if (!res.ok) {
+        let detail = `Error ${res.status}`;
+        try { detail = (await res.json()).detail || detail; } catch {}
+        throw new Error(detail);
+    }
+    return res.json();
+}
+
+async function adminDeleteComment(commentId) {
+    const adminKey = localStorage.getItem("eftforge_admin_key") || "";
+    const res = await fetch(`${_base()}/admin/builds/comments/${encodeURIComponent(commentId)}`, {
+        method:  "DELETE",
+        headers: { "X-Admin-Key": adminKey },
+    });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    return res.json();
+}
+
+async function uploadAvatar(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const b64 = e.target.result.split(",")[1];
+            try {
+                const res = await fetch(`${_base()}/profile/avatar`, {
+                    method:  "POST",
+                    headers: _clientHeaders(),
+                    body:    JSON.stringify({ image_b64: b64, mime_type: file.type }),
+                });
+                if (!res.ok) {
+                    const j = await res.json().catch(() => ({}));
+                    reject(new Error(j.detail || `Upload failed: ${res.status}`));
+                    return;
+                }
+                resolve(await res.json());
+            } catch (err) {
+                reject(err);
+            }
+        };
+        reader.onerror = () => reject(new Error("Failed to read image file."));
+        reader.readAsDataURL(file);
+    });
+}
+
+async function updateUserProfile(username, avatarUrl) {
+    const res = await fetch(`${_base()}/profile/update`, {
+        method:  "POST",
+        headers: _clientHeaders(),
+        body:    JSON.stringify({ username: username || null, avatar_url: avatarUrl || null }),
+    });
+    if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.detail || `Server error: ${res.status}`);
+    }
+    return res.json();
+}
+
+async function transferPreview(oldUuid) {
+    const res = await fetch(`${_base()}/profile/transfer/preview`, {
+        method:  "POST",
+        headers: _clientHeaders(),
+        body:    JSON.stringify({ old_uuid: oldUuid }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.detail || `Server error: ${res.status}`);
+    return j;
+}
+
+async function transferAccount(oldUuid) {
+    const profile = EFTForge.profile ? EFTForge.profile.getProfile() : {};
+    const res = await fetch(`${_base()}/profile/transfer`, {
+        method:  "POST",
+        headers: _clientHeaders(),
+        body:    JSON.stringify({
+            old_uuid:   oldUuid,
+            username:   profile.username   || null,
+            avatar_url: profile.avatar_url || null,
+        }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.detail || `Server error: ${res.status}`);
+    return j;
+}
+
+async function fetchMyBuilds() {
+    const res = await fetch(`${_base()}/builds/mine`, {
+        headers: { "X-Client-ID": _getClientId() },
+    });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    return res.json();
+}
+
+EFTForge.api = { fetchTraders, fetchGuns, fetchGunInit, fetchAmmo, fetchItemSlots, fetchSlotAllowedItems, calculateBuild, validateBuild, batchProcessCandidates, comboBatchProcess, comboFull, fetchFleaPrices, fetchBulkRatings, postVote, deleteVote, fetchBulkBuildRatings, postBuildVote, deleteBuildVote, publishBuild, fetchPublicBuilds, fetchMyBuilds, recordBuildLoad, unlistBuild, fetchBanStatus, fetchNotifications, fetchAnnouncements, fetchLeaderboardBuilds, fetchLeaderboardAttachments, fetchStatChangelog, fetchBuildComments, postBuildComment, deleteOwnComment, adminDeleteComment, uploadAvatar, updateUserProfile, transferPreview, transferAccount };

@@ -198,29 +198,73 @@ function setToastStatus(toastEl, text) {
 function _createModalOverlay(id, title, opts = {}) {
     if (document.getElementById(id)) return null;
     const {
-        closeId    = `${id}-close`,
-        bodyId     = `${id}-body`,
-        maxWidth   = "",
-        titleExtra = "",
+        closeId     = `${id}-close`,
+        bodyId      = `${id}-body`,
+        maxWidth    = "",
+        titleExtra  = "",
+        tabs        = null,
+        onTabSwitch = null,
     } = opts;
 
     const overlay = document.createElement("div");
     overlay.id = id;
     overlay.className = "modal-overlay";
-    overlay.innerHTML = `
-        <div class="modal-window"${maxWidth ? ` style="max-width:${maxWidth};"` : ""}>
-            <div class="modal-header">
-                <span class="modal-title">${title}</span>
-                ${titleExtra}
-                <button class="modal-close-btn" id="${closeId}" aria-label="Close dialog">&#x2715;</button>
-            </div>
-            <div class="modal-body" id="${bodyId}"></div>
-        </div>
-    `;
+
+    const winStyle = maxWidth ? ` style="max-width:${maxWidth};"` : "";
+    const headerHtml = `
+        <div class="modal-header">
+            <span class="modal-title">${title}</span>
+            ${titleExtra}
+            <button class="modal-close-btn" id="${closeId}" aria-label="Close dialog">&#x2715;</button>
+        </div>`;
+
+    if (tabs && tabs.length > 0) {
+        const tabBtns = tabs.map((tab, i) =>
+            `<button class="modal-tab${i === 0 ? " active" : ""}" data-target="${tab.id}">${tab.label}</button>`
+        ).join("");
+        const tabPanels = tabs.map((tab, i) =>
+            `<div class="modal-tab-panel${i === 0 ? " active" : ""}" id="${tab.id}"></div>`
+        ).join("");
+        overlay.innerHTML = `
+            <div class="modal-outer">
+                <div class="modal-tab-rail">${tabBtns}</div>
+                <div class="modal-window"${winStyle}>
+                    ${headerHtml}
+                    <div class="modal-body" id="${bodyId}">${tabPanels}</div>
+                </div>
+            </div>`;
+    } else {
+        overlay.innerHTML = `
+            <div class="modal-window"${winStyle}>
+                ${headerHtml}
+                <div class="modal-body" id="${bodyId}"></div>
+            </div>`;
+    }
 
     document.body.appendChild(overlay);
     document.getElementById(closeId).addEventListener("click", () => overlay.remove());
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+    let _mdOnBackdrop = false;
+    overlay.addEventListener("mousedown", e => { _mdOnBackdrop = e.target === overlay; });
+    overlay.addEventListener("click", (e) => { if (e.target === overlay && _mdOnBackdrop) overlay.remove(); });
+
+    if (tabs && tabs.length > 0) {
+        overlay.querySelectorAll(".modal-tab").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const targetId = btn.dataset.target;
+                overlay.querySelectorAll(".modal-tab").forEach(b => b.classList.remove("active"));
+                overlay.querySelectorAll(".modal-tab-panel").forEach(p => p.classList.remove("active"));
+                btn.classList.add("active");
+                const panel = document.getElementById(targetId);
+                if (panel) {
+                    panel.style.animation = "none";
+                    panel.offsetHeight;
+                    panel.style.animation = "";
+                    panel.classList.add("active");
+                }
+                onTabSwitch?.(targetId);
+            });
+        });
+    }
 
     return overlay;
 }

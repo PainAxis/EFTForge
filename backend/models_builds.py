@@ -34,9 +34,11 @@ class PublicBuild(BuildsBase):
     is_rotating    = Column(Boolean, nullable=False, default=False)  # true when this build was promoted by the rotate-featured endpoint
     stats_json     = Column(Text, nullable=True)         # JSON {ergo,recoil_v,recoil_h,weight,eed,overswing,arm_stam}
     total_price_rub = Column(Integer, nullable=True)     # sum of all item trader_price_rub at publish time
-    load_count      = Column(Integer, nullable=False, default=0)  # how many times any user has loaded this build
-    card_image_url  = Column(String, nullable=True)      # optional custom card image (e.g. GitHub raw URL); overrides the default gun image
-    ammo_id         = Column(String, nullable=True)      # selected ammo at save/publish time; restored on load
+    load_count        = Column(Integer, nullable=False, default=0)  # how many times any user has loaded this build
+    card_image_url    = Column(String, nullable=True)      # optional custom card image (e.g. GitHub raw URL); overrides the default gun image
+    ammo_id           = Column(String, nullable=True)      # selected ammo at save/publish time; restored on load
+    user_display_name = Column(String(30), nullable=True)  # self-reported username at publish time
+    user_avatar_url   = Column(String(500), nullable=True) # self-reported avatar URL (Gitee-hosted)
 
     __table_args__ = (
         Index("ix_public_builds_gun_id", "gun_id"),
@@ -100,3 +102,20 @@ class BuildRating(BuildsBase):
     like_count    = Column(Integer, nullable=False, default=0)
     dislike_count = Column(Integer, nullable=False, default=0)
     last_updated  = Column(DateTime, nullable=False, default=_utcnow)
+
+
+class BuildComment(BuildsBase):
+    __tablename__ = "build_comments"
+
+    id                = Column(Integer, primary_key=True, autoincrement=True)
+    build_id          = Column(Integer, nullable=False)
+    ip_hash           = Column(String, nullable=False)
+    content           = Column(String(280), nullable=False)
+    created_at        = Column(DateTime, nullable=False, default=_utcnow)
+    is_deleted        = Column(Boolean, nullable=False, default=False)
+    user_display_name = Column(String(30), nullable=True)
+    user_avatar_url   = Column(String(500), nullable=True)
+
+    __table_args__ = (
+        Index("ix_build_comments_build_id", "build_id"),
+    )

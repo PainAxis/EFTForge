@@ -455,6 +455,8 @@ async function selectGun(gun, liElement) {
     EFTForge.state.lastParentNode = null;
     EFTForge.state.lastSlot = null;
     EFTForge.state.lastProcessedItems = [];
+    EFTForge.state.buildHistory = [];
+    EFTForge.state.buildFuture  = [];
 
   EFTForge.state.buildTree = {
     item: gun,

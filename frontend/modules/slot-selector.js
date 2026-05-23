@@ -109,6 +109,46 @@ async function handleVoteClick(event, itemId, vote) {
     _refreshRatingCells();
 }
 
+// ---------------------------------------------------
+// Attachment favorites
+// ---------------------------------------------------
+
+let _favorites = null;
+let _favoritesFilter = false;
+
+function _getFavorites() {
+    if (!_favorites) {
+        try { _favorites = new Set(JSON.parse(localStorage.getItem("eftforge_favorites") || "[]")); }
+        catch { _favorites = new Set(); }
+    }
+    return _favorites;
+}
+
+function _saveFavorites() {
+    try { localStorage.setItem("eftforge_favorites", JSON.stringify([..._getFavorites()])); } catch {}
+}
+
+function toggleFavoritesFilter() {
+    _favoritesFilter = !_favoritesFilter;
+    const btn = document.getElementById("favorites-filter-btn");
+    if (btn) btn.classList.toggle("active", _favoritesFilter);
+    applyAttachmentSort();
+}
+window.toggleFavoritesFilter = toggleFavoritesFilter;
+
+function handleFavClick(event, itemId) {
+    event.stopPropagation();
+    const favs = _getFavorites();
+    if (favs.has(itemId)) favs.delete(itemId);
+    else favs.add(itemId);
+    _saveFavorites();
+    document.querySelectorAll(`.att-fav-btn[data-item-id="${CSS.escape(itemId)}"]`).forEach(btn => {
+        btn.classList.toggle("active", favs.has(itemId));
+    });
+    applyAttachmentSort();
+}
+window.handleFavClick = handleFavClick;
+
 // Cached references to the stat bar DOM elements (stable while panel is open)
 let _statBarEls = null;
 
@@ -299,6 +339,10 @@ async function openSlotSelector(parentNode, slot) {
             ${headerImgHtml}
             <h3>${t("ui.selectAttFor")}<strong>${escapeHtml(tSlot(slot.slot_name))}</strong></h3>
             <div class="att-table-header-toggles">
+                <button id="favorites-filter-btn" class="compare-toggle${_favoritesFilter ? ' active' : ''}" onclick="toggleFavoritesFilter()">
+                    ★ ${t("ui.favorites")}
+                    <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
+                </button>
                 <button id="purchasable-toggle-btn" class="compare-toggle${EFTForge.state.purchasableOnly ? ' active' : ''}" onclick="togglePurchasableOnly()" data-tooltip="${escapeHtml(t("ui.purchasableOnlyTip"))}">
                     ${t("ui.purchasableOnly")}
                     <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
@@ -578,7 +622,18 @@ function applyAttachmentSort() {
       });
   }
 
+  if (_favoritesFilter) {
+      const favs = _getFavorites();
+      itemsToRender = itemsToRender.filter(entry => favs.has(entry.item.id));
+  }
+
+  const _favSet = _getFavorites();
+
   itemsToRender.sort((a, b) => {
+    // Favorites always pin to top
+    const aFav = _favSet.has(a.item.id);
+    const bFav = _favSet.has(b.item.id);
+    if (aFav !== bFav) return aFav ? -1 : 1;
 
     // ---------- PRIMARY SORT ----------
     let primary;
@@ -1051,9 +1106,12 @@ function renderAttachmentRows(items) {
         evoCell      = `<td class="${contribution >= 0 ? "positive" : "negative"}">${contribution >= 0 ? "+" : ""}${contribution.toFixed(1)}</td>`;
     }
 
+    const isFav = _getFavorites().has(item.id);
     row.innerHTML = `
         <td class="name-cell">
             <div class="attachment-name-wrapper">
+
+                <button class="att-fav-btn${isFav ? ' active' : ''}" data-item-id="${escapeHtml(item.id)}" onclick="handleFavClick(event,'${escapeHtml(item.id)}')" title="${escapeHtml(t('ui.favorites'))}">★</button>
 
                 <div class="attachment-icon-wrapper">
                     <img
@@ -1444,6 +1502,13 @@ function renderAttachmentRows(items) {
     });
 
     fragment.appendChild(row);
+  }
+
+  if (items.length === 0) {
+      const emptyRow = document.createElement("tr");
+      emptyRow.className = "att-empty-row";
+      emptyRow.innerHTML = `<td colspan="9" style="text-align:center;padding:18px 0;color:#666;font-size:13px;">${t("ui.noAttachments")}</td>`;
+      fragment.appendChild(emptyRow);
   }
 
   tbody.appendChild(fragment);

@@ -1,11 +1,12 @@
 window.EFTForge = window.EFTForge || {};
 
 window.EFTForge.mediaViewer = (function () {
-    var _overlay = null;
-    var _img     = null;
-    var _scale   = 1;
-    var _panX    = 0;
-    var _panY    = 0;
+    var _overlay       = null;
+    var _img           = null;
+    var _scale         = 1;
+    var _panX          = 0;
+    var _panY          = 0;
+    var _mdOnBackdrop  = false;
 
     function open(src) {
         if (_overlay) _destroy();
@@ -54,7 +55,7 @@ window.EFTForge.mediaViewer = (function () {
     }
 
     function _onOverlayClick(e) {
-        if (e.target === _overlay) close();
+        if (e.target === _overlay && _mdOnBackdrop) close();
     }
 
     function _onKeyDown(e) {
@@ -79,6 +80,7 @@ window.EFTForge.mediaViewer = (function () {
     }
 
     function _onMouseDown(e) {
+        _mdOnBackdrop = e.target === _overlay;
         if (e.button !== 1) return;
         e.preventDefault();
         var startX = e.clientX - _panX;

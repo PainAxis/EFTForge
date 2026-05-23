@@ -443,6 +443,7 @@ function flashConflictSlotElement(el) {
 }
 
 async function installAttachment(parentNode, slotId, item) {
+    pushBuildHistory();
 
     parentNode.children[slotId] = { item, children: {} };
 
@@ -484,6 +485,7 @@ async function installAttachment(parentNode, slotId, item) {
 }
 
 function removeAttachment(parentNode, slotId, keepTableOpen = false) {
+    pushBuildHistory();
 
     const removedNode = parentNode.children[slotId];
 
@@ -623,4 +625,81 @@ function collectAttachmentIds(node) {
     ids = ids.concat(collectAttachmentIds(child));
   }
   return ids;
+}
+
+// ---------------------------------------------------
+// Undo / Redo
+// ---------------------------------------------------
+
+function pushBuildHistory() {
+    if (!EFTForge.state.buildTree) return;
+    const pairs = collectSlotPairs(EFTForge.state.buildTree);
+    EFTForge.state.buildHistory.push(pairs);
+    if (EFTForge.state.buildHistory.length > 30) EFTForge.state.buildHistory.shift();
+    EFTForge.state.buildFuture = [];
+}
+
+async function _restoreBuildFromPairs(pairs) {
+    if (!EFTForge.state.buildTree || !EFTForge.state.currentGun) return;
+
+    EFTForge.state.buildTree.children = {};
+    EFTForge.state.processedCache = {};
+
+    for (const [slotId, itemId] of pairs) {
+        if (!EFTForge.state.allowedCache[slotId]) {
+            try {
+                const allowed = await fetchSlotAllowedItems(slotId);
+                cacheSet(EFTForge.state.allowedCache, slotId, allowed);
+            } catch {}
+        }
+        const allowed = EFTForge.state.allowedCache[slotId];
+        if (!allowed) continue;
+
+        const itemObj = allowed.find(i => i.id === itemId);
+        if (!itemObj) continue;
+
+        const slotToParent = {};
+        buildSlotParentMap(EFTForge.state.buildTree, slotToParent);
+
+        const parentNode = slotToParent[slotId];
+        if (!parentNode) continue;
+
+        parentNode.children[slotId] = { item: itemObj, children: {} };
+
+        if (!EFTForge.state.slotCache[itemObj.id]) {
+            try {
+                const slots = await fetchItemSlots(itemObj.id);
+                cacheSet(EFTForge.state.slotCache, itemObj.id, slots);
+            } catch {}
+        }
+    }
+
+    // Close the attachment table since the build state changed
+    const box = document.getElementById("attachment-table-container");
+    if (box) box.innerHTML = "";
+    const placeholder = document.getElementById("attachment-placeholder");
+    if (placeholder) placeholder.style.display = "flex";
+    document.querySelectorAll(".tree-slot.active-slot").forEach(el => el.classList.remove("active-slot"));
+    EFTForge.state.lastSlot       = null;
+    EFTForge.state.lastParentNode = null;
+
+    await renderFullTree(false);
+    await refreshBuildStats();
+    syncBuildDisplayName();
+}
+
+async function undoBuildAction() {
+    if (!EFTForge.state.buildHistory.length) return;
+    const currentPairs = collectSlotPairs(EFTForge.state.buildTree);
+    EFTForge.state.buildFuture.push(currentPairs);
+    if (EFTForge.state.buildFuture.length > 30) EFTForge.state.buildFuture.shift();
+    await _restoreBuildFromPairs(EFTForge.state.buildHistory.pop());
+}
+
+async function redoBuildAction() {
+    if (!EFTForge.state.buildFuture.length) return;
+    const currentPairs = collectSlotPairs(EFTForge.state.buildTree);
+    EFTForge.state.buildHistory.push(currentPairs);
+    if (EFTForge.state.buildHistory.length > 30) EFTForge.state.buildHistory.shift();
+    await _restoreBuildFromPairs(EFTForge.state.buildFuture.pop());
 }

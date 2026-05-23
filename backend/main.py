@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -30,7 +31,7 @@ from database_ratings import ratings_engine, RatingsSessionLocal, RatingsBase
 from models_ratings import AttachmentVote, AttachmentRating  # noqa: F401 - registers tables
 
 from database_builds import builds_engine, BuildsSessionLocal, BuildsBase
-from models_builds import PublicBuild, PublicBuildAuthor, IPBan, PendingNotification, ServerAnnouncement, BuildVote, BuildRating  # noqa: F401 - registers tables
+from models_builds import PublicBuild, PublicBuildAuthor, IPBan, PendingNotification, ServerAnnouncement, BuildVote, BuildRating, BuildComment  # noqa: F401 - registers tables
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -76,10 +77,24 @@ def _migrate_builds_db():
         if "is_rotating" not in existing:
             conn.execute(text("ALTER TABLE public_builds ADD COLUMN is_rotating INTEGER NOT NULL DEFAULT 0"))
             conn.commit()
+        if "user_display_name" not in existing:
+            conn.execute(text("ALTER TABLE public_builds ADD COLUMN user_display_name TEXT"))
+            conn.commit()
+        if "user_avatar_url" not in existing:
+            conn.execute(text("ALTER TABLE public_builds ADD COLUMN user_avatar_url TEXT"))
+            conn.commit()
 
         ann_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(server_announcements)"))}
         if "dismissible" not in ann_cols:
             conn.execute(text("ALTER TABLE server_announcements ADD COLUMN dismissible INTEGER NOT NULL DEFAULT 1"))
+            conn.commit()
+
+        comment_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(build_comments)"))}
+        if "user_display_name" not in comment_cols:
+            conn.execute(text("ALTER TABLE build_comments ADD COLUMN user_display_name TEXT"))
+            conn.commit()
+        if "user_avatar_url" not in comment_cols:
+            conn.execute(text("ALTER TABLE build_comments ADD COLUMN user_avatar_url TEXT"))
             conn.commit()
 
 
@@ -206,6 +221,18 @@ def _evict_expired_admin_failures(now: float) -> None:
 _COMMUNITY_BUILDS_LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "community_builds.lock")
 _community_builds_disabled: bool = os.path.exists(_COMMUNITY_BUILDS_LOCK_FILE)
 
+# Hyperactive sync mode: re-syncs tarkov.dev data every 30 minutes instead of relying
+# solely on the external daily cron. Useful immediately after a game patch when
+# tarkov.dev data is still catching up to the new game state.
+_HYPERACTIVE_LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hyperactive.lock")
+_hyperactive_mode: bool = os.path.exists(_HYPERACTIVE_LOCK_FILE)
+_SYNC_INTERVAL_HYPERACTIVE_SECS = 1800   # 30 minutes
+_sync_running: bool = False
+_last_sync_at: float | None = None
+_sync_trigger: asyncio.Event = asyncio.Event()
+# Written before the subprocess starts and removed after - visible to all gunicorn workers.
+_SYNC_IN_PROGRESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sync_in_progress.lock")
+
 def _require_admin(request: Request, x_admin_key: str = Header(None)) -> None:
     if not ADMIN_API_KEY:
         raise HTTPException(status_code=503, detail="Admin not configured")
@@ -277,6 +304,14 @@ def _safe_json_loads(s: str | None):
 # publish rate limit: client_id_hash -> monotonic time of last successful publish
 _publish_last: dict[str, float] = {}
 _PUBLISH_COOLDOWN = 60.0
+
+# comment rate limit: client_id_hash -> monotonic time of last successful comment
+_comment_last: dict[str, float] = {}
+_COMMENT_COOLDOWN = 120.0  # 2 minutes
+
+# account transfer rate limit
+_transfer_last: dict[str, float] = {}
+_TRANSFER_COOLDOWN = 60.0
 
 _HTML_TAG_RE = re.compile(r'<[^>]+>')
 
@@ -473,6 +508,13 @@ def health_check(request: Request, db: Session = Depends(get_db)):
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"DB unavailable: {exc}")
     return {"status": "ok", "started": SERVER_START_TIME}
+
+
+@app.get("/sync-status")
+def get_sync_status():
+    """Public endpoint - lets clients show a notice when a background sync is in progress."""
+    running = _sync_running or os.path.exists(_SYNC_IN_PROGRESS_FILE)
+    return {"sync_running": running}
 
 
 # ---------------------------------------------------
@@ -2450,6 +2492,12 @@ _GITEE_RAW_PREFIX = (
     f"/raw/{_GITEE_BRANCH}/{_GITEE_FOLDER}/"
 )
 
+_GITEE_AVATAR_FOLDER = "streaming-assets/avatars"
+_GITEE_AVATAR_PREFIX = (
+    f"https://gitee.com/{_GITEE_OWNER}/{_GITEE_REPO}"
+    f"/raw/{_GITEE_BRANCH}/{_GITEE_AVATAR_FOLDER}/"
+)
+
 
 def _gitee_upload_sync(filename: str, image_bytes: bytes, token: str) -> str:
     """Upload or overwrite a build image in the Gitee asset repo.
@@ -2519,6 +2567,78 @@ def _gitee_delete_image(card_image_url: str | None, build_id: int) -> None:
         _logger.warning("gitee-delete: removed image %s for build %s", filename, build_id)
     except Exception as exc:
         _logger.error("gitee-delete: failed to delete image for build %s: %s", build_id, exc)
+
+
+_MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2 MB raw limit before processing
+_AVATAR_RENDER_SIZE = 128             # output square dimension in pixels
+
+def _process_and_upload_avatar(image_bytes: bytes, ip_hash: str) -> str:
+    """Decode, resize to 128x128 JPEG, upload to Gitee. Returns the raw URL."""
+    from PIL import Image
+    import io
+    from config import GITEE_TOKEN
+
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+    except Exception:
+        raise ValueError("Invalid image data - could not decode.")
+
+    if img.format not in ("JPEG", "PNG", "WEBP", "GIF"):
+        raise ValueError("Unsupported image format. Use JPEG, PNG, or WebP.")
+
+    img = img.convert("RGB")
+    img.thumbnail((_AVATAR_RENDER_SIZE, _AVATAR_RENDER_SIZE), Image.LANCZOS)
+
+    # crop to square from center
+    w, h = img.size
+    side = min(w, h)
+    left = (w - side) // 2
+    top  = (h - side) // 2
+    img  = img.crop((left, top, left + side, top + side))
+
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85, optimize=True)
+    jpeg_bytes = buf.getvalue()
+
+    filename = f"avatar_{ip_hash[:20]}.jpg"
+    path     = f"{_GITEE_AVATAR_FOLDER}/{filename}"
+    api_url  = f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/contents/{path}"
+    content  = base64.b64encode(jpeg_bytes).decode()
+
+    import requests as _req
+
+    sha = None
+    r = _req.get(api_url, params={"access_token": GITEE_TOKEN}, timeout=20)
+    if r.status_code == 200:
+        data = r.json()
+        sha = data.get("sha") if isinstance(data, dict) else None
+
+    payload = {
+        "access_token": GITEE_TOKEN,
+        "message":      f"ci: avatar upload for {ip_hash[:8]}",
+        "content":      content,
+        "branch":       _GITEE_BRANCH,
+    }
+    if sha:
+        payload["sha"] = sha
+        r = _req.put(api_url, json=payload, timeout=30)
+    else:
+        r = _req.post(api_url, json=payload, timeout=30)
+
+    r.raise_for_status()
+    return f"{_GITEE_AVATAR_PREFIX}{filename}"
+
+
+def _sanitize_username(raw: str) -> str:
+    return " ".join(_HTML_TAG_RE.sub("", raw).split())[:30]
+
+
+def _validate_avatar_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    if not url.startswith(_GITEE_AVATAR_PREFIX):
+        raise ValueError("avatar_url must point to the EFTForge asset repository.")
+    return url
 
 
 def _generate_and_save_build_image(build_id: int, gun_id: str, gun_name: str, pairs: list) -> bool:
@@ -2700,11 +2820,72 @@ async def _bg_migrate_build_images(force: bool = False):
 
 
 _bg_migrate_task: asyncio.Task | None = None
+_bg_sync_task:    asyncio.Task | None = None
+
+
+async def _run_sync_once() -> bool:
+    """Run sync_tarkov_dev.py in a thread pool so the event loop stays unblocked."""
+    global _sync_running, _last_sync_at
+    if _sync_running:
+        _logger.info("Hyperactive sync skipped - previous run still in progress.")
+        return False
+    _sync_running = True
+    try:
+        open(_SYNC_IN_PROGRESS_FILE, "w").close()  # broadcast to all workers
+        sync_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sync_tarkov_dev.py")
+        loop = asyncio.get_event_loop()
+        ret = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run([sys.executable, sync_script], timeout=600).returncode,
+        )
+        if ret == 0:
+            _last_sync_at = time.time()
+            with _COMBO_FULL_CACHE_LOCK:
+                _COMBO_FULL_CACHE.clear()
+            _logger.info("Hyperactive sync completed.")
+            return True
+        _logger.error("Hyperactive sync exited with code %s.", ret)
+        return False
+    except Exception as exc:
+        _logger.error("Hyperactive sync failed: %s", exc)
+        return False
+    finally:
+        _sync_running = False
+        if os.path.exists(_SYNC_IN_PROGRESS_FILE):
+            os.remove(_SYNC_IN_PROGRESS_FILE)
+
+
+async def _bg_hyperactive_sync():
+    """Background loop: while hyperactive mode is on, re-sync every 30 minutes.
+    Triggers an immediate sync as soon as the mode is enabled."""
+    global _hyperactive_mode
+    while True:
+        if not _hyperactive_mode:
+            # Idle - wait indefinitely until the admin enables the mode.
+            await _sync_trigger.wait()
+            _sync_trigger.clear()
+            continue
+        # Hyperactive mode is active: sync now, then wait the interval.
+        await _run_sync_once()
+        try:
+            await asyncio.wait_for(
+                _sync_trigger.wait(),
+                timeout=float(_SYNC_INTERVAL_HYPERACTIVE_SECS),
+            )
+            _sync_trigger.clear()
+        except asyncio.TimeoutError:
+            pass
+        # Loop back - if mode was disabled while waiting, the next iteration idles.
+
 
 @app.on_event("startup")
 async def _on_startup():
-    global _bg_migrate_task
+    global _bg_migrate_task, _bg_sync_task
+    # Remove a stale in-progress lock left by a previous crash.
+    if os.path.exists(_SYNC_IN_PROGRESS_FILE):
+        os.remove(_SYNC_IN_PROGRESS_FILE)
     _bg_migrate_task = asyncio.create_task(_bg_migrate_build_images())
+    _bg_sync_task    = asyncio.create_task(_bg_hyperactive_sync())
 
 
 @app.post("/admin/builds/retrigger-migrate")
@@ -2721,6 +2902,203 @@ async def admin_retrigger_migrate(
 
 
 # ---------------------------------------------------
+# Admin - Hyperactive Sync Mode
+# ---------------------------------------------------
+
+@app.get("/admin/hyperactive-mode")
+def admin_get_hyperactive_mode(
+    request:     Request,
+    x_admin_key: str = Header(None),
+):
+    _require_admin(request, x_admin_key)
+    return {
+        "hyperactive_mode":       _hyperactive_mode,
+        "sync_running":           _sync_running,
+        "last_sync_at":           _last_sync_at,
+        "sync_interval_seconds":  _SYNC_INTERVAL_HYPERACTIVE_SECS,
+    }
+
+
+@app.post("/admin/hyperactive-mode")
+async def admin_set_hyperactive_mode(
+    request:     Request,
+    enabled:     bool = Body(...),
+    x_admin_key: str  = Header(None),
+):
+    global _hyperactive_mode
+    _require_admin(request, x_admin_key)
+    _hyperactive_mode = enabled
+    if enabled:
+        open(_HYPERACTIVE_LOCK_FILE, "w").close()
+        _sync_trigger.set()   # wake the background loop for an immediate sync
+    else:
+        if os.path.exists(_HYPERACTIVE_LOCK_FILE):
+            os.remove(_HYPERACTIVE_LOCK_FILE)
+        _sync_trigger.set()   # wake the background loop so it sees mode=False
+    return {"hyperactive_mode": enabled}
+
+
+# ---------------------------------------------------
+# User Profile
+# ---------------------------------------------------
+
+@app.post("/profile/avatar")
+def upload_avatar(
+    request:     Request,
+    x_client_id: str      = Header(None),
+    image_b64:   str      = Body(...),
+    mime_type:   str      = Body("image/jpeg"),
+    db:          Session  = Depends(get_builds_db),
+):
+    from config import GITEE_TOKEN, GITEE_DRY_RUN
+
+    client_hash = _get_client_id_hash(x_client_id)
+    _check_client_ban(client_hash, db)
+
+    if not GITEE_TOKEN and not GITEE_DRY_RUN:
+        raise HTTPException(status_code=503, detail="Avatar upload is not configured on this server.")
+
+    try:
+        raw_bytes = base64.b64decode(image_b64)
+    except Exception:
+        raise HTTPException(status_code=422, detail="Invalid base64 image data.")
+
+    if len(raw_bytes) > _MAX_AVATAR_BYTES:
+        raise HTTPException(status_code=413, detail="Avatar image must be under 2 MB.")
+
+    if GITEE_DRY_RUN:
+        dry_url = f"{_GITEE_AVATAR_PREFIX}avatar_{client_hash[:20]}.jpg"
+        return {"avatar_url": dry_url}
+
+    try:
+        avatar_url = _process_and_upload_avatar(raw_bytes, client_hash)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        _logger.error("avatar-upload: failed for client %s: %s", client_hash[:8], exc)
+        raise HTTPException(status_code=502, detail="Avatar upload to asset storage failed.")
+
+    return {"avatar_url": avatar_url}
+
+
+@app.post("/profile/update")
+def update_profile(
+    x_client_id:      str      = Header(None),
+    username:         str | None = Body(default=None),
+    avatar_url:       str | None = Body(default=None),
+    db:               Session  = Depends(get_builds_db),
+):
+    client_hash = _get_client_id_hash(x_client_id)
+
+    clean_name = _sanitize_username(username) if username else None
+    try:
+        clean_avatar = _validate_avatar_url(avatar_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    builds = (
+        db.query(PublicBuild)
+        .filter(PublicBuild.ip_hash == client_hash, PublicBuild.is_admin_build == False)  # noqa: E712
+        .all()
+    )
+    for b in builds:
+        b.user_display_name = clean_name or None
+        b.user_avatar_url   = clean_avatar or None
+
+    comments = db.query(BuildComment).filter(BuildComment.ip_hash == client_hash).all()
+    for c in comments:
+        c.user_display_name = clean_name or None
+        c.user_avatar_url   = clean_avatar or None
+
+    db.commit()
+    return {"updated_builds": len(builds), "updated_comments": len(comments)}
+
+
+@app.post("/profile/transfer/preview")
+def transfer_preview(
+    x_client_id: str      = Header(None),
+    old_uuid:    str      = Body(..., embed=True),
+    db:          Session  = Depends(get_builds_db),
+):
+    current_hash   = _get_client_id_hash(x_client_id)
+    old_uuid_clean = old_uuid.strip().lower()
+
+    if not _CLIENT_ID_RE.match(old_uuid_clean):
+        raise HTTPException(status_code=400, detail="Invalid UUID format.")
+    if old_uuid_clean == x_client_id.strip().lower():
+        raise HTTPException(status_code=400, detail="That is your current Account ID.")
+
+    old_hash = hmac.new(IP_HASH_SECRET.encode(), old_uuid_clean.encode(), hashlib.sha256).hexdigest()
+
+    old_builds   = db.query(PublicBuild).filter(PublicBuild.ip_hash == old_hash,     PublicBuild.is_admin_build == False).count()  # noqa: E712
+    old_comments = db.query(BuildComment).filter(BuildComment.ip_hash == old_hash).count()
+    cur_builds   = db.query(PublicBuild).filter(PublicBuild.ip_hash == current_hash, PublicBuild.is_admin_build == False).count()  # noqa: E712
+    cur_comments = db.query(BuildComment).filter(BuildComment.ip_hash == current_hash).count()
+
+    return {
+        "old_builds":   old_builds,
+        "old_comments": old_comments,
+        "cur_builds":   cur_builds,
+        "cur_comments": cur_comments,
+    }
+
+
+@app.post("/profile/transfer")
+def transfer_account(
+    x_client_id: str       = Header(None),
+    old_uuid:    str       = Body(..., embed=True),
+    username:    str | None = Body(default=None),
+    avatar_url:  str | None = Body(default=None),
+    db:          Session   = Depends(get_builds_db),
+):
+    current_hash = _get_client_id_hash(x_client_id)
+
+    now_mono = time.monotonic()
+    stale = [k for k, v in _transfer_last.items() if now_mono - v > _TRANSFER_COOLDOWN * 2]
+    for k in stale:
+        del _transfer_last[k]
+    if now_mono - _transfer_last.get(current_hash, 0.0) < _TRANSFER_COOLDOWN:
+        remaining = int(_TRANSFER_COOLDOWN - (now_mono - _transfer_last[current_hash]))
+        raise HTTPException(status_code=429, detail=f"Rate limit: wait {remaining}s before transferring again.")
+
+    old_uuid_clean = old_uuid.strip().lower()
+    if not _CLIENT_ID_RE.match(old_uuid_clean):
+        raise HTTPException(status_code=400, detail="Invalid UUID format.")
+    if old_uuid_clean == x_client_id.strip().lower():
+        raise HTTPException(status_code=400, detail="That is your current Account ID.")
+
+    old_hash = hmac.new(IP_HASH_SECRET.encode(), old_uuid_clean.encode(), hashlib.sha256).hexdigest()
+
+    transferred_builds = db.query(PublicBuild).filter(
+        PublicBuild.ip_hash == old_hash, PublicBuild.is_admin_build == False  # noqa: E712
+    ).update({"ip_hash": current_hash}, synchronize_session=False)
+
+    transferred_comments = db.query(BuildComment).filter(
+        BuildComment.ip_hash == old_hash
+    ).update({"ip_hash": current_hash}, synchronize_session=False)
+
+    # Apply the current account's profile to all records now under current_hash
+    clean_name = _sanitize_username(username) if username else None
+    try:
+        clean_avatar = _validate_avatar_url(avatar_url)
+    except ValueError:
+        clean_avatar = None
+
+    db.query(PublicBuild).filter(
+        PublicBuild.ip_hash == current_hash, PublicBuild.is_admin_build == False  # noqa: E712
+    ).update({"user_display_name": clean_name, "user_avatar_url": clean_avatar}, synchronize_session=False)
+
+    db.query(BuildComment).filter(
+        BuildComment.ip_hash == current_hash
+    ).update({"user_display_name": clean_name, "user_avatar_url": clean_avatar}, synchronize_session=False)
+
+    db.commit()
+    _transfer_last[current_hash] = now_mono
+
+    return {"transferred_builds": transferred_builds, "transferred_comments": transferred_comments}
+
+
+# ---------------------------------------------------
 # Public Builds
 # ---------------------------------------------------
 
@@ -2728,14 +3106,16 @@ async def admin_retrigger_migrate(
 def publish_build(
     request:          Request,
     background_tasks: BackgroundTasks,
-    x_client_id: str = Header(None),
-    gun_id:     str        = Body(...),
-    build_name: str        = Body(...),
-    pairs:      List[list] = Body(...),
-    stats:      dict | None = Body(default=None),
-    ammo_id:    str | None  = Body(default=None),
-    db:         Session    = Depends(get_builds_db),
-    db_main:    Session    = Depends(get_db),
+    x_client_id:      str        = Header(None),
+    gun_id:           str        = Body(...),
+    build_name:       str        = Body(...),
+    pairs:            List[list] = Body(...),
+    stats:            dict | None = Body(default=None),
+    ammo_id:          str | None  = Body(default=None),
+    author_username:  str | None  = Body(default=None),
+    author_avatar_url: str | None = Body(default=None),
+    db:               Session    = Depends(get_builds_db),
+    db_main:          Session    = Depends(get_db),
 ):
     client_hash = _get_client_id_hash(x_client_id)
 
@@ -2762,6 +3142,13 @@ def publish_build(
     if not name:
         raise HTTPException(status_code=422, detail="build_name cannot be empty.")
 
+    # sanitize user profile fields
+    u_name = _sanitize_username(author_username) if author_username else None
+    try:
+        u_avatar = _validate_avatar_url(author_avatar_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
     # validate pairs format: each must be [str, str]
     if not isinstance(pairs, list):
         raise HTTPException(status_code=422, detail="pairs must be an array.")
@@ -2786,15 +3173,17 @@ def publish_build(
     total_price = sum(r[1] or 0 for r in price_rows) or None
 
     build = PublicBuild(
-        gun_id          = gun_id,
-        gun_name        = gun.name,
-        build_name      = name,
-        pairs_json      = json.dumps(pairs),
-        ip_hash         = client_hash,
-        ip_snapshot     = _get_client_ip(request),
-        author_id       = None,
-        is_admin_build  = False,
-        stats_json      = json.dumps(stats) if stats else None,
+        gun_id            = gun_id,
+        gun_name          = gun.name,
+        build_name        = name,
+        pairs_json        = json.dumps(pairs),
+        ip_hash           = client_hash,
+        ip_snapshot       = _get_client_ip(request),
+        author_id         = None,
+        is_admin_build    = False,
+        stats_json        = json.dumps(stats) if stats else None,
+        user_display_name = u_name or None,
+        user_avatar_url   = u_avatar or None,
         total_price_rub = total_price,
         ammo_id         = ammo_id or None,
     )
@@ -2811,6 +3200,62 @@ def publish_build(
     )
 
     return {"id": build.id, "published_at": build.published_at.isoformat()}
+
+
+@app.get("/builds/mine")
+def get_my_builds(
+    x_client_id: str = Header(None),
+    db: Session = Depends(get_builds_db),
+):
+    if not x_client_id:
+        return []
+    client_hash = _get_client_id_hash(x_client_id)
+
+    rows = (
+        db.query(PublicBuild)
+        .filter(PublicBuild.ip_hash == client_hash)
+        .order_by(PublicBuild.published_at.desc())
+        .limit(100)
+        .all()
+    )
+    if not rows:
+        return []
+
+    build_ids = [b.id for b in rows]
+
+    count_rows = (
+        db.query(BuildComment.build_id, func.count(BuildComment.id))
+        .filter(BuildComment.build_id.in_(build_ids), BuildComment.is_deleted == False)
+        .group_by(BuildComment.build_id)
+        .all()
+    )
+    comment_counts = {bid: cnt for bid, cnt in count_rows}
+
+    rating_rows = db.query(BuildRating).filter(BuildRating.build_id.in_(build_ids)).all()
+    like_counts = {r.build_id: r.like_count for r in rating_rows}
+
+    return [
+        {
+            "id":                b.id,
+            "gun_id":            b.gun_id,
+            "gun_name":          b.gun_name,
+            "build_name":        b.build_name,
+            "user_display_name": b.user_display_name,
+            "user_avatar_url":   b.user_avatar_url,
+            "is_admin_build":    False,
+            "is_featured":       b.is_featured,
+            "published_at":      b.published_at.isoformat(),
+            "is_mine":           True,
+            "pairs":             _safe_json_loads(b.pairs_json),
+            "stats":             _safe_json_loads(b.stats_json),
+            "load_count":        b.load_count or 0,
+            "like_count":        like_counts.get(b.id, 0),
+            "comment_count":     comment_counts.get(b.id, 0),
+            "card_image_url":    b.card_image_url,
+            "ammo_id":           b.ammo_id,
+        }
+        for b in rows
+    ]
 
 
 @app.get("/builds/public")
@@ -2833,6 +3278,17 @@ def get_public_builds(
         .all()
     )
 
+    build_ids = [b.id for b, _ in rows]
+    comment_counts: dict[int, int] = {}
+    if build_ids:
+        count_rows = (
+            db.query(BuildComment.build_id, func.count(BuildComment.id))
+            .filter(BuildComment.build_id.in_(build_ids), BuildComment.is_deleted == False)
+            .group_by(BuildComment.build_id)
+            .all()
+        )
+        comment_counts = {bid: cnt for bid, cnt in count_rows}
+
     return [
         {
             "id":                     build.id,
@@ -2841,16 +3297,19 @@ def get_public_builds(
             "author_display_name":    author.display_name     if author else None,
             "author_display_name_zh": author.display_name_zh  if author else None,
             "author_avatar_url":      author.avatar_url        if author else None,
+            "user_display_name":      build.user_display_name,
+            "user_avatar_url":        build.user_avatar_url,
             "is_admin_build":         build.is_admin_build,
             "is_featured":            build.is_featured,
             "published_at":           build.published_at.isoformat(),
             "is_mine":                (client_hash is not None and build.ip_hash == client_hash),
             "pairs":                  _safe_json_loads(build.pairs_json),
             "stats":                  _safe_json_loads(build.stats_json),
-            "total_price_rub": build.total_price_rub,
-            "load_count":      build.load_count or 0,
-            "card_image_url":  build.card_image_url,
-            "ammo_id":         build.ammo_id,
+            "total_price_rub":        build.total_price_rub,
+            "load_count":             build.load_count or 0,
+            "card_image_url":         build.card_image_url,
+            "ammo_id":                build.ammo_id,
+            "comment_count":          comment_counts.get(build.id, 0),
         }
         for build, author in rows
     ]
@@ -3292,6 +3751,201 @@ def admin_migration_regenerate_image(
     return {"queued": True, "id": build_id}
 
 
+@app.post("/admin/builds/wipe-all")
+def admin_wipe_all_builds(
+    request:     Request,
+    x_admin_key: str = Header(None),
+    db:          Session = Depends(get_builds_db),
+):
+    """Delete every community build from the DB and remove their Gitee images."""
+    _require_admin(request, x_admin_key)
+
+    rows = db.query(PublicBuild.id, PublicBuild.card_image_url).all()
+    image_pairs = [(r.id, r.card_image_url) for r in rows]
+
+    db.query(PendingNotification).delete(synchronize_session=False)
+    db.query(BuildVote).delete(synchronize_session=False)
+    db.query(BuildRating).delete(synchronize_session=False)
+    db.query(BuildComment).delete(synchronize_session=False)
+    db.query(PublicBuild).delete(synchronize_session=False)
+    db.commit()
+
+    deleted_images = 0
+    for build_id, url in image_pairs:
+        if url and url.startswith(_GITEE_RAW_PREFIX):
+            _gitee_delete_image(url, build_id)
+            deleted_images += 1
+
+    return {"deleted_builds": len(image_pairs), "deleted_images": deleted_images}
+
+
+# ---------------------------------------------------
+# Build Comments
+# ---------------------------------------------------
+
+@app.get("/builds/{build_id}/comments")
+def get_build_comments(
+    build_id:    int,
+    x_client_id: str = Header(None),
+    db:          Session = Depends(get_builds_db),
+):
+    build = db.query(PublicBuild).filter(PublicBuild.id == build_id).first()
+    if not build:
+        raise HTTPException(status_code=404, detail="Build not found.")
+    client_hash = _get_optional_client_id_hash(x_client_id)
+    rows = (
+        db.query(BuildComment)
+        .filter(BuildComment.build_id == build_id, BuildComment.is_deleted == False)  # noqa: E712
+        .order_by(BuildComment.created_at.asc())
+        .limit(100)
+        .all()
+    )
+    return [
+        {
+            "id":                r.id,
+            "content":           r.content,
+            "created_at":        r.created_at.isoformat(),
+            "is_mine":           (client_hash is not None and r.ip_hash == client_hash),
+            "user_display_name": r.user_display_name,
+            "user_avatar_url":   r.user_avatar_url,
+        }
+        for r in rows
+    ]
+
+
+@app.post("/builds/{build_id}/comments")
+def post_build_comment(
+    build_id:         int,
+    request:          Request,
+    x_client_id:      str      = Header(None),
+    content:          str      = Body(...),
+    user_display_name: str | None = Body(default=None),
+    user_avatar_url:   str | None = Body(default=None),
+    db:               Session = Depends(get_builds_db),
+):
+    build = db.query(PublicBuild).filter(PublicBuild.id == build_id).first()
+    if not build:
+        raise HTTPException(status_code=404, detail="Build not found.")
+
+    client_hash = _get_client_id_hash(x_client_id)
+    _check_client_ban(client_hash, db)
+
+    # Rate limit: 1 comment per 2 minutes
+    now = time.monotonic()
+    last = _comment_last.get(client_hash)
+    if last is not None and now - last < _COMMENT_COOLDOWN:
+        wait = int(_COMMENT_COOLDOWN - (now - last)) + 1
+        raise HTTPException(status_code=429, detail=f"Please wait {wait}s before posting another comment.")
+
+    cleaned = _HTML_TAG_RE.sub("", content).strip()
+    if not cleaned:
+        raise HTTPException(status_code=422, detail="Comment cannot be empty.")
+    if len(cleaned) > 280:
+        raise HTTPException(status_code=422, detail="Comment exceeds 280 characters.")
+
+    c_name = _sanitize_username(user_display_name) if user_display_name else None
+    try:
+        c_avatar = _validate_avatar_url(user_avatar_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    comment = BuildComment(
+        build_id          = build_id,
+        ip_hash           = client_hash,
+        content           = cleaned,
+        created_at        = datetime.now(timezone.utc).replace(tzinfo=None),
+        user_display_name = c_name or None,
+        user_avatar_url   = c_avatar or None,
+    )
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+
+    _comment_last[client_hash] = now
+    return {
+        "id":                comment.id,
+        "content":           comment.content,
+        "created_at":        comment.created_at.isoformat(),
+        "is_mine":           True,
+        "user_display_name": comment.user_display_name,
+        "user_avatar_url":   comment.user_avatar_url,
+    }
+
+
+@app.delete("/builds/{build_id}/comments/{comment_id}")
+def delete_own_comment(
+    build_id:    int,
+    comment_id:  int,
+    x_client_id: str = Header(None),
+    db:          Session = Depends(get_builds_db),
+):
+    client_hash = _get_client_id_hash(x_client_id)
+    comment = db.query(BuildComment).filter(
+        BuildComment.id == comment_id,
+        BuildComment.build_id == build_id,
+    ).first()
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found.")
+    if comment.is_deleted:
+        raise HTTPException(status_code=404, detail="Comment not found.")
+    if comment.ip_hash != client_hash:
+        raise HTTPException(status_code=403, detail="You can only delete your own comments.")
+    comment.is_deleted = True
+    db.commit()
+    return {"deleted": True, "id": comment_id}
+
+
+@app.delete("/admin/builds/comments/{comment_id}")
+def admin_delete_comment(
+    comment_id:  int,
+    request:     Request,
+    x_admin_key: str = Header(None),
+    db:          Session = Depends(get_builds_db),
+):
+    _require_admin(request, x_admin_key)
+    comment = db.query(BuildComment).filter(BuildComment.id == comment_id).first()
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found.")
+    comment.is_deleted = True
+    db.commit()
+    return {"deleted": True, "id": comment_id}
+
+
+@app.get("/admin/builds/comments")
+def admin_list_builds_with_comments(
+    request:     Request,
+    x_admin_key: str = Header(None),
+    db:          Session = Depends(get_builds_db),
+):
+    _require_admin(request, x_admin_key)
+    rows = (
+        db.query(BuildComment, PublicBuild)
+        .join(PublicBuild, BuildComment.build_id == PublicBuild.id)
+        .filter(BuildComment.is_deleted == False)  # noqa: E712
+        .order_by(BuildComment.created_at.desc())
+        .all()
+    )
+    builds: dict[int, dict] = {}
+    for comment, build in rows:
+        if build.id not in builds:
+            builds[build.id] = {
+                "build_id":     build.id,
+                "build_name":   build.build_name,
+                "gun_name":     build.gun_name,
+                "published_at": build.published_at.isoformat(),
+                "comments":     [],
+            }
+        builds[build.id]["comments"].append({
+            "id":         comment.id,
+            "content":    comment.content,
+            "created_at": comment.created_at.isoformat(),
+        })
+    result = list(builds.values())
+    for entry in result:
+        entry["comment_count"] = len(entry["comments"])
+    return result
+
+
 @app.get("/admin/builds")
 def admin_list_builds(
     request: Request,
@@ -3342,6 +3996,8 @@ def _build_row_to_dict(rank, build, author, like_count):
         "author_display_name":    author.display_name     if author else None,
         "author_display_name_zh": author.display_name_zh  if author else None,
         "author_avatar_url":      author.avatar_url        if author else None,
+        "user_display_name":      build.user_display_name,
+        "user_avatar_url":        build.user_avatar_url,
         "like_count":             like_count,
         "is_admin_build":         build.is_admin_build,
         "is_featured":            build.is_featured,

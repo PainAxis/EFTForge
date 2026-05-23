@@ -8,6 +8,11 @@ window.EFTForge = window.EFTForge || {};
 
 const _communityCountCache = {}; // gunId -> number, populated after first fetch
 
+// Build tags state
+let _pendingBuildTags = [];         // tags being edited in the current save dialog
+const _activeTagFilters = new Set(); // currently active tag filter chips
+let _buildsListGunId = null;         // gunId context for the active builds list
+
 async function updateGunBuildsBadge(gunId) {
     if (!gunId) return;
     const btn = document.getElementById("gun-builds-btn");
@@ -141,7 +146,7 @@ function syncBuildDisplayName() {
             const avatarSrc = avatarUrl || "./assets/images/tarkovcitizen.jpg";
             const avatarHtml = `<img src="${escapeHtml(avatarSrc)}"
                         style="width:20px;height:20px;border-radius:50%;object-fit:cover;background:#2a2a2a;flex-shrink:0;"
-                        onerror="this.style.display='none'" />`;
+                        onerror="this.src='./assets/images/tarkovcitizen.jpg';this.onerror=null;" />`;
             el.innerHTML = `
                 <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:2px;">
                     ${avatarHtml}
@@ -266,7 +271,9 @@ function showDiscardChangesModal(snapshot, onDiscard) {
     document.body.appendChild(overlay);
 
     const dismiss = () => overlay.remove();
-    overlay.addEventListener("click", e => { if (e.target === overlay) dismiss(); });
+    let _mdOnBackdrop = false;
+    overlay.addEventListener("mousedown", e => { _mdOnBackdrop = e.target === overlay; });
+    overlay.addEventListener("click", e => { if (e.target === overlay && _mdOnBackdrop) dismiss(); });
     overlay.querySelector("#discard-cancel-btn").addEventListener("click", dismiss);
     overlay.querySelector("#discard-confirm-btn").addEventListener("click", () => {
         clearSessionSnapshot();
@@ -366,13 +373,14 @@ function persistSavedBuilds(data) {
     if (EFTForge.state.currentGun) updateGunBuildsBadge(EFTForge.state.currentGun.id);
 }
 
-function saveCurrentBuild(name, overwrite = false) {
+function saveCurrentBuild(name, overwrite = false, tags = null) {
     if (!EFTForge.state.currentGun || !EFTForge.state.buildTree) return;
     const trimmed = (name || "").trim().slice(0, 60);
     if (!trimmed) {
         showToast(t("toast.saveFailed"), t("toast.saveFailedMsg"), 2500);
         return;
     }
+    const finalTags = (tags ?? _pendingBuildTags).slice(0, 5);
     const data = loadSavedBuilds();
     const duplicate = data.builds.find(
         b => b.gunId === EFTForge.state.currentGun.id && b.name.toLowerCase() === trimmed.toLowerCase()
@@ -385,6 +393,7 @@ function saveCurrentBuild(name, overwrite = false) {
     if (duplicate && overwrite) {
         duplicate.code = code;
         duplicate.savedAt = Date.now();
+        duplicate.tags = finalTags;
     } else {
         data.builds.unshift({
             id: Date.now().toString(36),
@@ -392,6 +401,7 @@ function saveCurrentBuild(name, overwrite = false) {
             gunId: EFTForge.state.currentGun.id,
             gunName: EFTForge.state.currentGun.name,
             savedAt: Date.now(),
+            tags: finalTags,
             code
         });
         if (data.builds.length > 500) data.builds = data.builds.slice(0, 500);
@@ -505,10 +515,32 @@ function showSaveBuildDialog() {
     _renderSaveBuildBody(EFTForge.state.currentGun.name);
 }
 
-function _renderSaveBuildBody(prefill) {
+const BUILD_TAG_PRESETS = ["meta", "budget", "cqb", "sniper", "recoil", "ergo", "pve", "beginner", "hybrid"];
+
+function _renderPresetTagChips(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const { t } = EFTForge.lang;
+    container.innerHTML = BUILD_TAG_PRESETS.map(key => {
+        const active = _pendingBuildTags.includes(key);
+        return `<button class="build-tag-chip${active ? ' active' : ''}" onclick="_togglePendingTag('${key}')">${escapeHtml(t("tag." + key))}</button>`;
+    }).join("");
+}
+
+function _togglePendingTag(key) {
+    const idx = _pendingBuildTags.indexOf(key);
+    if (idx >= 0) _pendingBuildTags.splice(idx, 1);
+    else if (_pendingBuildTags.length < 5) _pendingBuildTags.push(key);
+    _renderPresetTagChips("tag-chips-container");
+}
+window._togglePendingTag = _togglePendingTag;
+
+function _renderSaveBuildBody(prefill, existingTags = null) {
     const body = document.getElementById("save-build-modal-body");
     if (!body || !EFTForge.state.currentGun) return;
     const { t } = EFTForge.lang;
+
+    _pendingBuildTags = existingTags ? existingTags.slice() : [];
 
     const gun = EFTForge.state.currentGun;
     body.innerHTML = `
@@ -521,6 +553,9 @@ function _renderSaveBuildBody(prefill) {
                        maxlength="60"
                        value="${escapeHtml(prefill ?? gun.name)}" />
                 <button class="modal-btn primary" id="modal-save-btn">${t("modal.saveBtn")}</button>
+            </div>
+            <div class="build-tag-input-row" id="tag-input-row">
+                <div id="tag-chips-container" class="build-tag-chips-edit"></div>
             </div>
         </div>
 
@@ -545,6 +580,8 @@ function _renderSaveBuildBody(prefill) {
     const input = document.getElementById("save-build-name");
     input.focus();
     input.select();
+
+    _renderPresetTagChips("tag-chips-container");
 
     document.getElementById("modal-save-btn").addEventListener("click", () => {
         saveCurrentBuild(input.value);
@@ -676,14 +713,26 @@ function _confirmDeleteSavePanelBuild(btn, id, gunId) {
 
 function showBuildsDialog() {
     const { t } = EFTForge.lang;
+    let _myCommunityLoaded = false;
+
     const overlay = _createModalOverlay("builds-dialog", t("modal.builds"), {
         closeId:  "builds-modal-close",
         bodyId:   "builds-dialog-body",
         maxWidth: "640px",
+        tabs: [
+            { id: "bm-tab-saves",     label: t("modal.tabMyBuilds") },
+            { id: "bm-tab-community", label: t("modal.tabCommunity") },
+        ],
+        onTabSwitch(tabId) {
+            if (tabId === "bm-tab-community" && !_myCommunityLoaded) {
+                _myCommunityLoaded = true;
+                _loadMyCommunityBuilds();
+            }
+        },
     });
     if (!overlay) return;
 
-    document.getElementById("builds-dialog-body").innerHTML = `
+    document.getElementById("bm-tab-saves").innerHTML = `
         <div class="modal-section">
             <div class="modal-label" style="display:flex; align-items:center; gap:6px;">
                 ${t("modal.builds")} <span id="saved-builds-count" style="font-weight:400; letter-spacing:0; color:#555;"></span>
@@ -716,6 +765,12 @@ function showBuildsDialog() {
                 <button class="modal-btn full-width" onclick="exportBuildsBackup()">${t("modal.exportBtn")}</button>
                 <button class="modal-btn full-width" onclick="importBuildsFromFile()">${t("modal.importFile")}</button>
             </div>
+        </div>
+    `;
+
+    document.getElementById("bm-tab-community").innerHTML = `
+        <div id="my-community-list" style="max-height:560px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:#444 #111;">
+            <div style="color:#555; font-size:13px; font-style:italic; padding:4px 0 2px 0;">${t("modal.myCommunityLoading")}</div>
         </div>
     `;
 
@@ -835,7 +890,16 @@ async function showGunBuildsDialog() {
    UI - SAVED BUILDS LIST
 =========================== */
 
+function _toggleTagFilter(tag) {
+    if (_activeTagFilters.has(tag)) _activeTagFilters.delete(tag);
+    else _activeTagFilters.add(tag);
+    const searchInput = document.getElementById("builds-search-input");
+    renderSavedBuildsList(searchInput?.value ?? "", _buildsListGunId);
+}
+window._toggleTagFilter = _toggleTagFilter;
+
 function renderSavedBuildsList(query = "", gunId = null, showPublish = true) {
+    _buildsListGunId = gunId;
     _clearMarqueeTimers();
 
     const list = document.getElementById("saved-builds-list");
@@ -846,16 +910,40 @@ function renderSavedBuildsList(query = "", gunId = null, showPublish = true) {
 
     const pool = gunId ? builds.filter(b => b.gunId === gunId) : builds;
     const q = query.trim().toLowerCase();
-    const filtered = q
+
+    // Collect all unique tags from the pool for the filter bar
+    const allTags = [...new Set(pool.flatMap(b => b.tags ?? []))].sort();
+    // Remove any active filters that no longer exist in the pool
+    for (const tag of [..._activeTagFilters]) {
+        if (!allTags.includes(tag)) _activeTagFilters.delete(tag);
+    }
+
+    let filtered = q
         ? pool.filter(b =>
             b.name.toLowerCase().includes(q) ||
             b.gunName.toLowerCase().includes(q)
           )
         : pool;
 
+    if (_activeTagFilters.size > 0) {
+        filtered = filtered.filter(b =>
+            [..._activeTagFilters].every(tag => (b.tags ?? []).includes(tag))
+        );
+    }
+
     countEl.textContent = pool.length > 0 ? `(${pool.length})` : "";
 
     const { t } = EFTForge.lang;
+
+    // Tag filter row (only shown if there are tags)
+    const tagFilterHtml = allTags.length > 0
+        ? `<div class="build-tag-filter-row">
+            <span class="build-tag-filter-label">${escapeHtml(t("modal.tagFilterLabel"))}</span>
+            ${allTags.map(tag =>
+                `<button class="build-tag-chip${_activeTagFilters.has(tag) ? ' active' : ''}" onclick="_toggleTagFilter('${escapeHtml(tag)}')">${escapeHtml(t("tag." + tag))}</button>`
+            ).join("")}
+           </div>`
+        : "";
 
     if (pool.length === 0) {
         list.innerHTML = `<div style="color:#555; font-size:13px; font-style:italic; padding:4px 0 2px 0;">${t("modal.noBuilds")}</div>`;
@@ -863,7 +951,7 @@ function renderSavedBuildsList(query = "", gunId = null, showPublish = true) {
     }
 
     if (filtered.length === 0) {
-        list.innerHTML = `<div style="color:#555; font-size:13px; font-style:italic; padding:4px 0 2px 0;">${t("modal.noMatch")}</div>`;
+        list.innerHTML = tagFilterHtml + `<div style="color:#555; font-size:13px; font-style:italic; padding:4px 0 2px 0;">${t("modal.noMatch")}</div>`;
         return;
     }
 
@@ -873,7 +961,7 @@ function renderSavedBuildsList(query = "", gunId = null, showPublish = true) {
 
     const gunLookup = new Map((EFTForge.state.allGuns || []).map(g => [g.id, g.name]));
 
-    list.innerHTML = filtered.map(entry => {
+    const buildCardsHtml = filtered.map(entry => {
         const safeId = escapeHtml(entry.id);
         const displayGunName = gunLookup.get(entry.gunId) || entry.gunName;
         let publishBtnHtml = "";
@@ -886,11 +974,15 @@ function renderSavedBuildsList(query = "", gunId = null, showPublish = true) {
                            data-id="${safeId}"
                            onclick="_publishSavedBuildById(this.dataset.id)">${t("modal.publishBtn")}</button>`;
         }
+        const tagsHtml = (entry.tags ?? []).length > 0
+            ? `<div class="saved-build-tags">${(entry.tags).map(tag => `<span class="build-tag-chip">${escapeHtml(t("tag." + tag))}</span>`).join("")}</div>`
+            : "";
         return `
             <div class="saved-build-card">
                 <div class="saved-build-info">
                     <div class="saved-build-name"><span class="marquee-text">${escapeHtml(entry.name)}</span></div>
                     <div class="saved-build-gun"><span class="marquee-text">${escapeHtml(displayGunName)}</span></div>
+                    ${tagsHtml}
                 </div>
                 <div class="saved-build-actions">
                     <button class="saved-build-btn load-btn"
@@ -909,6 +1001,7 @@ function renderSavedBuildsList(query = "", gunId = null, showPublish = true) {
         `;
     }).join("");
 
+    list.innerHTML = tagFilterHtml + buildCardsHtml;
     _initMarqueeText(list);
 }
 
@@ -1072,13 +1165,17 @@ async function _confirmPublish(buildName, entryId) {
         arm_stam:  EFTForge.state.lastArmStamina  ?? null,
     };
 
+    const userProfile = EFTForge.profile ? EFTForge.profile.getProfile() : {};
+
     try {
         const result = await EFTForge.api.publishBuild({
-            gun_id:     gun.id,
-            build_name: buildName,
+            gun_id:            gun.id,
+            build_name:        buildName,
             pairs,
             stats,
-            ammo_id:    ammoId,
+            ammo_id:           ammoId,
+            author_username:   userProfile.username   || null,
+            author_avatar_url: userProfile.avatar_url || null,
         });
 
         // Mark this build as published so its button shows "Published" (greyed out)
@@ -1285,11 +1382,16 @@ function _applyPublicBuildsFilter() {
 
     const lang = EFTForge.state.lang;
     container.innerHTML = builds.map((b, idx) => {
-        const authorName = lang === "zh"
-            ? (b.author_display_name_zh || b.author_display_name || (b.is_admin_build ? "Morph1ne" : t("modal.anonymousAuthor")))
-            : (b.author_display_name || (b.is_admin_build ? "Morph1ne" : t("modal.anonymousAuthor")));
-
-        const avatarSrc = b.author_avatar_url || (b.is_admin_build ? "./news/images/devProfilePic.jpg" : "./assets/images/tarkovcitizen.jpg");
+        let authorName, avatarSrc;
+        if (b.is_admin_build) {
+            authorName = lang === "zh"
+                ? (b.author_display_name_zh || b.author_display_name || "Morph1ne")
+                : (b.author_display_name || "Morph1ne");
+            avatarSrc = b.author_avatar_url || "./news/images/devProfilePic.jpg";
+        } else {
+            authorName = b.user_display_name || t("modal.anonymousAuthor");
+            avatarSrc  = b.user_avatar_url   || "./assets/images/tarkovcitizen.jpg";
+        }
 
         const featuredLabel = b.is_featured
             ? `<div class="cb-featured-label">${t("cb.featured")}</div>`
@@ -1321,7 +1423,7 @@ function _applyPublicBuildsFilter() {
 
         const publishedAt = b.published_at ? new Date(b.published_at + "Z") : null;
         const fmtDate = publishedAt
-            ? publishedAt.toLocaleDateString(lang === "zh" ? "zh-CN" : "en-US", { month: "short", day: "numeric" })
+            ? publishedAt.toLocaleDateString(lang === "zh" ? "zh-CN" : "en-US", { year: "numeric", month: "short", day: "numeric" })
             : "";
 
         return `
@@ -1336,19 +1438,17 @@ function _applyPublicBuildsFilter() {
                     </div>
                     <div class="cb-publish-date">${fmtDate}</div>
                     <div class="cb-author">
-                        <img src="${escapeHtml(avatarSrc)}" class="cb-avatar" onerror="this.style.display='none'" />
+                        <img src="${escapeHtml(avatarSrc)}" class="cb-avatar" onerror="this.src='./assets/images/tarkovcitizen.jpg';this.onerror=null;" />
                         <span>${escapeHtml(authorName)}</span>
                     </div>
                     <div class="cb-load-count">${b.load_count ?? 0} ${t("cb.loads")}</div>
                 </div>
                 <div class="cb-stats">
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.ergo")}</div><div class="cb-stat-val">${fmtErgo}</div></div>
-                    <div class="cb-stat"><div class="cb-stat-label">${t("cb.statWeight")}</div><div class="cb-stat-val">${fmtWeight}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.verRecoil")}</div><div class="cb-stat-val">${fmtVRec}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.horRecoil")}</div><div class="cb-stat-val">${fmtHRec}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.eed")}</div><div class="cb-stat-val ${eedClass}">${fmtEED}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("cb.statOverswing")}</div><div class="cb-stat-val ${osClass}">${fmtOS}</div></div>
-                    <div class="cb-stat"><div class="cb-stat-label">${t("stats.armStamina")}</div><div class="cb-stat-val">${fmtArm}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("cb.statCost")}</div><div class="cb-stat-val cb-price">${fmtPrice}</div></div>
                 </div>
                 <div class="cb-card-footer">
@@ -1356,9 +1456,12 @@ function _applyPublicBuildsFilter() {
                         <button class="att-vote-btn att-vote-like" data-tooltip="${escapeHtml(t("cb.rating.like"))}" onclick="handleBuildVoteClick(event,${b.id},'like')"><img src="./assets/images/icon-fir.png" class="att-vote-icon" /><span class="att-vote-count">0</span></button>
                     </div>
                     ${unlistBtn}
+                    <button class="saved-build-btn cb-comments-toggle-btn" data-build-id="${b.id}"
+                            onclick="_toggleBuildComments(event,${b.id})">${t("cb.comments")}${b.comment_count > 0 ? ` (${b.comment_count})` : ""}</button>
                     <button class="saved-build-btn load-btn" data-pub-idx="${idx}"
                             onclick="_loadPublicBuildByIdx(this.dataset.pubIdx)">${t("ui.load")}</button>
                 </div>
+                <div class="cb-comments-section" id="cb-comments-${b.id}" style="display:none;"></div>
             </div>
         `;
     }).join("");
@@ -1377,10 +1480,16 @@ async function _loadPublicBuildByIdx(idx) {
     if (!build || !build.pairs) return;
 
     const lang = EFTForge.state.lang;
-    const authorName = lang === "zh"
-        ? (build.author_display_name_zh || build.author_display_name || (build.is_admin_build ? "Morph1ne" : t("modal.anonymousAuthor")))
-        : (build.author_display_name || (build.is_admin_build ? "Morph1ne" : t("modal.anonymousAuthor")));
-    const avatarUrl = build.author_avatar_url || (build.is_admin_build ? "./news/images/devProfilePic.jpg" : null);
+    let authorName, avatarUrl;
+    if (build.is_admin_build) {
+        authorName = lang === "zh"
+            ? (build.author_display_name_zh || build.author_display_name || "Morph1ne")
+            : (build.author_display_name || "Morph1ne");
+        avatarUrl = build.author_avatar_url || "./news/images/devProfilePic.jpg";
+    } else {
+        authorName = build.user_display_name || t("modal.anonymousAuthor");
+        avatarUrl  = build.user_avatar_url   || null;
+    }
 
     const communityBuildInfo = {
         pairsKey:      _pairsKey(build.pairs),
@@ -1403,6 +1512,138 @@ async function _loadPublicBuildByIdx(idx) {
     EFTForge.state.communityBuild = communityBuildInfo;
     syncBuildDisplayName();
 }
+
+function _isAdminSession() {
+    return !!localStorage.getItem("eftforge_admin_key");
+}
+
+async function _toggleBuildComments(event, buildId) {
+    event.stopPropagation();
+    const section = document.getElementById(`cb-comments-${buildId}`);
+    if (!section) return;
+    const isOpen = section.style.display !== "none";
+    if (isOpen) {
+        section.style.display = "none";
+        return;
+    }
+    section.style.display = "block";
+    _renderBuildCommentsSection(section, buildId);
+}
+window._toggleBuildComments = _toggleBuildComments;
+
+async function _renderBuildCommentsSection(section, buildId) {
+    const { t } = EFTForge.lang;
+    section.innerHTML = `<div class="cb-comments-loading">${t("cb.commentsLoading")}</div>`;
+    let comments = [];
+    try {
+        comments = await EFTForge.api.fetchBuildComments(buildId);
+    } catch {
+        section.innerHTML = `<div class="cb-comments-error">${t("cb.commentsError")}</div>`;
+        return;
+    }
+    _renderCommentsContent(section, buildId, comments);
+}
+
+function _renderCommentsContent(section, buildId, comments) {
+    const { t } = EFTForge.lang;
+    const lang = EFTForge.state.lang;
+    const isAdmin = _isAdminSession();
+    const commentsHtml = comments.length === 0
+        ? `<div class="cb-no-comments">${t("cb.noComments")}</div>`
+        : comments.map(c => {
+            const dt = new Date(c.created_at + "Z");
+            const fmtDt = dt.toLocaleDateString(lang === "zh" ? "zh-CN" : "en-US", { year: "numeric", month: "short", day: "numeric" });
+            let deleteBtn = "";
+            if (isAdmin) deleteBtn = ` <button class="cb-comment-delete-btn" onclick="_deleteComment(event,${c.id},${buildId})">&#x2715;</button>`;
+            else if (c.is_mine) deleteBtn = ` <button class="cb-comment-delete-btn" onclick="_deleteOwnComment(event,${c.id},${buildId})">&#x2715;</button>`;
+            const commentAuthor = c.user_display_name || t("modal.anonymousAuthor");
+            const commentAvatar = c.user_avatar_url   || "./assets/images/tarkovcitizen.jpg";
+            return `<div class="cb-comment" data-comment-id="${c.id}">
+                <div class="cb-comment-author">
+                    <img class="cb-avatar loaded" src="${escapeHtml(commentAvatar)}" onerror="this.src='./assets/images/tarkovcitizen.jpg'" />
+                    <span class="cb-comment-author-name">${escapeHtml(commentAuthor)}</span>
+                    <span class="cb-comment-date">${fmtDt}${deleteBtn}</span>
+                </div>
+                <div class="cb-comment-content">${escapeHtml(c.content)}</div>
+            </div>`;
+        }).join("");
+
+    section.innerHTML = `
+        <div class="cb-comments-list">${commentsHtml}</div>
+        <div class="cb-comment-form">
+            <textarea class="cb-comment-textarea" placeholder="${escapeHtml(t("cb.commentPlaceholder"))}" maxlength="280" rows="2"></textarea>
+            <div class="cb-comment-form-footer">
+                <span class="cb-comment-charcount">0 / 280</span>
+                <button class="modal-btn primary cb-comment-submit">${t("cb.commentSubmit")}</button>
+            </div>
+        </div>
+    `;
+
+    const textarea = section.querySelector(".cb-comment-textarea");
+    const charCount = section.querySelector(".cb-comment-charcount");
+    const submitBtn = section.querySelector(".cb-comment-submit");
+
+    textarea.addEventListener("input", () => {
+        charCount.textContent = `${textarea.value.length} / 280`;
+    });
+
+    submitBtn.addEventListener("click", async () => {
+        const content = textarea.value.trim();
+        if (!content) return;
+        submitBtn.disabled = true;
+        submitBtn.textContent = "...";
+        try {
+            const newComment = await EFTForge.api.postBuildComment(buildId, content);
+            comments.push(newComment);
+            _renderCommentsContent(section, buildId, comments);
+            const { t: _tc } = EFTForge.lang;
+            const toggleBtn = document.querySelector(`.cb-comments-toggle-btn[data-build-id="${buildId}"]`);
+            if (toggleBtn) toggleBtn.textContent = `${_tc("cb.comments")} (${comments.length})`;
+        } catch (err) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = t("cb.commentSubmit");
+            showToast(t("toast.connectionError"), err.message || t("cb.commentError"), 3500);
+        }
+    });
+}
+
+async function _deleteComment(event, commentId, buildId) {
+    event.stopPropagation();
+    const { t } = EFTForge.lang;
+    try {
+        await EFTForge.api.adminDeleteComment(commentId);
+        const section = document.getElementById(`cb-comments-${buildId}`);
+        if (section) {
+            const commentEl = section.querySelector(`[data-comment-id="${commentId}"]`);
+            if (commentEl) commentEl.remove();
+            const remaining = section.querySelectorAll(".cb-comment").length;
+            const toggleBtn = document.querySelector(`.cb-comments-toggle-btn[data-build-id="${buildId}"]`);
+            if (toggleBtn) toggleBtn.textContent = remaining > 0 ? `${t("cb.comments")} (${remaining})` : t("cb.comments");
+        }
+    } catch (err) {
+        showToast(t("toast.connectionError"), err.message || "Failed to delete comment.", 3000);
+    }
+}
+window._deleteComment = _deleteComment;
+
+async function _deleteOwnComment(event, commentId, buildId) {
+    event.stopPropagation();
+    const { t } = EFTForge.lang;
+    try {
+        await EFTForge.api.deleteOwnComment(buildId, commentId);
+        const section = document.getElementById(`cb-comments-${buildId}`);
+        if (section) {
+            const commentEl = section.querySelector(`[data-comment-id="${commentId}"]`);
+            if (commentEl) commentEl.remove();
+            const remaining = section.querySelectorAll(".cb-comment").length;
+            const toggleBtn = document.querySelector(`.cb-comments-toggle-btn[data-build-id="${buildId}"]`);
+            if (toggleBtn) toggleBtn.textContent = remaining > 0 ? `${t("cb.comments")} (${remaining})` : t("cb.comments");
+        }
+    } catch (err) {
+        showToast(t("toast.connectionError"), err.message || "Failed to delete comment.", 3000);
+    }
+}
+window._deleteOwnComment = _deleteOwnComment;
 
 function _confirmUnlistByIdx(btn, idx) {
     if (btn.dataset.confirming === "1") {
@@ -1460,6 +1701,158 @@ async function _unlistPublicBuildByIdx(idx) {
         const refreshGunId = EFTForge.state.currentGun?.id || build.gun_id;
         renderSavedBuildsList("", refreshGunId);
         _renderPublicBuilds(refreshGunId);
+    } catch (err) {
+        showToast(t("toast.unlistFailed"), err.message || "", 3500);
+    }
+}
+
+/* ===========================
+   MY COMMUNITY BUILDS (builds dialog tab)
+=========================== */
+
+async function _loadMyCommunityBuilds() {
+    const { t } = EFTForge.lang;
+    try {
+        const builds = await EFTForge.api.fetchMyBuilds();
+        _renderMyCommunityBuilds(builds);
+        if (builds.length > 0) {
+            EFTForge.api.fetchBulkBuildRatings(builds.map(b => b.id)).then(ratings => {
+                EFTForge.state.buildRatingsCache = Object.assign(EFTForge.state.buildRatingsCache || {}, ratings);
+                _refreshBuildRatingCells();
+            }).catch(() => {});
+        }
+    } catch {
+        const container = document.getElementById("my-community-list");
+        if (container) container.innerHTML = `<div style="color:#888; font-size:13px; font-style:italic; padding:4px 0;">${t("modal.myCommunityError")}</div>`;
+    }
+}
+
+function _renderMyCommunityBuilds(builds) {
+    const container = document.getElementById("my-community-list");
+    if (!container) return;
+    const { t } = EFTForge.lang;
+    const lang = EFTForge.state.lang;
+
+    if (!builds || builds.length === 0) {
+        container.innerHTML = `<div style="color:#555; font-size:13px; font-style:italic; padding:4px 0;">${t("modal.myCommunityEmpty")}</div>`;
+        return;
+    }
+
+    const gunLookup = new Map((EFTForge.state.allGuns || []).map(g => [g.id, g.name]));
+
+    container.innerHTML = builds.map(b => {
+        const gunName    = gunLookup.get(b.gun_id) || b.gun_name || "";
+        const gunObj     = (EFTForge.state.allGuns || []).find(g => g.id === b.gun_id);
+        const gunImgSrc  = gunObj ? (gunObj.image_512_link || gunObj.icon_link || "") : "";
+        const cardImgSrc = b.card_image_url || gunImgSrc;
+
+        const s        = b.stats || {};
+        const hasStats = b.stats !== null && b.stats !== undefined;
+        const fmtErgo  = hasStats && s.ergo      != null ? parseFloat(s.ergo).toFixed(1)                           : "-";
+        const fmtVRec  = hasStats && s.recoil_v  != null ? Math.round(s.recoil_v)                                  : "-";
+        const fmtHRec  = hasStats && s.recoil_h  != null ? Math.round(s.recoil_h)                                  : "-";
+        const fmtEED   = hasStats && s.eed       != null ? (s.eed >= 0 ? "+" : "") + parseFloat(s.eed).toFixed(1)  : "-";
+        const fmtOS    = hasStats && s.overswing != null ? (s.overswing ? t("stats.yes") : t("stats.no"))          : "-";
+        const eedClass = hasStats && s.eed       != null ? (s.eed >= 0 ? "positive" : "negative")                  : "";
+        const osClass  = hasStats && s.overswing != null ? (s.overswing ? "negative" : "positive")                 : "";
+
+        const publishedAt = b.published_at ? new Date(b.published_at + "Z") : null;
+        const fmtDate = publishedAt
+            ? publishedAt.toLocaleDateString(lang === "zh" ? "zh-CN" : "en-US", { year: "numeric", month: "short", day: "numeric" })
+            : "";
+
+        const featuredLabel = b.is_featured
+            ? `<div class="cb-featured-label">${t("cb.featured")}</div>`
+            : "";
+
+        return `
+            <div class="cb-card${b.is_featured ? " featured" : ""}">
+                ${featuredLabel}
+                <div class="cb-gun-area">
+                    ${cardImgSrc ? `<img class="cb-gun-img" src="${escapeHtml(cardImgSrc)}" alt="" referrerpolicy="no-referrer" onerror="this.src='${escapeHtml(gunImgSrc)}'; this.onerror=null;" />` : ""}
+                </div>
+                <div class="cb-card-body">
+                    <div class="cb-build-name"><span class="marquee-text">${escapeHtml(b.build_name)}</span></div>
+                    <div class="cb-publish-date">${fmtDate}</div>
+                    <div style="color:#555; font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(gunName)}</div>
+                    <div class="cb-load-count">${b.load_count ?? 0} ${t("cb.loads")}</div>
+                </div>
+                <div class="cb-stats">
+                    <div class="cb-stat"><div class="cb-stat-label">${t("stats.ergo")}</div><div class="cb-stat-val">${fmtErgo}</div></div>
+                    <div class="cb-stat"><div class="cb-stat-label">${t("stats.verRecoil")}</div><div class="cb-stat-val">${fmtVRec}</div></div>
+                    <div class="cb-stat"><div class="cb-stat-label">${t("stats.horRecoil")}</div><div class="cb-stat-val">${fmtHRec}</div></div>
+                    <div class="cb-stat"><div class="cb-stat-label">${t("stats.eed")}</div><div class="cb-stat-val ${eedClass}">${fmtEED}</div></div>
+                    <div class="cb-stat"><div class="cb-stat-label">${t("cb.statOverswing")}</div><div class="cb-stat-val ${osClass}">${fmtOS}</div></div>
+                    <div class="cb-stat"><div class="cb-stat-label">${t("cb.statCost")}</div><div class="cb-stat-val">-</div></div>
+                </div>
+                <div class="cb-card-footer">
+                    <div class="cb-rating att-rating" data-build-id="${b.id}">
+                        <button class="att-vote-btn att-vote-like" data-tooltip="${escapeHtml(t("cb.rating.like"))}"
+                                onclick="handleBuildVoteClick(event,${b.id},'like')">
+                            <img src="./assets/images/icon-fir.png" class="att-vote-icon" />
+                            <span class="att-vote-count">0</span>
+                        </button>
+                    </div>
+                    <button class="saved-build-btn unlist-btn" data-build-id="${b.id}"
+                            onclick="_confirmUnlistMyBuild(this,'${b.id}')">${t("modal.unlistBtn")}</button>
+                    <button class="saved-build-btn cb-comments-toggle-btn" data-build-id="${b.id}"
+                            onclick="_toggleBuildComments(event,${b.id})">${t("cb.comments")}${b.comment_count > 0 ? ` (${b.comment_count})` : ""}</button>
+                </div>
+                <div class="cb-comments-section" id="cb-comments-${b.id}" style="display:none;"></div>
+            </div>
+        `;
+    }).join("");
+
+    _initMarqueeText(container, { hoverOnly: true, hoverTarget: ".cb-card" });
+    _refreshBuildRatingCells();
+}
+
+function _confirmUnlistMyBuild(btn, buildId) {
+    if (btn.dataset.confirming === "1") {
+        _unlistMyBuild(btn, buildId);
+        return;
+    }
+    btn.dataset.confirming = "1";
+    btn.textContent = t("ui.confirm");
+    btn.style.background = "#3d0f0f";
+    btn.style.color = "#eee";
+    btn.style.borderColor = "#f44336";
+
+    const reset = () => {
+        if (btn.dataset.confirming !== "1") return;
+        delete btn.dataset.confirming;
+        btn.textContent = t("modal.unlistBtn");
+        btn.style.background = "";
+        btn.style.color = "";
+        btn.style.borderColor = "";
+    };
+    setTimeout(reset, 3000);
+    btn.addEventListener("mouseleave", reset, { once: true });
+}
+window._confirmUnlistMyBuild = _confirmUnlistMyBuild;
+
+async function _unlistMyBuild(btn, buildId) {
+    try {
+        await EFTForge.api.unlistBuild(buildId);
+
+        const published = new Set(JSON.parse(localStorage.getItem("eftforge_published_ids") || "[]"));
+        const saveData = loadSavedBuilds();
+        let localChanged = false;
+        for (const entry of saveData.builds) {
+            if (entry.publishedId === buildId) {
+                delete entry.publishedId;
+                published.delete(entry.id);
+                localChanged = true;
+            }
+        }
+        localStorage.setItem("eftforge_published_ids", JSON.stringify([...published]));
+        if (localChanged) persistSavedBuilds(saveData);
+
+        const card = btn.closest(".cb-card");
+        if (card) card.remove();
+
+        renderSavedBuildsList(document.getElementById("builds-search-input")?.value ?? "");
+        showToast(t("toast.unlistSuccess"), t("toast.unlistSuccessMsg"), 3000, "#4CAF50");
     } catch (err) {
         showToast(t("toast.unlistFailed"), err.message || "", 3500);
     }

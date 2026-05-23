@@ -93,4 +93,8 @@ window.EFTForge.state = {
     lastComboItems:    [],
     lastComboWasCapped: false,
     combosCache:       {},
+
+    // Undo / redo history (session-scoped, cleared on gun switch)
+    buildHistory: [], // array of serialized pairs strings (past states, newest last)
+    buildFuture:  [], // array of serialized pairs strings (redo stack)
 };
