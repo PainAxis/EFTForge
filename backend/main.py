@@ -83,6 +83,9 @@ def _migrate_builds_db():
         if "user_avatar_url" not in existing:
             conn.execute(text("ALTER TABLE public_builds ADD COLUMN user_avatar_url TEXT"))
             conn.commit()
+        if "tags_json" not in existing:
+            conn.execute(text("ALTER TABLE public_builds ADD COLUMN tags_json TEXT"))
+            conn.commit()
 
         ann_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(server_announcements)"))}
         if "dismissible" not in ann_cols:
@@ -3129,6 +3132,7 @@ def publish_build(
     ammo_id:          str | None  = Body(default=None),
     author_username:  str | None  = Body(default=None),
     author_avatar_url: str | None = Body(default=None),
+    tags:             List[str] | None = Body(default=None),
     db:               Session    = Depends(get_builds_db),
     db_main:          Session    = Depends(get_db),
 ):
@@ -3187,6 +3191,9 @@ def publish_build(
     price_rows = db_main.query(Item.id, Item.trader_price_rub).filter(Item.id.in_(all_ids)).all()
     total_price = sum(r[1] or 0 for r in price_rows) or None
 
+    _ALLOWED_TAGS = {"meta", "budget", "cqb", "sniper", "recoil", "ergo", "pve", "beginner", "hybrid"}
+    clean_tags = [t for t in (tags or []) if t in _ALLOWED_TAGS][:5]
+
     build = PublicBuild(
         gun_id            = gun_id,
         gun_name          = gun.name,
@@ -3199,8 +3206,9 @@ def publish_build(
         stats_json        = json.dumps(stats) if stats else None,
         user_display_name = u_name or None,
         user_avatar_url   = u_avatar or None,
-        total_price_rub = total_price,
-        ammo_id         = ammo_id or None,
+        total_price_rub   = total_price,
+        ammo_id           = ammo_id or None,
+        tags_json         = json.dumps(clean_tags) if clean_tags else None,
     )
     db.add(build)
     db.commit()
@@ -3268,6 +3276,7 @@ def get_my_builds(
             "comment_count":     comment_counts.get(b.id, 0),
             "card_image_url":    b.card_image_url,
             "ammo_id":           b.ammo_id,
+            "tags":              _safe_json_loads(b.tags_json) or [],
         }
         for b in rows
     ]
@@ -3324,6 +3333,7 @@ def get_public_builds(
             "load_count":             build.load_count or 0,
             "card_image_url":         build.card_image_url,
             "ammo_id":                build.ammo_id,
+            "tags":                   _safe_json_loads(build.tags_json) or [],
             "comment_count":          comment_counts.get(build.id, 0),
         }
         for build, author in rows

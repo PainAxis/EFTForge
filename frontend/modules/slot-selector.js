@@ -320,7 +320,6 @@ async function openSlotSelector(parentNode, slot) {
 
   const box = document.getElementById("attachment-table-container");
 
-
   const { t, tSlot } = EFTForge.lang;
 
   const gun = EFTForge.state.currentGun;
@@ -414,6 +413,9 @@ async function openSlotSelector(parentNode, slot) {
             <tbody id="attachment-body"></tbody>
         </table>
     `;
+
+  const rightPanel = document.querySelector(".right-panel");
+  if (rightPanel) rightPanel.scrollTop = 0;
 
   // Wire up the close button rendered in the header HTML above
   document.getElementById("att-table-close-btn").addEventListener("click", () => {

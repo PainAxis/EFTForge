@@ -565,6 +565,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
 
   overflow-x: auto;
   overflow-y: auto;
+  overflow-anchor: none;
   padding: 20px 20px 20px 20px;
   min-height: 0;
 }
@@ -4079,6 +4080,9 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
   animation: modalSlideIn 0.15s ease;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 40px);
 }
 
 @keyframes modalSlideIn {
@@ -4124,6 +4128,29 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
   display: flex;
   flex-direction: column;
   gap: 14px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #444 #111;
+}
+
+.modal-body::-webkit-scrollbar {
+  width: 10px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+  background: #111;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 6px;
+  border: 2px solid #111;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: #555;
 }
 
 .modal-label {
@@ -4193,6 +4220,7 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
   display: flex;
   flex-direction: row;
   align-items: flex-start;
+  max-height: calc(100vh - 40px);
 }
 
 .modal-tab-rail {
@@ -4374,9 +4402,9 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    background: #1e2a1e;
-    border: 1px solid #2a4a2a;
-    color: #6dbf6d;
+    background: var(--tag-bg, #1e2a1e);
+    border: 1px solid var(--tag-border, #2a4a2a);
+    color: var(--tag-color, #6dbf6d);
     font-size: 10px;
     font-weight: 700;
     font-family: "Bender", Arial, sans-serif;
@@ -4386,23 +4414,37 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
     white-space: nowrap;
 }
 
+.build-tag-chip[data-tag="meta"]     { --tag-bg: #2a2010; --tag-border: #f5c542; --tag-color: #f5c542; }
+.build-tag-chip[data-tag="budget"]   { --tag-bg: #1e2a1e; --tag-border: #6dbf6d; --tag-color: #6dbf6d; }
+.build-tag-chip[data-tag="cqb"]      { --tag-bg: #2a1a1a; --tag-border: #e05555; --tag-color: #e05555; }
+.build-tag-chip[data-tag="sniper"]   { --tag-bg: #18222e; --tag-border: #5ba8e5; --tag-color: #5ba8e5; }
+.build-tag-chip[data-tag="recoil"]   { --tag-bg: #221830; --tag-border: #b07ed6; --tag-color: #b07ed6; }
+.build-tag-chip[data-tag="ergo"]     { --tag-bg: #2a1e12; --tag-border: #e08840; --tag-color: #e08840; }
+.build-tag-chip[data-tag="pve"]      { --tag-bg: #182828; --tag-border: #5bc4c4; --tag-color: #5bc4c4; }
+.build-tag-chip[data-tag="beginner"] { --tag-bg: #1a2820; --tag-border: #7ac4a0; --tag-color: #7ac4a0; }
+.build-tag-chip[data-tag="hybrid"]   { --tag-bg: #1a1e28; --tag-border: #8899bb; --tag-color: #8899bb; }
+
 button.build-tag-chip {
     cursor: pointer;
     background: #1a1a1a;
     border-color: #333;
     color: #666;
     transition: background 0.12s, border-color 0.12s, color 0.12s;
+    line-height: 1;
+    box-sizing: border-box;
+    vertical-align: middle;
 }
 
 button.build-tag-chip:hover {
-    border-color: #6dbf6d;
-    color: #6dbf6d;
+    background: var(--tag-bg, #1e2a1e);
+    border-color: var(--tag-border, #6dbf6d);
+    color: var(--tag-color, #6dbf6d);
 }
 
 button.build-tag-chip.active {
-    background: #1e2a1e;
-    border-color: #6dbf6d;
-    color: #6dbf6d;
+    background: var(--tag-bg, #1e2a1e);
+    border-color: var(--tag-border, #6dbf6d);
+    color: var(--tag-color, #6dbf6d);
 }
 
 .build-tag-remove {
@@ -4517,6 +4559,8 @@ button.build-tag-chip.active {
 .cb-author-name { overflow:hidden; min-width:0; flex:1; white-space:nowrap; }
 .cb-publish-date { font-size:10px; color:#666; white-space:nowrap; text-align:right; line-height:1; }
 .cb-load-count { font-size:10px; color:#666; white-space:nowrap; text-align:right; line-height:1; }
+.cb-card-tags { grid-column:1/-1; display:flex; flex-wrap:wrap; gap:3px; padding-top:2px; }
+#cb-tag-filter-row:empty { display:none !important; }
 .cb-avatar { width:14px; height:14px; border-radius:50%; object-fit:cover; background:#2a2a2a; flex-shrink:0; }
 .cb-stats { display:grid; grid-template-columns:1fr 1fr; background:#0f0f0f; }
 .cb-stat { text-align:center; padding:5px 4px; border-right:1px solid #1e1e1e; border-bottom:1px solid #1e1e1e; }
@@ -6638,7 +6682,8 @@ var _hmt = _hmt || [];
         <div id="attachment-placeholder" class="attachment-placeholder">
             <div class="placeholder-inner">
                 <img id="gun-display-image" style="display:none; max-width:100%; max-height:180px; object-fit:contain; margin-bottom:16px;" />
-                <div id="gun-display-name" style="font-size:22px; font-weight:700; color:#f5c542; margin-bottom:16px;"></div>
+                <div id="gun-display-name" style="font-size:22px; font-weight:700; color:#f5c542; margin-bottom:8px;"></div>
+                <div id="build-display-tags" style="margin-bottom:8px;"></div>
                 <strong><em id="placeholder-main">
                     Select an attachment slot to begin modding...
                 </em></strong>

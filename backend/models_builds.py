@@ -39,6 +39,7 @@ class PublicBuild(BuildsBase):
     ammo_id           = Column(String, nullable=True)      # selected ammo at save/publish time; restored on load
     user_display_name = Column(String(30), nullable=True)  # self-reported username at publish time
     user_avatar_url   = Column(String(500), nullable=True) # self-reported avatar URL (Gitee-hosted)
+    tags_json         = Column(Text, nullable=True)        # JSON list of tag keys e.g. ["meta","pve"]
 
     __table_args__ = (
         Index("ix_public_builds_gun_id", "gun_id"),

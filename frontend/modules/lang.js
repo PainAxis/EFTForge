@@ -202,7 +202,7 @@ const _TRANSLATIONS = {
         "tag.meta":               "Meta",
         "tag.budget":             "Budget",
         "tag.cqb":                "CQB",
-        "tag.sniper":             "Sniper",
+        "tag.sniper":             "Long Range",
         "tag.recoil":             "Recoil",
         "tag.ergo":               "Ergo",
         "tag.pve":                "PvE",

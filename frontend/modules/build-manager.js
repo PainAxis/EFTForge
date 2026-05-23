@@ -9,9 +9,30 @@ window.EFTForge = window.EFTForge || {};
 const _communityCountCache = {}; // gunId -> number, populated after first fetch
 
 // Build tags state
-let _pendingBuildTags = [];         // tags being edited in the current save dialog
-const _activeTagFilters = new Set(); // currently active tag filter chips
-let _buildsListGunId = null;         // gunId context for the active builds list
+let _pendingBuildTags = [];           // tags being edited in the current save dialog
+const _activeTagFilters = new Set();  // currently active tag filter chips (saved builds list)
+const _activeCbTagFilters = new Set(); // currently active tag filter chips (community builds)
+let _buildsListGunId = null;          // gunId context for the active builds list
+
+function _tagChipsHtml(tags) {
+    if (!tags || tags.length === 0) return "";
+    const { t } = EFTForge.lang;
+    const chips = tags.map(tag => `<span class="build-tag-chip" data-tag="${escapeHtml(tag)}">${escapeHtml(t("tag." + tag))}</span>`).join("");
+    return `<div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-bottom:10px;">${chips}</div>`;
+}
+
+function _currentBuildTags() {
+    const gun = EFTForge.state.currentGun;
+    if (!gun) return [];
+    const currentKey = _pairsKey(collectSlotPairs(EFTForge.state.buildTree));
+    const { builds } = loadSavedBuilds();
+    const match = builds.find(b => {
+        if (b.gunId !== gun.id) return false;
+        const payload = decodeBuildCode(b.code);
+        return payload && _pairsKey(payload.p) === currentKey;
+    });
+    return match?.tags ?? [];
+}
 
 async function updateGunBuildsBadge(gunId) {
     if (!gunId) return;
@@ -185,6 +206,9 @@ function syncBuildDisplayName() {
 
     const displayName = match ? match.name : gun.name;
     el.textContent = displayName;
+
+    const tagsEl = document.getElementById("build-display-tags");
+    if (tagsEl) tagsEl.innerHTML = _tagChipsHtml(match?.tags ?? []);
 
     // Persist snapshot so a page refresh can offer to restore this state.
     // Skip factory config - nothing worth restoring.
@@ -523,7 +547,7 @@ function _renderPresetTagChips(containerId) {
     const { t } = EFTForge.lang;
     container.innerHTML = BUILD_TAG_PRESETS.map(key => {
         const active = _pendingBuildTags.includes(key);
-        return `<button class="build-tag-chip${active ? ' active' : ''}" onclick="_togglePendingTag('${key}')">${escapeHtml(t("tag." + key))}</button>`;
+        return `<button class="build-tag-chip${active ? ' active' : ''}" data-tag="${key}" onclick="_togglePendingTag('${key}')">${escapeHtml(t("tag." + key))}</button>`;
     }).join("");
 }
 
@@ -740,7 +764,7 @@ function showBuildsDialog() {
             <input id="builds-search-input" type="text" class="search-input"
                    style="font-size: 13px; margin:0 0 8px 0; width:100%; box-sizing:border-box;"
                    placeholder="${escapeHtml(t("modal.searchBuilds"))}" />
-            <div id="saved-builds-list" style="max-height:500px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:#444 #111;"></div>
+            <div id="saved-builds-list"></div>
         </div>
 
         <hr class="modal-divider" />
@@ -776,7 +800,7 @@ function showBuildsDialog() {
                        placeholder="${escapeHtml(t("modal.searchBuilds"))}" />
                 <span id="my-community-count" style="font-size:11px; color:#555; white-space:nowrap;"></span>
             </div>
-            <div id="my-community-list" style="max-height:520px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:#444 #111;">
+            <div id="my-community-list">
                 <div style="color:#555; font-size:13px; font-style:italic; padding:4px 0 2px 0;">${t("modal.myCommunityLoading")}</div>
             </div>
         </div>
@@ -840,6 +864,8 @@ async function showGunBuildsDialog() {
     const gunId   = EFTForge.state.currentGun.id;
     const gunName = EFTForge.state.currentGun.name;
 
+    _activeCbTagFilters.clear();
+
     const overlay = _createModalOverlay("builds-dialog", t("modal.exploreBuilds"), {
         closeId:  "builds-modal-close",
         bodyId:   "builds-dialog-body",
@@ -855,7 +881,7 @@ async function showGunBuildsDialog() {
             <input id="builds-search-input" type="text" class="search-input"
                    style="font-size:13px; margin:0 0 8px 0; width:100%; box-sizing:border-box;"
                    placeholder="${escapeHtml(t("modal.searchBuildsGun"))}" />
-            <div id="saved-builds-list" style="max-height:220px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:#444 #111;"></div>
+            <div id="saved-builds-list"></div>
         </div>
         <hr class="modal-divider" />
         <div class="modal-section">
@@ -877,10 +903,9 @@ async function showGunBuildsDialog() {
                     <option value="price">${escapeHtml(t("cb.sort.price"))}</option>
                 </select>
             </div>
-            <div style="max-height:560px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:#444 #111;">
-                <div id="public-builds-list">
-                    <div style="color:#555; font-size:13px; font-style:italic; padding:4px 0 2px 0;">${t("modal.publishLoading")}</div>
-                </div>
+            <div id="cb-tag-filter-row" class="build-tag-filter-row" style="padding:4px 0; margin-bottom:4px; border-bottom:1px solid #222; display:flex; flex-wrap:wrap; gap:4px; min-height:0;"></div>
+            <div id="public-builds-list">
+                <div style="color:#555; font-size:13px; font-style:italic; padding:4px 0 2px 0;">${t("modal.publishLoading")}</div>
             </div>
         </div>
     `;
@@ -953,7 +978,7 @@ function renderSavedBuildsList(query = "", gunId = null, showPublish = true) {
         ? `<div class="build-tag-filter-row">
             <span class="build-tag-filter-label">${escapeHtml(t("modal.tagFilterLabel"))}</span>
             ${allTags.map(tag =>
-                `<button class="build-tag-chip${_activeTagFilters.has(tag) ? ' active' : ''}" onclick="_toggleTagFilter('${escapeHtml(tag)}')">${escapeHtml(t("tag." + tag))}</button>`
+                `<button class="build-tag-chip${_activeTagFilters.has(tag) ? ' active' : ''}" data-tag="${escapeHtml(tag)}" onclick="_toggleTagFilter('${escapeHtml(tag)}')">${escapeHtml(t("tag." + tag))}</button>`
             ).join("")}
            </div>`
         : "";
@@ -988,7 +1013,7 @@ function renderSavedBuildsList(query = "", gunId = null, showPublish = true) {
                            onclick="_publishSavedBuildById(this.dataset.id)">${t("modal.publishBtn")}</button>`;
         }
         const tagsHtml = (entry.tags ?? []).length > 0
-            ? `<div class="saved-build-tags">${(entry.tags).map(tag => `<span class="build-tag-chip">${escapeHtml(t("tag." + tag))}</span>`).join("")}</div>`
+            ? `<div class="saved-build-tags">${(entry.tags).map(tag => `<span class="build-tag-chip" data-tag="${escapeHtml(tag)}">${escapeHtml(t("tag." + tag))}</span>`).join("")}</div>`
             : "";
         return `
             <div class="saved-build-card">
@@ -1085,6 +1110,9 @@ function showPublishConfirmPanel(buildName, entryId) {
 
     const imgSrc = window._bpGetLastImageUrl?.() || gun.image_512_link || gun.icon_link || "";
 
+    const { builds: _allBuilds } = loadSavedBuilds();
+    const _publishEntry = _allBuilds.find(b => b.id === entryId);
+
     placeholder.style.display = "flex";
     placeholder.innerHTML = `
         <div class="placeholder-inner" id="publish-confirm-panel" style="white-space:normal; max-width:100%; box-sizing:border-box;">
@@ -1093,6 +1121,7 @@ function showPublishConfirmPanel(buildName, entryId) {
             <div style="font-size:22px; font-weight:700; color:#f5c542; margin-bottom:8px;">
                 ${escapeHtml(buildName)}
             </div>
+            ${_tagChipsHtml(_publishEntry?.tags ?? [])}
             <div style="font-size:13px; color:#aaa; margin-bottom:4px; text-align:center; line-height:1.6;">
                 ${escapeHtml(t("publish.confirm"))}
             </div>
@@ -1145,9 +1174,10 @@ function _restoreNormalPlaceholder() {
                  src="${escapeHtml(imgSrc)}"
                  style="${imgSrc ? "" : "display:none;"}max-height:120px; object-fit:contain; margin-bottom:16px;" />
             <div id="gun-display-name"
-                 style="font-size:22px; font-weight:700; color:#f5c542; margin-bottom:16px;">
+                 style="font-size:22px; font-weight:700; color:#f5c542; margin-bottom:8px;">
                 ${escapeHtml(gun.name)}
             </div>
+            <div id="build-display-tags" style="margin-bottom:8px;">${_tagChipsHtml(_currentBuildTags())}</div>
             <strong><em id="placeholder-main">${escapeHtml(t("placeholder.modding"))}</em></strong>
             <span class="placeholder-sub">
                 <strong><em id="placeholder-sub">${escapeHtml(t(isMobileLayout() ? "placeholder.longPress" : "placeholder.rightClick"))}</em></strong>
@@ -1181,6 +1211,9 @@ async function _confirmPublish(buildName, entryId) {
     const userProfile = EFTForge.profile ? EFTForge.profile.getProfile() : {};
 
     try {
+        const { builds: _publishBuilds } = loadSavedBuilds();
+        const _publishLocalEntry = _publishBuilds.find(b => b.id === entryId);
+
         const result = await EFTForge.api.publishBuild({
             gun_id:            gun.id,
             build_name:        buildName,
@@ -1189,6 +1222,7 @@ async function _confirmPublish(buildName, entryId) {
             ammo_id:           ammoId,
             author_username:   userProfile.username   || null,
             author_avatar_url: userProfile.avatar_url || null,
+            tags:              _publishLocalEntry?.tags ?? [],
         });
 
         // Mark this build as published so its button shows "Published" (greyed out)
@@ -1331,6 +1365,31 @@ async function _renderPublicBuilds(gunId) {
     }).catch(() => {});
 }
 
+function _toggleCbTagFilter(tag) {
+    if (_activeCbTagFilters.has(tag)) _activeCbTagFilters.delete(tag);
+    else _activeCbTagFilters.add(tag);
+    _applyPublicBuildsFilter();
+}
+window._toggleCbTagFilter = _toggleCbTagFilter;
+
+function _renderCbTagFilterRow(pool) {
+    const { t } = EFTForge.lang;
+    const allTags = [...new Set(pool.flatMap(b => b.tags ?? []))];
+    if (allTags.length === 0) {
+        const row = document.getElementById("cb-tag-filter-row");
+        if (row) row.innerHTML = "";
+        return;
+    }
+    for (const tag of [..._activeCbTagFilters]) {
+        if (!allTags.includes(tag)) _activeCbTagFilters.delete(tag);
+    }
+    const row = document.getElementById("cb-tag-filter-row");
+    if (!row) return;
+    row.innerHTML = allTags.map(tag =>
+        `<button class="build-tag-chip${_activeCbTagFilters.has(tag) ? " active" : ""}" data-tag="${escapeHtml(tag)}" onclick="_toggleCbTagFilter('${escapeHtml(tag)}')">${escapeHtml(t("tag." + tag))}</button>`
+    ).join("");
+}
+
 function _applyPublicBuildsFilter() {
     const container = document.getElementById("public-builds-list");
     if (!container || !container._publicBuilds) return;
@@ -1347,6 +1406,12 @@ function _applyPublicBuildsFilter() {
             const authorZh = (b.author_display_name_zh || "").toLowerCase();
             return name.includes(query) || author.includes(query) || authorZh.includes(query);
         });
+    }
+
+    if (_activeCbTagFilters.size > 0) {
+        builds = builds.filter(b =>
+            [..._activeCbTagFilters].every(tag => (b.tags ?? []).includes(tag))
+        );
     }
 
     const ratings = EFTForge.state.buildRatingsCache || {};
@@ -1376,11 +1441,13 @@ function _applyPublicBuildsFilter() {
             });
     }
 
+    _renderCbTagFilterRow(container._publicBuilds);
+
     const countEl = document.getElementById("public-builds-count");
     if (countEl) {
         const total = container._publicBuilds.length;
         const shown = builds.length;
-        countEl.textContent = query ? `${shown} / ${total}` : `${total}`;
+        countEl.textContent = (query || _activeCbTagFilters.size > 0) ? `${shown} / ${total}` : `${total}`;
     }
 
     if (builds.length === 0) {
@@ -1455,6 +1522,7 @@ function _applyPublicBuildsFilter() {
                         <span class="cb-author-name"><span class="marquee-text">${escapeHtml(authorName)}</span></span>
                     </div>
                     <div class="cb-load-count">${b.load_count ?? 0} ${t("cb.loads")}</div>
+                    ${(b.tags ?? []).length > 0 ? `<div class="cb-card-tags">${(b.tags).map(tag => `<span class="build-tag-chip" data-tag="${escapeHtml(tag)}">${escapeHtml(t("tag." + tag))}</span>`).join("")}</div>` : ""}
                 </div>
                 <div class="cb-stats">
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.ergo")}</div><div class="cb-stat-val">${fmtErgo}</div></div>
@@ -1521,6 +1589,35 @@ async function _loadPublicBuildByIdx(idx) {
     // Set after loadBuildFromPayload (which calls selectGun internally, clearing communityBuild).
     // syncBuildDisplayName was already called at the end of loadBuildFromPayload, so call it again
     // now that communityBuild is populated.
+    EFTForge.state.communityBuild = communityBuildInfo;
+    syncBuildDisplayName();
+}
+
+async function _loadMyCommunityBuildByIdx(idx) {
+    const container = document.getElementById("my-community-list");
+    if (!container) return;
+
+    const pool  = container._displayedMyBuilds || container._myBuilds;
+    if (!pool) return;
+    const build = pool[parseInt(idx, 10)];
+    if (!build || !build.pairs) return;
+
+    const { t } = EFTForge.lang;
+    const communityBuildInfo = {
+        pairsKey:     _pairsKey(build.pairs),
+        authorName:   build.user_display_name || t("modal.anonymousAuthor"),
+        avatarUrl:    build.user_avatar_url   || null,
+        buildName:    build.build_name,
+        cardImageUrl: build.card_image_url    || null,
+    };
+
+    const dlg = document.getElementById("builds-dialog");
+    if (dlg) dlg.remove();
+
+    EFTForge.api.recordBuildLoad(build.id);
+
+    await loadBuildFromPayload({ g: build.gun_id, p: build.pairs, a: build.ammo_id || null }, build.build_name);
+
     EFTForge.state.communityBuild = communityBuildInfo;
     syncBuildDisplayName();
 }
@@ -1777,7 +1874,9 @@ function _applyMyCommunityFilter() {
         return;
     }
 
-    container.innerHTML = builds.map(b => {
+    container._displayedMyBuilds = builds;
+
+    container.innerHTML = builds.map((b, idx) => {
         const gunName    = gunLookup.get(b.gun_id) || b.gun_name || "";
         const gunObj     = (EFTForge.state.allGuns || []).find(g => g.id === b.gun_id);
         const gunImgSrc  = gunObj ? (gunObj.image_512_link || gunObj.icon_link || "") : "";
@@ -1813,6 +1912,7 @@ function _applyMyCommunityFilter() {
                     <div class="cb-publish-date">${fmtDate}</div>
                     <div style="color:#555; font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(gunName)}</div>
                     <div class="cb-load-count">${b.load_count ?? 0} ${t("cb.loads")}</div>
+                    ${(b.tags ?? []).length > 0 ? `<div class="cb-card-tags">${(b.tags).map(tag => `<span class="build-tag-chip" data-tag="${escapeHtml(tag)}">${escapeHtml(t("tag." + tag))}</span>`).join("")}</div>` : ""}
                 </div>
                 <div class="cb-stats">
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.ergo")}</div><div class="cb-stat-val">${fmtErgo}</div></div>
@@ -1833,6 +1933,8 @@ function _applyMyCommunityFilter() {
                             onclick="_confirmUnlistMyBuild(this,'${b.id}')">${t("modal.unlistBtn")}</button>
                     <button class="saved-build-btn cb-comments-toggle-btn" data-build-id="${b.id}"
                             onclick="_toggleBuildComments(event,${b.id})">${t("cb.comments")}${b.comment_count > 0 ? ` (${b.comment_count})` : ""}</button>
+                    <button class="saved-build-btn load-btn" data-my-idx="${idx}"
+                            onclick="_loadMyCommunityBuildByIdx(this.dataset.myIdx)">${t("ui.load")}</button>
                 </div>
                 <div class="cb-comments-section" id="cb-comments-${b.id}" style="display:none;"></div>
             </div>

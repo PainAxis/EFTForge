@@ -1,5 +1,6 @@
 window.EFTForge = window.EFTForge || {};
 
+
 // Apply a server-resolved factory_tree onto a build-tree node.
 // Used both on initial gun select and on reset build so both paths
 // produce identical tree structure (same slot IDs, same nesting).
@@ -482,6 +483,9 @@ async function selectGun(gun, liElement) {
             gunDisplayImage.style.display = "none";
         }
     }
+
+    const buildDisplayTags = document.getElementById("build-display-tags");
+    if (buildDisplayTags) buildDisplayTags.innerHTML = "";
 
   const selectGunOverlay = startPanelLoading(document.querySelector(".left-panel"), 1000);
 
