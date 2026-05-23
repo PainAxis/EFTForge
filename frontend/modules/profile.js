@@ -249,7 +249,8 @@ function showProfileModal() {
                 " class="avatar-hover-hint">${escapeHtml(t("profile.changeAvatar"))}</div>
                 <input id="profile-avatar-input" type="file" accept="image/jpeg,image/png,image/webp" style="display:none;" />
             </div>
-            <div id="profile-avatar-status" style="font-size:11px;color:#888;min-height:14px;text-align:center;"></div>
+            <div id="profile-avatar-username" style="font-size:18px;color:#f5c542;text-align:center;font-weight:700;">${escapeHtml(profile.username)}</div>
+            <div id="profile-avatar-status" style="font-size:11px;color:#888;text-align:center;display:none;"></div>
         </div>
 
         <hr class="modal-divider">
@@ -286,13 +287,14 @@ function showProfileModal() {
         </div>
     `;
 
-    const avatarWrap    = body.querySelector("#profile-avatar-wrap");
-    const avatarInput   = body.querySelector("#profile-avatar-input");
-    const avatarPreview = body.querySelector("#profile-avatar-preview");
-    const avatarHint    = body.querySelector(".avatar-hover-hint");
-    const avatarStatus  = body.querySelector("#profile-avatar-status");
-    const usernameInput = body.querySelector("#profile-username-input");
-    const usernameHint  = body.querySelector("#profile-username-hint");
+    const avatarWrap        = body.querySelector("#profile-avatar-wrap");
+    const avatarInput       = body.querySelector("#profile-avatar-input");
+    const avatarPreview     = body.querySelector("#profile-avatar-preview");
+    const avatarHint        = body.querySelector(".avatar-hover-hint");
+    const avatarStatus      = body.querySelector("#profile-avatar-status");
+    const avatarUsername    = body.querySelector("#profile-avatar-username");
+    const usernameInput     = body.querySelector("#profile-username-input");
+    const usernameHint      = body.querySelector("#profile-username-hint");
     const saveBtn       = body.querySelector("#profile-modal-save");
     const closeBtn      = body.querySelector("#profile-modal-close");
 
@@ -310,6 +312,7 @@ function showProfileModal() {
         if (file.size > _AVATAR_MAX_BYTES) {
             avatarStatus.textContent = t("profile.avatarTooLarge");
             avatarStatus.style.color = "#c0392b";
+            avatarStatus.style.display = "";
             return;
         }
 
@@ -319,6 +322,7 @@ function showProfileModal() {
                 pendingAvatarFile = croppedFile;
                 avatarStatus.textContent = t("profile.avatarSelected");
                 avatarStatus.style.color = "#888";
+                avatarStatus.style.display = "";
                 const reader = new FileReader();
                 reader.onload = e => { avatarPreview.src = e.target.result; };
                 reader.readAsDataURL(croppedFile);
@@ -343,6 +347,7 @@ function showProfileModal() {
                 usernameHint.style.color = "#666";
             }, 2000);
         }
+        avatarUsername.textContent = usernameInput.value;
     });
 
     closeBtn.addEventListener("click", _closeProfileModal);
@@ -359,12 +364,18 @@ function showProfileModal() {
             pendingAvatarUrl  = "";
             pendingAvatarFile = null;
         }
+        if (!hasChanges) {
+            _closeProfileModal();
+            return;
+        }
+
         saveBtn.disabled = true;
         saveBtn.textContent = t("profile.saving");
 
         if (pendingAvatarFile) {
             avatarStatus.textContent = t("profile.avatarUploading");
             avatarStatus.style.color = "#f5c542";
+            avatarStatus.style.display = "";
             try {
                 const result = await EFTForge.api.uploadAvatar(pendingAvatarFile);
                 pendingAvatarUrl  = result.avatar_url;
@@ -372,6 +383,7 @@ function showProfileModal() {
             } catch (err) {
                 avatarStatus.textContent = err.message || t("profile.avatarError");
                 avatarStatus.style.color = "#c0392b";
+                avatarStatus.style.display = "";
                 avatarPreview.src = profile.avatar_url || "./assets/images/tarkovcitizen.jpg";
                 pendingAvatarUrl  = profile.avatar_url || "";
                 pendingAvatarFile = null;
@@ -384,8 +396,18 @@ function showProfileModal() {
         try {
             await EFTForge.api.updateUserProfile(newName, pendingAvatarUrl);
         } catch (err) {
-            // best-effort - don't block local save on server error
-            console.warn("profile update server error:", err.message);
+            const msg = err.message || "";
+            const isRateLimit = msg.toLowerCase().includes("wait") || msg.includes("429");
+            if (isRateLimit) {
+                avatarStatus.textContent = msg;
+                avatarStatus.style.color = "#c0392b";
+                avatarStatus.style.display = "";
+                saveBtn.disabled = false;
+                saveBtn.textContent = t("profile.save");
+                return;
+            }
+            // other server errors are best-effort - don't block local save
+            console.warn("profile update server error:", msg);
         }
 
         setProfile({ username: newName, avatar_url: pendingAvatarUrl });

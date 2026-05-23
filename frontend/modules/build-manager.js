@@ -1447,8 +1447,6 @@ function _applyPublicBuildsFilter() {
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.ergo")}</div><div class="cb-stat-val">${fmtErgo}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.verRecoil")}</div><div class="cb-stat-val">${fmtVRec}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.horRecoil")}</div><div class="cb-stat-val">${fmtHRec}</div></div>
-                    <!-- <div class="cb-stat"><div class="cb-stat-label">${t("stats.eed")}</div><div class="cb-stat-val ${eedClass}">${fmtEED}</div></div> -->
-                    <!-- <div class="cb-stat"><div class="cb-stat-label">${t("cb.statOverswing")}</div><div class="cb-stat-val ${osClass}">${fmtOS}</div></div> -->
                     <div class="cb-stat"><div class="cb-stat-label">${t("cb.statCost")}</div><div class="cb-stat-val cb-price">${fmtPrice}</div></div>
                 </div>
                 <div class="cb-card-footer">
@@ -1781,8 +1779,6 @@ function _renderMyCommunityBuilds(builds) {
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.ergo")}</div><div class="cb-stat-val">${fmtErgo}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.verRecoil")}</div><div class="cb-stat-val">${fmtVRec}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.horRecoil")}</div><div class="cb-stat-val">${fmtHRec}</div></div>
-                    <!-- <div class="cb-stat"><div class="cb-stat-label">${t("stats.eed")}</div><div class="cb-stat-val ${eedClass}">${fmtEED}</div></div> -->
-                    <!-- <div class="cb-stat"><div class="cb-stat-label">${t("cb.statOverswing")}</div><div class="cb-stat-val ${osClass}">${fmtOS}</div></div> -->
                     <div class="cb-stat"><div class="cb-stat-label">${t("cb.statCost")}</div><div class="cb-stat-val">-</div></div>
                 </div>
                 <div class="cb-card-footer">

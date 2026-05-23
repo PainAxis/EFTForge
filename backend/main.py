@@ -307,11 +307,19 @@ _PUBLISH_COOLDOWN = 60.0
 
 # comment rate limit: client_id_hash -> monotonic time of last successful comment
 _comment_last: dict[str, float] = {}
-_COMMENT_COOLDOWN = 120.0  # 2 minutes
+_COMMENT_COOLDOWN = 60.0  # 1 minute
 
 # account transfer rate limit
 _transfer_last: dict[str, float] = {}
 _TRANSFER_COOLDOWN = 60.0
+
+# avatar upload rate limit
+_avatar_last: dict[str, float] = {}
+_AVATAR_COOLDOWN = 90.0
+
+# username update rate limit
+_username_last: dict[str, float] = {}
+_USERNAME_COOLDOWN = 60.0
 
 _HTML_TAG_RE = re.compile(r'<[^>]+>')
 
@@ -2943,6 +2951,14 @@ def upload_avatar(
     client_hash = _get_client_id_hash(x_client_id)
     _check_client_ban(client_hash, db)
 
+    now_mono = time.monotonic()
+    stale = [k for k, v in _avatar_last.items() if now_mono - v > _AVATAR_COOLDOWN * 2]
+    for k in stale:
+        del _avatar_last[k]
+    if now_mono - _avatar_last.get(client_hash, 0.0) < _AVATAR_COOLDOWN:
+        wait = int(_AVATAR_COOLDOWN - (now_mono - _avatar_last[client_hash])) + 1
+        raise HTTPException(status_code=429, detail=f"Please wait {wait}s before uploading another avatar.")
+
     if not GITEE_TOKEN and not GITEE_DRY_RUN:
         raise HTTPException(status_code=503, detail="Avatar upload is not configured on this server.")
 
@@ -2955,6 +2971,7 @@ def upload_avatar(
         raise HTTPException(status_code=413, detail="Avatar image must be under 2 MB.")
 
     if GITEE_DRY_RUN:
+        _avatar_last[client_hash] = now_mono
         dry_url = f"{_GITEE_AVATAR_PREFIX}avatar_{client_hash[:20]}.jpg"
         return {"avatar_url": dry_url}
 
@@ -2966,6 +2983,7 @@ def upload_avatar(
         _logger.error("avatar-upload: failed for client %s: %s", client_hash[:8], exc)
         raise HTTPException(status_code=502, detail="Avatar upload to asset storage failed.")
 
+    _avatar_last[client_hash] = now_mono
     return {"avatar_url": avatar_url}
 
 
@@ -2977,6 +2995,14 @@ def update_profile(
     db:               Session  = Depends(get_builds_db),
 ):
     client_hash = _get_client_id_hash(x_client_id)
+
+    now_mono = time.monotonic()
+    stale = [k for k, v in _username_last.items() if now_mono - v > _USERNAME_COOLDOWN * 2]
+    for k in stale:
+        del _username_last[k]
+    if now_mono - _username_last.get(client_hash, 0.0) < _USERNAME_COOLDOWN:
+        wait = int(_USERNAME_COOLDOWN - (now_mono - _username_last[client_hash])) + 1
+        raise HTTPException(status_code=429, detail=f"Please wait {wait}s before updating your profile again.")
 
     clean_name = _sanitize_username(username) if username else None
     try:
@@ -2999,6 +3025,7 @@ def update_profile(
         c.user_avatar_url   = clean_avatar or None
 
     db.commit()
+    _username_last[client_hash] = now_mono
     return {"updated_builds": len(builds), "updated_comments": len(comments)}
 
 
@@ -3014,7 +3041,7 @@ def transfer_preview(
     if not _CLIENT_ID_RE.match(old_uuid_clean):
         raise HTTPException(status_code=400, detail="Invalid UUID format.")
     if old_uuid_clean == x_client_id.strip().lower():
-        raise HTTPException(status_code=400, detail="That is your current Account ID.")
+        raise HTTPException(status_code=400, detail="That is your current UUID.")
 
     old_hash = hmac.new(IP_HASH_SECRET.encode(), old_uuid_clean.encode(), hashlib.sha256).hexdigest()
 
@@ -3053,7 +3080,7 @@ def transfer_account(
     if not _CLIENT_ID_RE.match(old_uuid_clean):
         raise HTTPException(status_code=400, detail="Invalid UUID format.")
     if old_uuid_clean == x_client_id.strip().lower():
-        raise HTTPException(status_code=400, detail="That is your current Account ID.")
+        raise HTTPException(status_code=400, detail="That is your current UUID.")
 
     old_hash = hmac.new(IP_HASH_SECRET.encode(), old_uuid_clean.encode(), hashlib.sha256).hexdigest()
 
