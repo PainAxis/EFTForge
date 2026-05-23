@@ -28,13 +28,8 @@ def _calc_eed(total_ergo: float, total_weight: float, equip_ergo_modifier: float
     return -15 * _calc_evo_weight(total_ergo, total_weight, equip_ergo_modifier)
 
 
-def _calc_arm_stamina(total_weight: float, total_ergo: float, strength_level: int, equip_ergo_modifier: float = 0.0) -> float:
-    b = equip_ergo_modifier
-    return (
-        (85.5 / (total_weight + 0.65))
-        + 9.15
-        + 0.06477 * total_ergo * (1 + b / 2)
-    ) / 1.04 * (1 + strength_level * 0.004)
+def _calc_arm_stamina(total_weight: float, total_ergo: float) -> float:
+    return 233.65 / (total_weight + 0.83) + 0.185 * total_ergo + 23.16
 
 
 # ---------------------------------------------------------------------------
@@ -89,40 +84,28 @@ class TestCalcEED:
 # ---------------------------------------------------------------------------
 
 class TestCalcArmStamina:
-    def test_higher_strength_increases_stamina(self):
-        base = _calc_arm_stamina(4.0, 50, 10)
-        high = _calc_arm_stamina(4.0, 50, 51)
-        assert high > base
-
     def test_heavier_build_decreases_stamina(self):
-        light = _calc_arm_stamina(3.0, 50, 10)
-        heavy = _calc_arm_stamina(7.0, 50, 10)
+        light = _calc_arm_stamina(3.0, 50)
+        heavy = _calc_arm_stamina(7.0, 50)
         assert heavy < light
 
     def test_higher_ergo_increases_stamina(self):
-        low_ergo  = _calc_arm_stamina(4.0, 30, 10)
-        high_ergo = _calc_arm_stamina(4.0, 70, 10)
+        low_ergo  = _calc_arm_stamina(4.0, 30)
+        high_ergo = _calc_arm_stamina(4.0, 70)
         assert high_ergo > low_ergo
 
-    def test_strength_level_zero(self):
-        # multiplier = (1 + 0 * 0.004) = 1.0 - formula still valid
-        stamina = _calc_arm_stamina(4.0, 50, 0)
-        assert stamina > 0
-
     def test_result_is_finite(self):
-        stamina = _calc_arm_stamina(4.0, 50, 25, equip_ergo_modifier=-0.15)
+        stamina = _calc_arm_stamina(4.0, 50)
         assert math.isfinite(stamina)
 
     def test_symmetry_with_frontend_formula(self):
-        # JS calcArmStamina(4.0, 50, 10, 0):
-        #   = (85.5/4.65 + 9.15 + 0.06477*50) / 1.04 * 1.04
-        #   = (18.387 + 9.15 + 3.2385) / 1.04 * 1.04
-        #   = 30.776 / 1.04 * 1.04 = 30.776
-        stamina = _calc_arm_stamina(4.0, 50, 10, 0.0)
-        assert abs(round(stamina, 1) - round(
-            ((85.5 / (4.0 + 0.65)) + 9.15 + 0.06477 * 50 * (1 + 0.0 / 2)) / 1.04 * (1 + 10 * 0.004),
-            1
-        )) < 0.1
+        # JS calcArmStamina(4.0, 50):
+        #   = 233.65 / (4.0 + 0.83) + 0.185 * 50 + 23.16
+        #   = 233.65 / 4.83 + 9.25 + 23.16
+        #   = 48.37 + 9.25 + 23.16 = 80.78
+        stamina = _calc_arm_stamina(4.0, 50)
+        expected = 233.65 / (4.0 + 0.83) + 0.185 * 50 + 23.16
+        assert abs(stamina - expected) < 0.01
 
 
 # ---------------------------------------------------------------------------

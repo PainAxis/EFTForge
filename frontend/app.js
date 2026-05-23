@@ -1660,6 +1660,16 @@ async function switchLang(lang) {
                         </div>
                         <div id="dev-tracker-inject-out" class="dev-debugger-output"></div>
 
+                        <div class="dev-modal-section-label" style="padding-top:18px;">LocalStorage</div>
+                        <div class="dev-modal-row">
+                            <span class="dev-modal-row-label">eftforge_* keys</span>
+                            <div style="display:flex;gap:6px;">
+                                <button id="dev-ls-refresh-btn" class="dev-debugger-run-btn" style="display:none;">REFRESH</button>
+                                <button id="dev-ls-toggle-btn" class="dev-debugger-run-btn">EXPAND</button>
+                            </div>
+                        </div>
+                        <div id="dev-ls-list" class="dev-ls-list" style="display:none;"></div>
+
                     </div>
                 </div>
             </div>
@@ -1720,6 +1730,55 @@ async function switchLang(lang) {
             const count = EFTForge._dev.trackerInject();
             out.textContent = `Injected ${count} fake entries. Open the Tracker panel to see them.`;
             out.style.display = "block";
+        });
+
+        function _renderLsItems() {
+            const container = document.getElementById("dev-ls-list");
+            if (!container) return;
+            const keys = Object.keys(localStorage)
+                .filter(k => k.startsWith("eftforge_"))
+                .sort();
+            if (keys.length === 0) {
+                container.innerHTML = `<div class="dev-ls-empty">No eftforge_* keys found.</div>`;
+                return;
+            }
+            container.innerHTML = keys.map(k => {
+                const val = localStorage.getItem(k) ?? "";
+                const preview = val.length > 60 ? val.slice(0, 60) + "…" : val;
+                return `<div class="dev-ls-row" data-key="${escapeHtml(k)}">
+                    <div class="dev-ls-key">${escapeHtml(k.replace("eftforge_", ""))}</div>
+                    <div class="dev-ls-val" title="${escapeHtml(val)}">${escapeHtml(preview)}</div>
+                    <button class="dev-ls-clear-btn">CLEAR</button>
+                </div>`;
+            }).join("");
+        }
+
+        const _lsList = document.getElementById("dev-ls-list");
+        const _lsRefreshBtn = document.getElementById("dev-ls-refresh-btn");
+        const _lsToggleBtn = document.getElementById("dev-ls-toggle-btn");
+        let _lsExpanded = false;
+
+        _lsToggleBtn.addEventListener("click", () => {
+            _lsExpanded = !_lsExpanded;
+            _lsList.style.display = _lsExpanded ? "" : "none";
+            _lsRefreshBtn.style.display = _lsExpanded ? "" : "none";
+            _lsToggleBtn.textContent = _lsExpanded ? "COLLAPSE" : "EXPAND";
+            if (_lsExpanded) _renderLsItems();
+        });
+
+        _lsRefreshBtn.addEventListener("click", _renderLsItems);
+
+        _lsList.addEventListener("click", e => {
+            const btn = e.target.closest(".dev-ls-clear-btn");
+            if (!btn) return;
+            const row = btn.closest(".dev-ls-row");
+            const key = row?.dataset.key;
+            if (!key) return;
+            localStorage.removeItem(key);
+            row.remove();
+            if (_lsList.children.length === 0) {
+                _lsList.innerHTML = `<div class="dev-ls-empty">No eftforge_* keys found.</div>`;
+            }
         });
     }
 

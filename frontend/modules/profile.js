@@ -224,6 +224,12 @@ function showProfileModal() {
     const overlay = _createModalOverlay("profile-modal-overlay", t("profile.title"), { maxWidth: "500px" });
     if (!overlay) return;
 
+    if (!localStorage.getItem("eftforge_profile_seen")) {
+        localStorage.setItem("eftforge_profile_seen", "1");
+        const profileBtn = document.getElementById("profile-nav-btn");
+        if (profileBtn) profileBtn.dataset.badge = "";
+    }
+
     const profile = getProfile();
     const defaultAvatar = "./assets/images/tarkovcitizen.jpg";
     const avatarSrc = profile.avatar_url || defaultAvatar;
@@ -584,6 +590,9 @@ function _updateProfileBtn() {
     if (label) {
         const t = EFTForge.lang.t;
         label.textContent = profile.username || t("modal.anonymousAuthor");
+        if (!localStorage.getItem("eftforge_profile_seen")) {
+            btn.dataset.badge = t("ui.newBadge");
+        }
     }
 }
 

@@ -397,11 +397,7 @@ def _compute_stats(base_item, current_ids: list, items_map: dict,
     evo_weight = total_weight - KG
     eed = -15 * evo_weight
 
-    arm_stamina = (
-        (85.5 / (total_weight + 0.65))
-        + 9.15
-        + 0.06477 * total_ergo * (1 + b / 2)
-    ) / 1.04 * (1 + strength_level * 0.004)
+    arm_stamina = 233.65 / (total_weight + 0.83) + 0.185 * total_ergo + 23.16
 
     # Effective sighting range: max scope sighting range installed, else weapon base
     effective_sighting_range = base_item.sighting_range
@@ -916,11 +912,7 @@ def calculate_build(
         stats["evo_ergo_delta"] = round(-15 * evo_weight, 2)
         stats["overswing"] = evo_weight > 0
         stats["arm_stamina"] = round(
-            (
-                (85.5 / (stats["total_weight"] + 0.65))
-                + 9.15
-                + 0.06477 * stats["total_ergo"] * (1 + b / 2)
-            ) / 1.04 * (1 + strength_level * 0.004),
+            233.65 / (stats["total_weight"] + 0.83) + 0.185 * stats["total_ergo"] + 23.16,
             1
         )
 
@@ -1682,11 +1674,7 @@ def get_gun_init(
         stats["evo_ergo_delta"] = round(-15 * evo_weight, 2)
         stats["overswing"] = evo_weight > 0
         stats["arm_stamina"] = round(
-            (
-                (85.5 / (stats["total_weight"] + 0.65))
-                + 9.15
-                + 0.06477 * stats["total_ergo"] * (1 + b / 2)
-            ) / 1.04 * (1 + strength_level * 0.004),
+            233.65 / (stats["total_weight"] + 0.83) + 0.185 * stats["total_ergo"] + 23.16,
             1
         )
 

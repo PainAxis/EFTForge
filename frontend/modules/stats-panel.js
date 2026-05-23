@@ -44,6 +44,7 @@ function _saveTraderLevels() {
 }
 
 let _fleaFetching = false;
+let _armStamFlashDone = false;
 let _fleaDotsInterval = null;
 let _traderLevelsOpen = false;
 
@@ -576,15 +577,13 @@ function syncAmmoDisabledState() {
     if (!el) continue;
     el.classList.toggle("ammo-disabled", disabled);
     if (disabled) {
-      if (!el._ammoDisabledHandler) {
-        el._ammoDisabledHandler = () => {
-          const { t: _t } = EFTForge.lang;
-          showToast(_t("stats.ammoDisabledTitle"), _t("stats.ammoDisabledTip"), 2500);
-        };
-      }
-      el.addEventListener("click", el._ammoDisabledHandler);
-    } else if (el._ammoDisabledHandler) {
+      el.dataset.tooltip = `${t("stats.ammoDisabledTip")}`;
+    } else {
+      delete el.dataset.tooltip;
+    }
+    if (el._ammoDisabledHandler) {
       el.removeEventListener("click", el._ammoDisabledHandler);
+      el._ammoDisabledHandler = null;
     }
   }
 }
@@ -827,9 +826,10 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
         <span class="deprecated-group-note"></span>
       </div>
       */}
-      <div class="stat-row">
+      <div class="stat-row" id="arm-stam-row">
         <span class="stat-label">${t("stats.armStamina")}<span class="stamina-info-btn" id="stamina-info-btn" data-tooltip="${t("stats.configStrengthTooltip")}">i</span>:</span>
         <span>${armStamina.toFixed(1)}s</span>
+        ${!localStorage.getItem("eftforge_armstam_v3_seen") ? `<span class="stam-updated-badge" id="stam-updated-badge">${t("stats.updatedBadge")}</span>` : ""}
       </div>
       ${sightingRange !== null ? `<div class="stat-row"><span class="stat-label">${t("stats.sightingRange")}</span><span>${sightingRange} m</span></div>` : ""}
       </div>
@@ -877,8 +877,25 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
     });
   }));
 
+  // First-time arm stamina formula update flash
+  if (!localStorage.getItem("eftforge_armstam_v3_seen") && !_armStamFlashDone) {
+    _armStamFlashDone = true;
+    const row = document.getElementById("arm-stam-row");
+    if (row) {
+      row.classList.add("stat-row-gold-flash");
+      row.addEventListener("animationend", () => row.classList.remove("stat-row-gold-flash"), { once: true });
+    }
+  }
+
   // Toggle panel on i button click
   document.getElementById("stamina-info-btn").addEventListener("click", () => {
+      const badge = document.getElementById("stam-updated-badge");
+      if (badge) {
+        badge.classList.add("fade-out");
+        setTimeout(() => badge.remove(), 300);
+        localStorage.setItem("eftforge_armstam_v3_seen", "1");
+      }
+
       const existing = document.getElementById("stamina-panel");
       if (existing) {
           existing.style.height = existing.scrollHeight + "px";
@@ -896,12 +913,12 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
           panel.id = "stamina-panel";
           panel.innerHTML = `
               <span class="beta-badge">${t("stats.beta")}</span>
-                <div class="stamina-disclaimer">${t("stats.staminaDisclaimer").replace("\n", "<br>")}</div>
-              <div class="strength-control">
-                  <label style="color:#eee;">${t("stats.strengthLv")}</label>
+                <div class="stamina-disclaimer">${t("stats.staminaDisclaimer")} <a href="https://www.desmos.com/calculator/ym4itohyaf" target="_blank" rel="noopener" style="color:#aad4f5;">${t("stats.staminaFormulaLink")}</a></div>
+              <div class="strength-control locked" data-tooltip="${t("stats.strengthLockedTooltip")}">
+                  <label>${t("stats.strengthLv")}</label>
                   <div class="strength-input-row">
-                      <input type="range" id="strength-slider" min="0" max="51" step="1" value="${EFTForge.state.currentStrengthLevel}" />
-                      <input type="number" id="strength-input" min="0" max="51" value="${EFTForge.state.currentStrengthLevel}" />
+                      <input type="range" id="strength-slider" min="0" max="51" step="1" value="51" disabled />
+                      <input type="number" id="strength-input" min="0" max="51" value="51" disabled />
                   </div>
               </div>
           `;
@@ -994,7 +1011,7 @@ function wireStrengthControls() {
         numInput.value = EFTForge.state.currentStrengthLevel;
 
         // Recalculate arm stamina inline without triggering a DOM rebuild
-        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo, EFTForge.state.currentStrengthLevel, EFTForge.state.currentEquipErgoModifier);
+        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo);
 
         const staminaSpan = document.querySelector("#stamina-info-btn")?.closest(".stat-row")?.lastElementChild;
         if (staminaSpan) staminaSpan.textContent = armStamina.toFixed(1) + "s";
@@ -1003,7 +1020,7 @@ function wireStrengthControls() {
     slider.addEventListener("change", () => {
         // Update the display directly instead of triggering a full rebuild
         localStorage.setItem("eftforge_strength_level", EFTForge.state.currentStrengthLevel);
-        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo, EFTForge.state.currentStrengthLevel, EFTForge.state.currentEquipErgoModifier);
+        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo);
 
         const staminaSpan = document.querySelector("#stamina-info-btn")?.closest(".stat-row")?.lastElementChild;
         if (staminaSpan) staminaSpan.textContent = armStamina.toFixed(1) + "s";
@@ -1029,7 +1046,7 @@ function wireStrengthControls() {
         numInput.value = val;
         slider.value = val;
 
-        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo, EFTForge.state.currentStrengthLevel, EFTForge.state.currentEquipErgoModifier);
+        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo);
 
         const staminaSpan = document.querySelector("#stamina-info-btn")?.closest(".stat-row")?.lastElementChild;
         if (staminaSpan) staminaSpan.textContent = armStamina.toFixed(1) + "s";
@@ -1079,7 +1096,7 @@ function wireEquipErgoControls() {
             overswingSpan.textContent = overswing ? t("stats.yes") : t("stats.no");
         }
 
-        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo, EFTForge.state.currentStrengthLevel, EFTForge.state.currentEquipErgoModifier);
+        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo);
         const staminaSpan = document.querySelector("#stamina-info-btn")?.closest(".stat-row")?.lastElementChild;
         if (staminaSpan) staminaSpan.textContent = armStamina.toFixed(1) + "s";
     }
