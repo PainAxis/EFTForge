@@ -18,7 +18,7 @@
 
 ## Overview
 
-EFTForge is a full-stack Escape from Tarkov weapon build simulator and community platform. It provides a dual-view visual workbench, real-time stat calculations, live composite build preview images, flea/trader price fetching, and a community build publishing system with leaderboards. All item data is sourced from the [tarkov.dev](https://tarkov.dev) GraphQL API.
+EFTForge is a full-stack Escape from Tarkov weapon build simulator and community platform. It provides a dual-view visual workbench, real-time stat calculations, live composite build preview images, flea/trader price fetching, a combo calculator, attachment graphing, user profiles, build comments, and a community build publishing system with leaderboards. All item data is sourced from the [tarkov.dev](https://tarkov.dev) GraphQL API.
 
 ---
 
@@ -27,34 +27,32 @@ EFTForge is a full-stack Escape from Tarkov weapon build simulator and community
 ### Workbench
 - **Grid view** - attachment slots arranged spatially on a 2D canvas mirroring the physical weapon layout (barrel, stock, optics, grip, etc.), grouped into zones (Upper, Lower, Left, Right, Extras)
 - **List view** - traditional recursive attachment tree with full slot and allowed-item resolution
-- Factory preset auto-install simulation
-- Build State Intelligence - gun display name syncs to a saved build name when the installed attachments match it exactly
+- **Build State Intelligence** - gun display name syncs to a saved build name when the installed attachments match it exactly
+- **Build Image Export** - Export button in the workbench toolbar renders the current build to a PNG for saving or sharing
+
+### Slot Selector
+- **Attachment Favorites** - star button on each attachment row to bookmark items; favorites sort to the top and can be filtered via a header toggle; stored in localStorage
+- **Combo Calculator** - BFS search across all valid attachment combinations for a slot, ranked by a chosen stat; results stream live with a progress indicator; installs the full combination in one click
+- **Attachment Graph** - scatter plot of all attachments for the current slot on two configurable axes (V-Recoil, H-Recoil, Ergo, Recoil Modifier); zoom, pan, cluster cycling; custom cross-weapon graphs; exportable at 4x resolution
 
 ### Stat Calculation
-- Real-time stats: ergonomics, recoil, weight, arm stamina, sighting range
+- Real-time stats: ergonomics, recoil, weight, arm stamina, sighting range, etc.
 - Full magazine ammo weight modeling
-- EvoErgo Engine: arm stamina drain, EvoErgoDelta, OverSwing
-- **16 hidden per-weapon stats** sourced from tarkov.dev + SPT game files: aim deviation, recoil angle, camera snap, recoil dispersion, recoil return speed, mount recoil multipliers, and more
 - Real attachment conflict detection (`conflictingItems` + `conflictingSlotIds`)
 
 ### Live Build Preview
 - Composite gun image generated in real-time as attachments are added or removed
-- Powered by [image-gen.tarkov-changes.com](https://image-gen.tarkov-changes.com/build) via a backend Playwright proxy
+- Powered by [image-gen.tarkov-changes.com](https://image-gen.tarkov-changes.com) via a backend Playwright proxy
 - Server-side result cache (up to 500 entries)
 - Factory configs and bare guns use static tarkov.dev images directly
 - Preview toggle to disable generation when the service is slow or unavailable
 
-### Attachment Compare Mode
-- Set any installed attachment as a compare baseline
-- Hover other attachments in the slot table to see live stat deltas on the ergo and recoil bars
-- Weight and EED deltas update simultaneously in the stat panel
-
-### Price Panel
+### Price System
 - Per-item cost breakdown for every attachment in the current build
 - Cheapest source auto-selected between trader and flea market
 - PvP / PvE flea price cache toggle (separate caches, no re-fetch on switch)
 - Per-trader loyalty level gating (LL1-4) for Prapor, Skier, Peacekeeper, Mechanic, and Jaeger
-- Price chips visible inline in the attachment tree (Workbench list view) at a glance
+- Price chips visible in the attachment table at a glance
 - Attachment selector **Buyable** filter - hides attachments your traders cannot currently sell
 - Quest unlock notes on attachments that require completing a trader task
 
@@ -63,15 +61,24 @@ EFTForge is a full-stack Escape from Tarkov weapon build simulator and community
 - Each entry shows old/new values, percentage change, and the date detected
 - Covers a rolling 7-day window, grouped by date
 
+### User Profiles
+- Quasi-local identity system: your profile token lives in localStorage with no registration, password, or email required
+- Upload or update an avatar (resized to 128x128 JPEG, stored server-side)
+- Edit your display name; author avatar and name appear on every community build card
+- Account transfer flow to relink builds and comments when moving to a new device or browser
+
 ### Community Platform
 - Publish, browse, and load community-submitted builds
 - Auto-generated composite preview images hosted permanently on Gitee [https://gitee.com/morph1ne/eftforge-assets/](https://gitee.com/morph1ne/eftforge-assets/)
+- **Build Comments** - per-build comment thread; deletable by the author or an admin
+- **Build Tags** - up to 5 preset tags per build (e.g. Budget, Recoil, Meta); tag filter row in the community list collapses automatically when no filters are active
+- **My Community Builds** tab in the builds dialog to view and reload your own published builds
 - Voting (like/dislike) on builds and individual attachments
 - **Leaderboard** - top 10 trending / top 50 all-time for builds; top 20 / top 100 for attachments; filterable and sortable
 - Featured build system curated by admins
 - Build load count tracking
 - In-app notifications for admin moderation actions
-- Admin tools: feature, unlist, ban, announcements
+- Admin tools: feature, unlist, ban, comment moderation, announcements
 
 ### Build Management
 - Local saved builds (up to 500 per device)
@@ -207,15 +214,17 @@ The backend runs at `http://127.0.0.1:8000` by default. Interactive docs are ava
 
 | Group | Endpoints |
 |---|---|
-| Items | `GET /guns`, `GET /ammo/{caliber}`, `GET /items/{id}/slots`, `GET /slots/{id}/allowed-items` |
-| Build | `POST /build/validate`, `POST /build/calculate`, `POST /build/batch-process`, `GET /build/init/{gun_id}` |
-| Image Gen | `POST /build/image-gen` |
-| Ratings | `GET /ratings/attachments/bulk`, `POST /ratings/attachments/{id}/vote` |
-| Community Builds | `POST /builds/publish`, `GET /builds/public`, `POST /builds/{id}/load`, `DELETE /builds/{id}` |
+| Items | `GET /guns`, `GET /ammo/{caliber}`, `GET /items/{id}/slots`, `GET /slots/{id}/allowed-items`, `GET /graph/searchable-items` |
+| Build | `POST /build/validate`, `POST /build/calculate`, `POST /build/batch-process`, `POST /build/combo-batch-process`, `POST /build/combo-full`, `GET /guns/{gun_id}/init` |
+| Image Gen | `POST /build-image` |
+| Ratings | `GET /ratings/attachments/bulk`, `POST /ratings/attachments/{id}/vote`, `DELETE /ratings/attachments/{id}/vote`, `GET /ratings/builds/bulk`, `POST /ratings/builds/{id}/vote` |
+| Community Builds | `POST /builds/publish`, `GET /builds/public`, `GET /builds/mine`, `POST /builds/{id}/load`, `DELETE /builds/{id}` |
+| Comments | `GET /builds/{id}/comments`, `POST /builds/{id}/comments`, `DELETE /builds/{id}/comments/{comment_id}` |
+| Profile | `POST /profile/avatar`, `POST /profile/update`, `POST /profile/transfer/preview`, `POST /profile/transfer` |
 | Notifications | `GET /builds/notifications`, `GET /announcements` |
-| Stat Tracker | `GET /stat-changes` |
+| Stat Tracker | `GET /stat-changelog` |
 | Health | `GET /health` |
-| Admin | Build management, author management, ban system, announcements, migration tools |
+| Admin | Build management, comment moderation, author management, ban system, announcements, migration tools |
 
 ---
 
@@ -234,12 +243,6 @@ The build code is a LZ-String compressed, URL-safe encoded JSON payload:
 ```
 
 EFTForge will auto-load the build on page load and strip the parameter from the URL. Item IDs must match EFTForge's internal tarkov.dev item IDs.
-
----
-
-## EvoErgo Credit
-
-The EvoErgo concept was originally developed by **SpaceMonkey37**. EFTForge implements and expands upon this system in a live simulation environment. This project would not have been possible without SpaceMonkey37's foundational theory.
 
 ---
 

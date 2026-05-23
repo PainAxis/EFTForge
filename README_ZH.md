@@ -18,7 +18,7 @@
 
 ## 项目简介
 
-EFTForge 是一个逃离塔科夫武器配置模拟器与社区平台。它提供双视图可视化工作台、实时武器属性计算、实时合成配件预览图像、跳蚤市场/商人价格获取，以及带有排行榜的社区方案发布系统。所有物品数据均通过 [tarkov.dev](https://tarkov.dev) GraphQL API 获取。
+EFTForge 是一个逃离塔科夫武器配置模拟器与社区平台。它提供双视图可视化工作台、实时武器属性计算、实时合成配件预览图像、跳蚤市场/商人价格获取、组合计算器、配件图表视图、用户资料系统、配置评论、以及带有排行榜的社区方案发布系统。所有物品数据均通过 [tarkov.dev](https://tarkov.dev) GraphQL API 获取。
 
 --- 
 
@@ -27,34 +27,32 @@ EFTForge 是一个逃离塔科夫武器配置模拟器与社区平台。它提�
 ### 工作台
 - **网格视图** - 配件槽按照武器物理结构在二维画布上空间排列（枪管、枪托、瞄具、握把等），分为区域（上、下、左、右、其他）
 - **列表视图** - 传统递归配件树，完整解析槽位与允许物品
-- 出厂预设配件自动安装模拟
-- 智能方案识别 - 当已装配件与某保存方案完全一致时，武器显示名称自动同步为该方案名称
+- **智能方案识别** - 当已装配件与某保存方案完全一致时，武器显示名称自动同步为该方案名称
+- **配件收藏** - 每行配件均有星标按钮，收藏的配件置顶排列，可通过表头开关筛选；存储于 localStorage
+- **配置图片导出** - 工作台工具栏的导出按钮可将当前配置渲染为 PNG 图片供保存或分享
+
+### 配件选择器
+- **组合计算器** - 对当前槽位进行 BFS 搜索，枚举所有合法配件组合并按所选属性排序；结果实时流式显示并附进度提示；点击一行即安装完整组合
+- **配件图表** - 将当前槽位所有配件以两个可配置坐标轴（纵向后坐力、横向后坐力、人机、后坐力修正）绘制散点图；支持缩放、平移、聚簇浏览；可自定义跨武器图表并以 4x 分辨率导出
 
 ### 属性计算
 - 实时属性：人机功效、后坐力、重量、手臂耐力、瞄准距离
 - 完整弹匣装弹重量建模
-- EvoErgo 引擎：手臂耐力消耗、Evo人机Delta（EED）、过摆
-- **16 项隐藏武器属性**，来源于 tarkov.dev + SPT 游戏文件：瞄准偏差、后坐力角度、镜头回位速度、散射、架设射击倍率等
 - 真实配件冲突检测（`conflictingItems` + `conflictingSlotIds`）
 
 ### 实时配置预览
 - 添加或移除配件时，自动实时生成武器合成图像
-- 通过后端 Playwright 代理调用 [image-gen.tarkov-changes.com](https://image-gen.tarkov-changes.com/build)
+- 通过后端 Playwright 代理调用 [image-gen.tarkov-changes.com](https://image-gen.tarkov-changes.com)
 - 服务端结果缓存（最多 500 条）
 - 出厂配置与裸枪直接使用 tarkov.dev 静态图
 - 预览开关 - 在生成服务较慢或不可用时可禁用
-
-### 配件对比模式
-- 将任意已安装配件设为对比基准
-- 在槽位列表中悬停其他配件，即可在人机和后坐力条上看到实时属性差值
-- 重量与 EED 同步显示在属性面板中
 
 ### 价格面板
 - 当前配置中每件配件的费用明细
 - 自动选取商人与跳蚤市场中的最低价格
 - PvP / PvE 跳蚤价格缓存切换（独立缓存，切换无需重新请求）
-- 每个商人的忠诚度等级设置（LL1-4）
-- 配件树（工作台列表视图）中内联显示价格标签，一目了然
+- 每个商人等级设置（LL1-4）
+- 配件列表中显示价格标签，一目了然
 - 配件选择器**可购**筛选 - 隐藏当前忠诚度下无法购买的配件
 - 需要完成商人任务才能解锁的配件会显示任务名称提示
 
@@ -63,15 +61,24 @@ EFTForge 是一个逃离塔科夫武器配置模拟器与社区平台。它提�
 - 每条记录显示旧值/新值、变化百分比及检测日期
 - 覆盖滚动 7 天窗口，按日期分组
 
+### 用户资料
+- 准本地身份系统：资料令牌存储于 localStorage，无需注册、密码或邮箱
+- 上传或更新头像（调整为 128x128 JPEG 后存储于服务端）
+- 编辑显示名称；每张社区方案卡片显示作者头像与名称
+- 账号迁移流程，可在换设备或浏览器时将历史方案与评论重新绑定至新资料
+
 ### 社区平台
 - 发布、浏览和加载社区装配方案
 - 自动生成合成预览图，永久托管于 Gitee [https://gitee.com/morph1ne/eftforge-assets/](https://gitee.com/morph1ne/eftforge-assets/)
+- **配置评论** - 每个方案均有独立评论区；作者或管理员可删除评论
+- **配置标签** - 每个方案最多添加 5 个预设标签（如 Budget、Recoil、Meta 等）；社区列表顶部显示标签筛选栏，无筛选时自动收起
+- **我的社区配置**标签页，可在配置对话框中查看并重新加载自己发布的方案
 - 对方案和单个配件进行点赞/踩评分
 - **排行榜** - 方案：近期热门 Top 10 / 历史 Top 50；配件：Top 20 / Top 100；支持筛选与排序
 - 管理员精选推荐方案
 - 方案加载次数统计
 - 管理员操作的站内通知
-- 管理员工具：推荐、下架、封禁、公告
+- 管理员工具：推荐、下架、封禁、评论管理、公告
 
 ### 方案管理
 - 本地保存方案（每设备最多 500 个）
@@ -207,15 +214,17 @@ launch.bat
 
 | 分组 | 端点 |
 |---|---|
-| 物品 | `GET /guns`、`GET /ammo/{caliber}`、`GET /items/{id}/slots`、`GET /slots/{id}/allowed-items` |
-| 装配 | `POST /build/validate`、`POST /build/calculate`、`POST /build/batch-process`、`GET /build/init/{gun_id}` |
-| 图像生成 | `POST /build/image-gen` |
-| 评分 | `GET /ratings/attachments/bulk`、`POST /ratings/attachments/{id}/vote` |
-| 社区方案 | `POST /builds/publish`、`GET /builds/public`、`POST /builds/{id}/load`、`DELETE /builds/{id}` |
+| 物品 | `GET /guns`、`GET /ammo/{caliber}`、`GET /items/{id}/slots`、`GET /slots/{id}/allowed-items`、`GET /graph/searchable-items` |
+| 装配 | `POST /build/validate`、`POST /build/calculate`、`POST /build/batch-process`、`POST /build/combo-batch-process`、`POST /build/combo-full`、`GET /guns/{gun_id}/init` |
+| 图像生成 | `POST /build-image` |
+| 评分 | `GET /ratings/attachments/bulk`、`POST /ratings/attachments/{id}/vote`、`DELETE /ratings/attachments/{id}/vote`、`GET /ratings/builds/bulk`、`POST /ratings/builds/{id}/vote` |
+| 社区方案 | `POST /builds/publish`、`GET /builds/public`、`GET /builds/mine`、`POST /builds/{id}/load`、`DELETE /builds/{id}` |
+| 评论 | `GET /builds/{id}/comments`、`POST /builds/{id}/comments`、`DELETE /builds/{id}/comments/{comment_id}` |
+| 用户资料 | `POST /profile/avatar`、`POST /profile/update`、`POST /profile/transfer/preview`、`POST /profile/transfer` |
 | 通知 | `GET /builds/notifications`、`GET /announcements` |
-| 属性追踪 | `GET /stat-changes` |
+| 属性追踪 | `GET /stat-changelog` |
 | 健康检查 | `GET /health` |
-| 管理员 | 方案管理、作者管理、封禁系统、公告、迁移工具 |
+| 管理员 | 方案管理、评论管理、作者管理、封禁系统、公告、迁移工具 |
 
 ---
 
@@ -234,12 +243,6 @@ https://eftforge.com/?build=<lzstring编码的装配码>
 ```
 
 EFTForge 将在页面加载时自动导入装配方案并清除 URL 参数。物品 ID 须与 EFTForge 内部的 tarkov.dev 物品 ID 保持一致。
-
----
-
-## EvoErgo 致谢
-
-EvoErgo 概念由 **SpaceMonkey37** 原创提出。EFTForge 在其基础上实现并扩展了这一系统。没有 SpaceMonkey37 的基础理论，本项目将无从实现。
 
 ---
 
