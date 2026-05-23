@@ -1958,11 +1958,9 @@ function applyComboSort() {
         }
         if (primary !== 0) return primary * dir;
 
-        // Secondary: when sorting by recoil, break ties by evo ergo delta (higher = better, so descending)
-        if (sortKey === "recoil") {
-            const evoDiff = b.comboEEDDelta - a.comboEEDDelta;
-            if (evoDiff !== 0) return evoDiff;
-        }
+        // Secondary: break ties by ergo delta (higher = better, so descending)
+        const ergoDiff = b.comboErgoDelta - a.comboErgoDelta;
+        if (ergoDiff !== 0) return ergoDiff;
 
         // Tertiary: alphabetical
         return a.sortName < b.sortName ? -1 : a.sortName > b.sortName ? 1 : 0;
