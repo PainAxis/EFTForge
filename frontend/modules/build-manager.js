@@ -1730,7 +1730,7 @@ async function _deleteComment(event, commentId, buildId) {
             if (toggleBtn) toggleBtn.textContent = remaining > 0 ? `${t("cb.comments")} (${remaining})` : t("cb.comments");
         }
     } catch (err) {
-        showToast(t("toast.connectionError"), err.message || "Failed to delete comment.", 3000);
+        showToast(t("toast.connectionError"), err.message || t("cb.deleteCommentFailed"), 3000);
     }
 }
 window._deleteComment = _deleteComment;
@@ -1749,7 +1749,7 @@ async function _deleteOwnComment(event, commentId, buildId) {
             if (toggleBtn) toggleBtn.textContent = remaining > 0 ? `${t("cb.comments")} (${remaining})` : t("cb.comments");
         }
     } catch (err) {
-        showToast(t("toast.connectionError"), err.message || "Failed to delete comment.", 3000);
+        showToast(t("toast.connectionError"), err.message || t("cb.deleteCommentFailed"), 3000);
     }
 }
 window._deleteOwnComment = _deleteOwnComment;

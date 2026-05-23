@@ -399,7 +399,7 @@ function showProfileModal() {
             const msg = err.message || "";
             const isRateLimit = msg.toLowerCase().includes("wait") || msg.includes("429");
             if (isRateLimit) {
-                avatarStatus.textContent = msg;
+                avatarStatus.textContent = t("profile.profileRateLimit");
                 avatarStatus.style.color = "#c0392b";
                 avatarStatus.style.display = "";
                 saveBtn.disabled = false;
@@ -534,7 +534,12 @@ function _showTransferModal() {
         try {
             _previewData = await EFTForge.api.transferPreview(val);
         } catch (err) {
-            inputError.textContent = err.message || t("profile.transferNoData");
+            const rawMsg = err.message || "";
+            if (rawMsg.toLowerCase().includes("current") || rawMsg.toLowerCase().includes("yourself")) {
+                inputError.textContent = t("profile.transferSelf");
+            } else {
+                inputError.textContent = t("profile.transferError");
+            }
             previewBtn.disabled = false;
             previewBtn.textContent = t("profile.transferPreview");
             return;
@@ -588,7 +593,7 @@ function _showTransferModal() {
             if (errEl) {
                 const msg = document.createElement("div");
                 msg.style.cssText = "font-size:11px;color:#c0392b;margin-top:4px;";
-                msg.textContent = err.message;
+                msg.textContent = t("profile.transferFailed");
                 errEl.appendChild(msg);
             }
         }
