@@ -718,7 +718,7 @@ function showBuildsDialog() {
     const overlay = _createModalOverlay("builds-dialog", t("modal.builds"), {
         closeId:  "builds-modal-close",
         bodyId:   "builds-dialog-body",
-        maxWidth: "640px",
+        maxWidth: "820px",
         tabs: [
             { id: "bm-tab-saves",     label: t("modal.tabMyBuilds") },
             { id: "bm-tab-community", label: t("modal.tabCommunity") },
@@ -769,8 +769,16 @@ function showBuildsDialog() {
     `;
 
     document.getElementById("bm-tab-community").innerHTML = `
-        <div id="my-community-list" style="max-height:560px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:#444 #111;">
-            <div style="color:#555; font-size:13px; font-style:italic; padding:4px 0 2px 0;">${t("modal.myCommunityLoading")}</div>
+        <div class="modal-section">
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
+                <input id="my-community-search" type="text" class="search-input"
+                       style="font-size:13px; margin:0; flex:1;"
+                       placeholder="${escapeHtml(t("modal.searchBuilds"))}" />
+                <span id="my-community-count" style="font-size:11px; color:#555; white-space:nowrap;"></span>
+            </div>
+            <div id="my-community-list" style="max-height:520px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:#444 #111;">
+                <div style="color:#555; font-size:13px; font-style:italic; padding:4px 0 2px 0;">${t("modal.myCommunityLoading")}</div>
+            </div>
         </div>
     `;
 
@@ -778,6 +786,9 @@ function showBuildsDialog() {
 
     const searchInput = document.getElementById("builds-search-input");
     searchInput.addEventListener("input", () => renderSavedBuildsList(searchInput.value));
+
+    const myCommunitySearch = document.getElementById("my-community-search");
+    myCommunitySearch.addEventListener("input", _applyMyCommunityFilter);
 
     const modalWindow = overlay.querySelector(".modal-window");
 
@@ -805,6 +816,8 @@ function showBuildsDialog() {
     };
 
     overlay.addEventListener("dragover", (e) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        if (!document.getElementById("bm-tab-saves")?.classList.contains("active")) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
         showDrop();
@@ -1439,16 +1452,17 @@ function _applyPublicBuildsFilter() {
                     <div class="cb-publish-date">${fmtDate}</div>
                     <div class="cb-author">
                         <img src="${escapeHtml(avatarSrc)}" class="cb-avatar" onerror="this.src='./assets/images/tarkovcitizen.jpg';this.onerror=null;" />
-                        <span>${escapeHtml(authorName)}</span>
+                        <span class="cb-author-name"><span class="marquee-text">${escapeHtml(authorName)}</span></span>
                     </div>
                     <div class="cb-load-count">${b.load_count ?? 0} ${t("cb.loads")}</div>
                 </div>
                 <div class="cb-stats">
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.ergo")}</div><div class="cb-stat-val">${fmtErgo}</div></div>
+                    <div class="cb-stat"><div class="cb-stat-label">${t("cb.statCost")}</div><div class="cb-stat-val cb-price">${fmtPrice}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.verRecoil")}</div><div class="cb-stat-val">${fmtVRec}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.horRecoil")}</div><div class="cb-stat-val">${fmtHRec}</div></div>
-                    <div class="cb-stat"><div class="cb-stat-label">${t("cb.statCost")}</div><div class="cb-stat-val cb-price">${fmtPrice}</div></div>
                 </div>
+                <div class="cb-stats-note">${t("cb.statsNote")}</div>
                 <div class="cb-card-footer">
                     <div class="cb-rating att-rating" data-build-id="${b.id}">
                         <button class="att-vote-btn att-vote-like" data-tooltip="${escapeHtml(t("cb.rating.like"))}" onclick="handleBuildVoteClick(event,${b.id},'like')"><img src="./assets/images/icon-fir.png" class="att-vote-icon" /><span class="att-vote-count">0</span></button>
@@ -1728,15 +1742,40 @@ async function _loadMyCommunityBuilds() {
 function _renderMyCommunityBuilds(builds) {
     const container = document.getElementById("my-community-list");
     if (!container) return;
+    container._myBuilds = builds || [];
+    _applyMyCommunityFilter();
+}
+
+function _applyMyCommunityFilter() {
+    const container = document.getElementById("my-community-list");
+    if (!container || !container._myBuilds) return;
     const { t } = EFTForge.lang;
     const lang = EFTForge.state.lang;
 
-    if (!builds || builds.length === 0) {
-        container.innerHTML = `<div style="color:#555; font-size:13px; font-style:italic; padding:4px 0;">${t("modal.myCommunityEmpty")}</div>`;
-        return;
+    const query = (document.getElementById("my-community-search")?.value || "").trim().toLowerCase();
+    const gunLookup = new Map((EFTForge.state.allGuns || []).map(g => [g.id, g.name]));
+
+    let builds = container._myBuilds;
+    if (query) {
+        builds = builds.filter(b => {
+            const buildName = (b.build_name || "").toLowerCase();
+            const gunName   = (gunLookup.get(b.gun_id) || b.gun_name || "").toLowerCase();
+            return buildName.includes(query) || gunName.includes(query);
+        });
     }
 
-    const gunLookup = new Map((EFTForge.state.allGuns || []).map(g => [g.id, g.name]));
+    const countEl = document.getElementById("my-community-count");
+    if (countEl) {
+        const total = container._myBuilds.length;
+        const shown = builds.length;
+        countEl.textContent = query ? `${shown} / ${total}` : `${total}`;
+    }
+
+    if (builds.length === 0) {
+        const msg = query ? t("cb.noMatch") : t("modal.myCommunityEmpty");
+        container.innerHTML = `<div style="color:#555; font-size:13px; font-style:italic; padding:4px 0; grid-column:1/-1;">${msg}</div>`;
+        return;
+    }
 
     container.innerHTML = builds.map(b => {
         const gunName    = gunLookup.get(b.gun_id) || b.gun_name || "";
@@ -1777,10 +1816,11 @@ function _renderMyCommunityBuilds(builds) {
                 </div>
                 <div class="cb-stats">
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.ergo")}</div><div class="cb-stat-val">${fmtErgo}</div></div>
+                    <div class="cb-stat"><div class="cb-stat-label">${t("cb.statCost")}</div><div class="cb-stat-val">-</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.verRecoil")}</div><div class="cb-stat-val">${fmtVRec}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.horRecoil")}</div><div class="cb-stat-val">${fmtHRec}</div></div>
-                    <div class="cb-stat"><div class="cb-stat-label">${t("cb.statCost")}</div><div class="cb-stat-val">-</div></div>
                 </div>
+                <div class="cb-stats-note">${t("cb.statsNote")}</div>
                 <div class="cb-card-footer">
                     <div class="cb-rating att-rating" data-build-id="${b.id}">
                         <button class="att-vote-btn att-vote-like" data-tooltip="${escapeHtml(t("cb.rating.like"))}"

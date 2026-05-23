@@ -611,14 +611,90 @@ function _updateProfileBtn() {
     const label = btn.querySelector(".profile-nav-label");
     if (label) {
         const t = EFTForge.lang.t;
-        label.textContent = profile.username || t("modal.anonymousAuthor");
+        const name = profile.username || t("modal.anonymousAuthor");
+        label.innerHTML = `<span class="profile-nav-label-text">${escapeHtml(name)}</span>`;
         if (!localStorage.getItem("eftforge_profile_seen")) {
             btn.dataset.badge = t("ui.newBadge");
         }
     }
 }
 
+function _setupProfileMarquee() {
+    const btn = document.getElementById("profile-nav-btn");
+    if (!btn) return;
+    const label = btn.querySelector(".profile-nav-label");
+    if (!label) return;
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    let gen = 0;
+
+    btn.addEventListener("mouseenter", async () => {
+        const myGen = ++gen;
+        const inner = label.querySelector(".profile-nav-label-text");
+        if (!inner) return;
+
+        await new Promise(r => requestAnimationFrame(r));
+        if (gen !== myGen) return;
+
+        const overflow = inner.offsetWidth - label.clientWidth;
+        if (overflow <= 2) return;
+
+        const duration = Math.max(1200, (overflow / 45) * 1000);
+
+        async function runCycle() {
+            if (gen !== myGen) return;
+
+            if (document.hidden) {
+                await sleep(1000);
+                runCycle();
+                return;
+            }
+
+            inner.style.transition = "none";
+            inner.style.transform = "translateX(0)";
+            inner.style.opacity = "1";
+
+            inner.style.transition = `transform ${duration}ms linear`;
+            inner.style.transform = `translateX(-${overflow}px)`;
+            await sleep(duration);
+            if (gen !== myGen) return;
+
+            await sleep(700);
+            if (gen !== myGen) return;
+
+            inner.style.transition = "opacity 0.35s ease";
+            inner.style.opacity = "0";
+            await sleep(400);
+            if (gen !== myGen) return;
+
+            inner.style.transition = "none";
+            inner.style.transform = "translateX(0)";
+
+            await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+            if (gen !== myGen) return;
+
+            inner.style.transition = "opacity 0.35s ease";
+            inner.style.opacity = "1";
+            await sleep(1500);
+
+            runCycle();
+        }
+
+        runCycle();
+    });
+
+    btn.addEventListener("mouseleave", () => {
+        gen++;
+        const inner = label.querySelector(".profile-nav-label-text");
+        if (!inner) return;
+        inner.style.transition = "none";
+        inner.style.transform = "translateX(0)";
+        inner.style.opacity = "1";
+    });
+}
+
 EFTForge.profile = { getProfile, setProfile, getDisplayName, getAvatarUrl, showProfileModal, updateBtn: _updateProfileBtn };
 
 // Initialize the nav button immediately - scripts run after the DOM at end of body
 _updateProfileBtn();
+_setupProfileMarquee();
