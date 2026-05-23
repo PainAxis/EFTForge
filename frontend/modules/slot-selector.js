@@ -715,14 +715,14 @@ function _updateColumnVisibility(items) {
         (e.item.accuracy_modifier != null && e.item.accuracy_modifier !== 0)
     );
     const hasErgo    = items.some(e => e.item.ergonomics_modifier != null && e.item.ergonomics_modifier !== 0);
-    const hasEvo     = hasErgo && items.some(e => Math.abs(e.contribution) > 0.05);
+    // const hasEvo     = hasErgo && items.some(e => Math.abs(e.contribution) > 0.05);
     const hasPrice   = items.some(e => _getPriceRub(e.item) !== null);
 
     table.classList.toggle("hide-col-weight", !hasWeight);
     table.classList.toggle("hide-col-recoil", !hasRecoil);
     table.classList.toggle("hide-col-acc",    !hasAcc);
     table.classList.toggle("hide-col-ergo",   !hasErgo);
-    table.classList.toggle("hide-col-evo",    !hasEvo);
+    table.classList.add("hide-col-evo");
     table.classList.toggle("hide-col-price",  !hasPrice);
     // Combo-only columns - always hidden in list mode
     table.classList.add("hide-col-rub-recoil", "hide-col-balance");
@@ -1982,14 +1982,14 @@ function _updateComboColumnVisibility(items) {
     const hasWeight = allItems.some(it => parseFloat(it.weight ?? 0) !== 0);
     const hasRecoil = allItems.some(it => it.recoil_modifier != null && it.recoil_modifier !== 0);
     const hasErgo   = allItems.some(it => it.ergonomics_modifier != null && it.ergonomics_modifier !== 0);
-    const hasEvo    = hasErgo && items.some(e => Math.abs(e.comboEEDDelta) > 0.05);
+    // const hasEvo    = hasErgo && items.some(e => Math.abs(e.comboEEDDelta) > 0.05);
     const hasPrice  = items.some(e => e.totalPrice !== null);
 
     table.classList.toggle("hide-col-weight", !hasWeight);
     table.classList.toggle("hide-col-recoil", !hasRecoil);
     table.classList.add("hide-col-acc");
     table.classList.toggle("hide-col-ergo",   !hasErgo);
-    table.classList.toggle("hide-col-evo",         !hasEvo);
+    table.classList.add("hide-col-evo");
     table.classList.toggle("hide-col-price",       !hasPrice);
     table.classList.toggle("hide-col-rub-recoil",  !(hasRecoil && hasPrice));
     table.classList.toggle("hide-col-balance",     !(hasRecoil && hasErgo));

@@ -37,7 +37,7 @@ let _graphCustomMode       = null;  // null | 'guns' | 'attachments'
 let _graphGunXMetric       = localStorage.getItem("eftforge_graph_gun_x")  || "recoilVertical";
 let _graphGunYMetric       = localStorage.getItem("eftforge_graph_gun_y")  || "ergoModifier";
 let _graphAttXMetric       = localStorage.getItem("eftforge_graph_att_x")  || "recoilPercent";
-let _graphAttYMetric       = localStorage.getItem("eftforge_graph_att_y")  || "contribution";
+let _graphAttYMetric       = localStorage.getItem("eftforge_graph_att_y")  || "ergoModifier";
 let _graphSearchData       = null;  // cached { guns:[...], attachments:[...] } from API
 let _graphSearchOpen       = false;
 let _graphSearchQuery      = "";    // preserved across panel rebuilds
@@ -51,7 +51,7 @@ const _GUN_METRICS = [
 ];
 const _ATT_METRICS = [
     { id: "recoilPercent",    shortKey: "graph.metricRecoilMod", axisKey: "graph.xLabel",           getValue: e => e.recoilPercent,    lowerBetter: true  },
-    { id: "contribution",     shortKey: "graph.metricEvoErgo",   axisKey: "graph.yLabel",           getValue: e => e.contribution,     lowerBetter: false },
+    // { id: "contribution",     shortKey: "graph.metricEvoErgo",   axisKey: "graph.yLabel",           getValue: e => e.contribution,     lowerBetter: false },
     { id: "ergoModifier",     shortKey: "graph.metricErgo",      axisKey: "graph.yLabelErgo",       getValue: e => e.ergoModifier,     lowerBetter: false },
 ];
 
@@ -65,6 +65,7 @@ function _updateGraphHeader() {
     const disp = inGraph ? "none" : "";
     document.getElementById("purchasable-toggle-btn").style.display = disp;
     document.getElementById("compare-toggle-btn").style.display = disp;
+    document.getElementById("favorites-filter-btn").style.display = disp;
     const h3 = document.querySelector(".att-table-header h3");
     if (h3) {
         const textNode = h3.firstChild;
@@ -607,14 +608,14 @@ function _buildGraphSVG(container, { fromLerp = false } = {}) {
         if (mId === "recoilVertical")   return `V: ${Math.round(v)}`;
         if (mId === "recoilHorizontal") return `H: ${Math.round(v)}`;
         if (mId === "recoilPercent")    return `R: ${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
-        if (mId === "contribution")     return `EE: ${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
+        // if (mId === "contribution")     return `EE: ${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
         return `Ergo: ${v.toFixed(1)}`;
     };
     const tipLabel = mId => {
         if (mId === "recoilVertical")   return "V";
         if (mId === "recoilHorizontal") return "H";
         if (mId === "recoilPercent")    return t("graph.tooltipRecoil");
-        if (mId === "contribution")     return t("graph.tooltipEvoErgo");
+        // if (mId === "contribution")     return t("graph.tooltipEvoErgo");
         return t("graph.tooltipErgo");
     };
 
