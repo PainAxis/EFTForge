@@ -1,6 +1,19 @@
 {
   "posts": [
     {
+      "id": "2026-05-24-v130-release",
+      "title": "v1.3.0 - Profile System, Build Comments & Build Tags",
+      "title_zh": "v1.3.0 - 资料系统、配置评论、舆配置标签",
+      "date": "2026-05-24",
+      "tags": ["patch-notes", "major-update"],
+      "title_media": "./news/images/v130/v130Thumbnail.webp",
+      "thumbnail": "./news/images/v130/v130Thumbnail.webp",
+      "thumbnail_style": "width: 80%;",
+      "thumbnail_img_style": "object-position: center 10%; transform: translateX(100px);",
+      "file": "2026-05-24-v130-release.md",
+      "file_zh": "2026-05-24-v130-release.zh.md"
+    },
+    {
       "id": "2026-05-16-v120-release",
       "title": "v1.2.0 - Combo Calculator, Attachment Graph & Build Image Export",
       "title_zh": "v1.2.0 - 组合计算器、配件图表、舆配置图片导出",
