@@ -242,8 +242,8 @@ window.EFTForge.leaderboard = (function () {
                     ? '<img class="lb-build-img" src="' + _escHtml(imgSrc) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
                     : '<div class="lb-build-img-placeholder"></div>';
                 var avatarSrc = entry.is_admin_build
-                    ? (entry.author_avatar_url || './news/images/devProfilePic.jpg')
-                    : (entry.user_avatar_url   || './assets/images/tarkovcitizen.jpg');
+                    ? (proxyAvatarUrl(entry.author_avatar_url) || './news/images/devProfilePic.jpg')
+                    : (proxyAvatarUrl(entry.user_avatar_url)   || './assets/images/tarkovcitizen.jpg');
                 var avatarHtml = '<img class="lb-author-avatar" src="' + _escHtml(avatarSrc) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.src=\'./assets/images/tarkovcitizen.jpg\';this.onerror=null;">';
                 return (
                     '<li class="lb-entry lb-entry-build" style="--lb-i:' + idx + '" data-idx="' + (_cache[_cacheKey()].indexOf(entry)) + '">' +
@@ -314,10 +314,10 @@ window.EFTForge.leaderboard = (function () {
             authorName = lang === 'zh'
                 ? (build.author_display_name_zh || build.author_display_name || 'Morph1ne')
                 : (build.author_display_name || 'Morph1ne');
-            avatarUrl = build.author_avatar_url || './news/images/devProfilePic.jpg';
+            avatarUrl = proxyAvatarUrl(build.author_avatar_url) || './news/images/devProfilePic.jpg';
         } else {
             authorName = build.user_display_name || t('modal.anonymousAuthor');
-            avatarUrl  = build.user_avatar_url   || null;
+            avatarUrl  = proxyAvatarUrl(build.user_avatar_url)  || null;
         }
 
         var communityBuildInfo = {

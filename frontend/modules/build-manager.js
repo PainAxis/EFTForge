@@ -164,7 +164,7 @@ function syncBuildDisplayName() {
     if (EFTForge.state.communityBuild) {
         if (currentKey === EFTForge.state.communityBuild.pairsKey) {
             const { authorName, avatarUrl, buildName, cardImageUrl } = EFTForge.state.communityBuild;
-            const avatarSrc = avatarUrl || "./assets/images/tarkovcitizen.jpg";
+            const avatarSrc = proxyAvatarUrl(avatarUrl) || "./assets/images/tarkovcitizen.jpg";
             const avatarHtml = `<img src="${escapeHtml(avatarSrc)}"
                         style="width:20px;height:20px;border-radius:50%;object-fit:cover;background:#2a2a2a;flex-shrink:0;"
                         onerror="this.src='./assets/images/tarkovcitizen.jpg';this.onerror=null;" />`;
@@ -1467,10 +1467,10 @@ function _applyPublicBuildsFilter() {
             authorName = lang === "zh"
                 ? (b.author_display_name_zh || b.author_display_name || "Morph1ne")
                 : (b.author_display_name || "Morph1ne");
-            avatarSrc = b.author_avatar_url || "./news/images/devProfilePic.jpg";
+            avatarSrc = proxyAvatarUrl(b.author_avatar_url) || "./news/images/devProfilePic.jpg";
         } else {
             authorName = b.user_display_name || t("modal.anonymousAuthor");
-            avatarSrc  = b.user_avatar_url   || "./assets/images/tarkovcitizen.jpg";
+            avatarSrc  = proxyAvatarUrl(b.user_avatar_url) || "./assets/images/tarkovcitizen.jpg";
         }
 
         const featuredLabel = b.is_featured
@@ -1567,10 +1567,10 @@ async function _loadPublicBuildByIdx(idx) {
         authorName = lang === "zh"
             ? (build.author_display_name_zh || build.author_display_name || "Morph1ne")
             : (build.author_display_name || "Morph1ne");
-        avatarUrl = build.author_avatar_url || "./news/images/devProfilePic.jpg";
+        avatarUrl = proxyAvatarUrl(build.author_avatar_url) || "./news/images/devProfilePic.jpg";
     } else {
         authorName = build.user_display_name || t("modal.anonymousAuthor");
-        avatarUrl  = build.user_avatar_url   || null;
+        avatarUrl  = proxyAvatarUrl(build.user_avatar_url) || null;
     }
 
     const communityBuildInfo = {
@@ -1668,7 +1668,7 @@ function _renderCommentsContent(section, buildId, comments) {
             if (isAdmin) deleteBtn = ` <button class="cb-comment-delete-btn" onclick="_deleteComment(event,${c.id},${buildId})">&#x2715;</button>`;
             else if (c.is_mine) deleteBtn = ` <button class="cb-comment-delete-btn" onclick="_deleteOwnComment(event,${c.id},${buildId})">&#x2715;</button>`;
             const commentAuthor = c.user_display_name || t("modal.anonymousAuthor");
-            const commentAvatar = c.user_avatar_url   || "./assets/images/tarkovcitizen.jpg";
+            const commentAvatar = proxyAvatarUrl(c.user_avatar_url) || "./assets/images/tarkovcitizen.jpg";
             return `<div class="cb-comment" data-comment-id="${c.id}">
                 <div class="cb-comment-author">
                     <img class="cb-avatar loaded" src="${escapeHtml(commentAvatar)}" onerror="this.src='./assets/images/tarkovcitizen.jpg'" />

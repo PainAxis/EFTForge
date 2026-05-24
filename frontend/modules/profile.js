@@ -232,7 +232,7 @@ function showProfileModal() {
 
     const profile = getProfile();
     const defaultAvatar = "./assets/images/tarkovcitizen.jpg";
-    const avatarSrc = profile.avatar_url || defaultAvatar;
+    const avatarSrc = proxyAvatarUrl(profile.avatar_url) || defaultAvatar;
 
     const body = document.getElementById("profile-modal-overlay-body");
     body.innerHTML = `
@@ -384,7 +384,7 @@ function showProfileModal() {
                 avatarStatus.textContent = err.message || t("profile.avatarError");
                 avatarStatus.style.color = "#c0392b";
                 avatarStatus.style.display = "";
-                avatarPreview.src = profile.avatar_url || "./assets/images/tarkovcitizen.jpg";
+                avatarPreview.src = proxyAvatarUrl(profile.avatar_url) || "./assets/images/tarkovcitizen.jpg";
                 pendingAvatarUrl  = profile.avatar_url || "";
                 pendingAvatarFile = null;
                 saveBtn.disabled  = false;
@@ -611,7 +611,7 @@ function _updateProfileBtn() {
     const profile = getProfile();
     const img = btn.querySelector(".profile-nav-avatar");
     if (img) {
-        img.src = profile.avatar_url || "./assets/images/tarkovcitizen.jpg";
+        img.src = proxyAvatarUrl(profile.avatar_url) || "./assets/images/tarkovcitizen.jpg";
     }
     const label = btn.querySelector(".profile-nav-label");
     if (label) {

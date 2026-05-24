@@ -2,6 +2,15 @@ window.EFTForge = window.EFTForge || {};
 
 window.EFTForge.utils = {};
 
+function proxyAvatarUrl(url) {
+    if (!url) return null;
+    if (url.startsWith("https://gitee.com/") || url.startsWith("https://raw.giteeusercontent.com/")) {
+        const base = (window.EFTForge && EFTForge.config && EFTForge.config.API_BASE) || "";
+        return `${base}/proxy-asset?url=${encodeURIComponent(url)}`;
+    }
+    return url;
+}
+
 /* --- Mobile detection --- */
 
 function isMobileLayout() {
