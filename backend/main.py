@@ -528,7 +528,7 @@ def get_sync_status():
 # Asset proxy (used by graph export to bypass CORS on assets.tarkov.dev)
 # ---------------------------------------------------
 
-_PROXY_ALLOWED_HOSTS = {"assets.tarkov.dev", "image-gen.tarkov-changes.com"}
+_PROXY_ALLOWED_HOSTS = {"assets.tarkov.dev", "image-gen.tarkov-changes.com", "gitee.com", "raw.giteeusercontent.com"}
 
 @app.get("/proxy-asset")
 def proxy_asset(url: str, request: Request):
