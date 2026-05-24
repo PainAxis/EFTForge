@@ -69,7 +69,7 @@ EFTForge 是一个逃离塔科夫武器配置模拟器与社区平台。它提�
 
 ### 社区平台
 - 发布、浏览和加载社区装配方案
-- 自动生成合成预览图，永久托管于 Gitee [https://gitee.com/morph1ne/eftforge-assets/](https://gitee.com/morph1ne/eftforge-assets/)
+- 自动生成合成预览图与用户头像托管于 Gitee [https://gitee.com/morph1ne/eftforge-assets/](https://gitee.com/morph1ne/eftforge-assets/)
 - **配置评论** - 每个方案均有独立评论区；作者或管理员可删除评论
 - **配置标签** - 每个方案最多添加 5 个预设标签（如 Budget、Recoil、Meta 等）；社区列表顶部显示标签筛选栏，无筛选时自动收起
 - **我的社区配置**标签页，可在配置对话框中查看并重新加载自己发布的方案
@@ -99,7 +99,7 @@ EFTForge 是一个逃离塔科夫武器配置模拟器与社区平台。它提�
 | 后端 | Python、FastAPI、SQLAlchemy、SQLite、Pydantic、Uvicorn |
 | 前端 | 原生 JavaScript（ES2022），模块化架构 |
 | 图像生成 | Playwright / Patchright（无头浏览器代理） |
-| 资源托管 | Gitee（社区方案卡片图像） |
+| 资源托管 | Gitee（社区方案卡片图像、用户头像） |
 | 数据来源 | tarkov.dev GraphQL API |
 | 压缩 | LZ-String |
 | Markdown | marked.js |

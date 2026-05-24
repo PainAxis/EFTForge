@@ -69,7 +69,7 @@ EFTForge is a full-stack Escape from Tarkov weapon build simulator and community
 
 ### Community Platform
 - Publish, browse, and load community-submitted builds
-- Auto-generated composite preview images hosted permanently on Gitee [https://gitee.com/morph1ne/eftforge-assets/](https://gitee.com/morph1ne/eftforge-assets/)
+- Auto-generated composite preview images and profile avatars hosted on Gitee [https://gitee.com/morph1ne/eftforge-assets/](https://gitee.com/morph1ne/eftforge-assets/)
 - **Build Comments** - per-build comment thread; deletable by the author or an admin
 - **Build Tags** - up to 5 preset tags per build (e.g. Budget, Recoil, Meta); tag filter row in the community list collapses automatically when no filters are active
 - **My Community Builds** tab in the builds dialog to view and reload your own published builds
@@ -99,7 +99,7 @@ EFTForge is a full-stack Escape from Tarkov weapon build simulator and community
 | Backend | Python, FastAPI, SQLAlchemy, SQLite, Pydantic, Uvicorn |
 | Frontend | Vanilla JavaScript (ES2022), modular architecture |
 | Image Generation | Playwright / Patchright (headless browser proxy) |
-| Asset Hosting | Gitee (community build card images) |
+| Asset Hosting | Gitee (community build card images, profile avatars) |
 | Data Source | tarkov.dev GraphQL API |
 | Compression | LZ-String |
 | Markdown | marked.js |
