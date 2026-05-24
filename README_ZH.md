@@ -246,6 +246,12 @@ EFTForge 将在页面加载时自动导入装配方案并清除 URL 参数。物
 
 ---
 
+## EvoErgo 致谢
+
+EvoErgo 概念由 **SpaceMonkey37** 原创提出。EFTForge 在其基础上实现并扩展了这一系统。没有 SpaceMonkey37 的基础理论，本项目将无从实现。
+
+---
+
 ## 开源协议
 
 MIT - 详见 [LICENSE](LICENSE)。

@@ -246,6 +246,12 @@ EFTForge will auto-load the build on page load and strip the parameter from the 
 
 ---
 
+## EvoErgo Credit
+
+The EvoErgo concept was originally developed by **SpaceMonkey37**. EFTForge implements and expands upon this system in a live simulation environment. This project would not have been possible without SpaceMonkey37's foundational theory.
+
+---
+
 ## License
 
 MIT - see [LICENSE](LICENSE) for details.
