@@ -734,7 +734,7 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
   savedEquipErgoPanel?.remove();
   document.getElementById("hidden-stats-panel")?.remove();
 
-  // const eed = parseFloat(data.evo_ergo_delta ?? 0);
+  const eed = parseFloat(data.evo_ergo_delta ?? 0);
   const totalErgo = parseFloat(data.total_ergo ?? 0);
   const totalWeight = parseFloat(data.total_weight ?? 0);
   EFTForge.state.lastTotalWeight = totalWeight;
@@ -743,12 +743,12 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
   EFTForge.state.lastRecoilH = data.recoil_horizontal ?? null;
   EFTForge.state.lastAccuracyMoa = data.accuracy_moa ?? null;
   EFTForge.state.lastSightingRange = data.sighting_range ?? null;
-  // EFTForge.state.lastEED = parseFloat(data.evo_ergo_delta ?? 0);
-  // EFTForge.state.lastOverswing  = data.overswing ?? false;
+  EFTForge.state.lastEED = parseFloat(data.evo_ergo_delta ?? 0);
+  EFTForge.state.lastOverswing  = data.overswing ?? false;
   EFTForge.state.lastArmStamina = parseFloat(data.arm_stamina ?? 0);
 
-  // const eedClass = eed >= 0 ? "positive" : "negative";
-  // const overswingClass = data.overswing ? "negative" : "positive";
+  const eedClass = eed >= 0 ? "positive" : "negative";
+  const overswingClass = data.overswing ? "negative" : "positive";
 
   const armStamina = parseFloat(data.arm_stamina ?? 0);
 
@@ -815,17 +815,20 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
 
       <div class="stat-subsection">
       <div class="stat-row stat-row-weight"><span class="stat-label">${t("stats.weight")}</span><span>${totalWeight.toFixed(3)} kg</span></div>
-      ${"" /* evoergo rows removed:
-      <div class="stat-row stat-row-eed">
-        <span class="stat-label">${t("stats.eed")}<span class="stamina-info-btn" id="equip-ergo-info-btn">i</span>:</span>
-        <span id="eed-value-span"></span>
+      <div class="deprecated-group-outer">
+        <div class="deprecated-group-rows">
+          <div class="stat-row stat-row-eed">
+            <span class="stat-label">${t("stats.eed")}<span class="stamina-info-btn${eed >= 0 && eed < 7 && EFTForge.state.currentEquipErgoModifier === 0 ? " eed-warn-active" : ""}" id="equip-ergo-info-btn" data-tooltip="${t("stats.configEquipErgoTooltip")}">i</span>:</span>
+            <span id="eed-value-span" class="${eedClass}">${eed > 0 ? "+" : ""}${eed.toFixed(1)}</span>${eed >= 0 && eed < 7 && EFTForge.state.currentEquipErgoModifier === 0 ? `<span class="eed-warning-icon" data-tooltip="${t("stats.eedWarnTooltip")}">⚠</span>` : ""}
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">${t("stats.overswing")}</span>
+            <span id="overswing-value-span" class="${overswingClass}">${data.overswing ? t("stats.yes") : t("stats.no")}</span>
+          </div>
+        </div>
+        <div class="deprecated-group-bracket"></div>
+        <span class="deprecated-group-note">${t("stats.overswingDeprecated")}</span>
       </div>
-      <div class="stat-row stat-row-deprecated">
-        <span class="stat-label">${t("stats.overswing")}</span>
-        <span id="overswing-value-span"></span>
-        <span class="deprecated-group-note"></span>
-      </div>
-      */}
       <div class="stat-row" id="arm-stam-row">
         <span class="stat-label">${t("stats.armStamina")}<span class="stamina-info-btn" id="stamina-info-btn" data-tooltip="${t("stats.configStrengthTooltip")}">i</span>:</span>
         <span>${armStamina.toFixed(1)}s</span>
@@ -938,65 +941,65 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
       }
   });
 
-  // // Make the EED warning triangle also open the same panel
-  // document.querySelector(".eed-warning-icon")?.addEventListener("click", () =>
-  //     document.getElementById("equip-ergo-info-btn")?.click()
-  // );
+  // Make the EED warning triangle also open the same panel
+  document.querySelector(".eed-warning-icon")?.addEventListener("click", () =>
+      document.getElementById("equip-ergo-info-btn")?.click()
+  );
 
-  // // Toggle equip ergo panel on i button click
-  // document.getElementById("equip-ergo-info-btn").addEventListener("click", () => {
-  //     const existing = document.getElementById("equip-ergo-panel");
-  //     if (existing) {
-  //         existing.style.height = existing.scrollHeight + "px";
-  //         existing.style.opacity = "1";
-  //         void existing.offsetHeight;
-  //         existing.style.height = "0px";
-  //         existing.style.opacity = "0";
-  //         existing.style.marginTop = "0px";
-  //         existing.style.padding = "0px";
-  //         existing.style.borderWidth = "0px";
-  //         setTimeout(() => existing.remove(), 200);
-  //     } else {
-  //         const panel = document.createElement("div");
-  //         panel.className = "stamina-panel";
-  //         panel.id = "equip-ergo-panel";
-  //         panel.innerHTML = `
-  //               <div class="stamina-disclaimer"><strong style="color:#eee;">${t("stats.eedLabel")}</strong> ${t("stats.eedDesc")}${_lang() === "zh" ? ` <a href="https://www.bilibili.com/video/BV19uAGz1EFX" target="_blank" rel="noopener" style="color:#aad4f5;">MAJ_Kelvin 的视频详解</a>` : ` <a href="https://www.youtube.com/watch?v=zVZ8gSk666g&t" target="_blank" rel="noopener" style="color:#aad4f5;">SpaceMonkey37's video</a>`}</div>
-  //               <div class="stamina-disclaimer"><strong style="color:#eee;">${t("stats.overswing")}</strong> ${t("stats.overswingDesc")}</div>
-  //             <div class="strength-control">
-  //                 <label style="color:#eee;">${t("stats.equipErgoLabel")}</label>
-  //                 <div class="stamina-disclaimer">${t("stats.equipErgoDisclaimer")}</div>
-  //                 <div class="strength-input-row">
-  //                     <input type="range" id="equip-ergo-slider" min="0" max="100" step="1" value="${Math.round(-EFTForge.state.currentEquipErgoModifier * 100)}" />
-  //                     <span class="input-prefix">-</span><input type="number" id="equip-ergo-input" min="0" max="100" value="${Math.round(-EFTForge.state.currentEquipErgoModifier * 100)}" />
-  //                     <span class="input-suffix">%</span>
-  //                 </div>
-  //             </div>
-  //         `;
-  //         document.getElementById("overswing-value-span").closest(".stat-row").after(panel);
+  // Toggle equip ergo panel on i button click
+  document.getElementById("equip-ergo-info-btn").addEventListener("click", () => {
+      const existing = document.getElementById("equip-ergo-panel");
+      if (existing) {
+          existing.style.height = existing.scrollHeight + "px";
+          existing.style.opacity = "1";
+          void existing.offsetHeight;
+          existing.style.height = "0px";
+          existing.style.opacity = "0";
+          existing.style.marginTop = "0px";
+          existing.style.padding = "0px";
+          existing.style.borderWidth = "0px";
+          setTimeout(() => existing.remove(), 200);
+      } else {
+          const panel = document.createElement("div");
+          panel.className = "stamina-panel";
+          panel.id = "equip-ergo-panel";
+          panel.innerHTML = `
+                <div class="stamina-disclaimer"><strong style="color:#eee;">${t("stats.eedLabel")}</strong> ${t("stats.eedDesc")}${_lang() === "zh" ? ` <a href="https://www.bilibili.com/video/BV19uAGz1EFX" target="_blank" rel="noopener" style="color:#aad4f5;">MAJ_Kelvin 的视频详解</a>` : ` <a href="https://www.youtube.com/watch?v=zVZ8gSk666g&t" target="_blank" rel="noopener" style="color:#aad4f5;">SpaceMonkey37's video</a>`}</div>
+                <div class="stamina-disclaimer"><strong style="color:#eee;">${t("stats.overswing")}</strong> ${t("stats.overswingDesc")}</div>
+              <div class="strength-control">
+                  <label style="color:#eee;">${t("stats.equipErgoLabel")}</label>
+                  <div class="stamina-disclaimer">${t("stats.equipErgoDisclaimer")}</div>
+                  <div class="strength-input-row">
+                      <input type="range" id="equip-ergo-slider" min="0" max="100" step="1" value="${Math.round(-EFTForge.state.currentEquipErgoModifier * 100)}" />
+                      <span class="input-prefix">-</span><input type="number" id="equip-ergo-input" min="0" max="100" value="${Math.round(-EFTForge.state.currentEquipErgoModifier * 100)}" />
+                      <span class="input-suffix">%</span>
+                  </div>
+              </div>
+          `;
+          document.getElementById("overswing-value-span").closest(".deprecated-group-outer").after(panel);
 
-  //         panel.style.height = "0px";
-  //         panel.style.opacity = "0";
-  //         void panel.offsetHeight;
-  //         panel.style.height = panel.scrollHeight + "px";
-  //         panel.style.opacity = "1";
-  //         panel.addEventListener("transitionend", () => {
-  //             panel.style.height = "";
-  //             panel.style.opacity = "";
-  //         }, { once: true });
+          panel.style.height = "0px";
+          panel.style.opacity = "0";
+          void panel.offsetHeight;
+          panel.style.height = panel.scrollHeight + "px";
+          panel.style.opacity = "1";
+          panel.addEventListener("transitionend", () => {
+              panel.style.height = "";
+              panel.style.opacity = "";
+          }, { once: true });
 
-  //         wireEquipErgoControls();
-  //     }
-  // });
+          wireEquipErgoControls();
+      }
+  });
 
   if (savedStaminaPanel) {
     document.getElementById("stamina-info-btn")?.closest(".stat-row")?.after(savedStaminaPanel);
     wireStrengthControls();
   }
-  // if (savedEquipErgoPanel) {
-  //   document.getElementById("overswing-value-span")?.closest(".stat-row")?.after(savedEquipErgoPanel);
-  //   wireEquipErgoControls();
-  // }
+  if (savedEquipErgoPanel) {
+    document.getElementById("overswing-value-span")?.closest(".deprecated-group-outer")?.after(savedEquipErgoPanel);
+    wireEquipErgoControls();
+  }
 }
 
 function wireStrengthControls() {
@@ -1053,7 +1056,6 @@ function wireStrengthControls() {
     });
 }
 
-/* wireEquipErgoControls - commented out (evoergo/overswing removed)
 function wireEquipErgoControls() {
     const slider = document.getElementById("equip-ergo-slider");
     const numInput = document.getElementById("equip-ergo-input");
@@ -1132,7 +1134,6 @@ function wireEquipErgoControls() {
         updateEquipErgoDisplay();
     });
 }
-*/
 
 function closeConfigPanel(id) {
     const panel = document.getElementById(id);

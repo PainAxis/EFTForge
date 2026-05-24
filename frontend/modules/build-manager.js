@@ -1493,11 +1493,11 @@ function _applyPublicBuildsFilter() {
         const fmtVRec   = hasStats && s.recoil_v  != null ? Math.round(s.recoil_v)                                  : "-";
         const fmtHRec   = hasStats && s.recoil_h  != null ? Math.round(s.recoil_h)                                  : "-";
         const fmtWeight = hasStats && s.weight    != null ? parseFloat(s.weight).toFixed(3) + " kg"                 : "-";
-        // const fmtEED    = hasStats && s.eed       != null ? (s.eed >= 0 ? "+" : "") + parseFloat(s.eed).toFixed(1)  : "-";
-        // const fmtOS     = hasStats && s.overswing != null ? (s.overswing ? t("stats.yes") : t("stats.no"))          : "-";
+        const fmtEED    = hasStats && s.eed       != null ? (s.eed >= 0 ? "+" : "") + parseFloat(s.eed).toFixed(1)  : "-";
+        const fmtOS     = hasStats && s.overswing != null ? (s.overswing ? t("stats.yes") : t("stats.no"))          : "-";
         const fmtArm    = hasStats && s.arm_stam  != null ? parseFloat(s.arm_stam).toFixed(1) + "s"                 : "-";
-        // const eedClass  = hasStats && s.eed       != null ? (s.eed >= 0 ? "positive" : "negative")                  : "";
-        // const osClass   = hasStats && s.overswing != null ? (s.overswing ? "negative" : "positive")                 : "";
+        const eedClass  = hasStats && s.eed       != null ? (s.eed >= 0 ? "positive" : "negative")                  : "";
+        const osClass   = hasStats && s.overswing != null ? (s.overswing ? "negative" : "positive")                 : "";
 
         const fmtPrice = b._livePrice ? _formatPrice(b._livePrice) : "-";
 
@@ -1529,6 +1529,8 @@ function _applyPublicBuildsFilter() {
                     <div class="cb-stat"><div class="cb-stat-label">${t("cb.statCost")}</div><div class="cb-stat-val cb-price">${fmtPrice}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.verRecoil")}</div><div class="cb-stat-val">${fmtVRec}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.horRecoil")}</div><div class="cb-stat-val">${fmtHRec}</div></div>
+                    <div class="cb-stat"><div class="cb-stat-label">${t("stats.eed")}</div><div class="cb-stat-val ${eedClass}">${fmtEED}</div></div>
+                    <div class="cb-stat"><div class="cb-stat-label">${t("cb.statOverswing")}</div><div class="cb-stat-val ${osClass}">${fmtOS}</div></div>
                 </div>
                 <div class="cb-stats-note">${t("cb.statsNote")}</div>
                 <div class="cb-card-footer">
@@ -1887,10 +1889,10 @@ function _applyMyCommunityFilter() {
         const fmtErgo  = hasStats && s.ergo      != null ? parseFloat(s.ergo).toFixed(1)                           : "-";
         const fmtVRec  = hasStats && s.recoil_v  != null ? Math.round(s.recoil_v)                                  : "-";
         const fmtHRec  = hasStats && s.recoil_h  != null ? Math.round(s.recoil_h)                                  : "-";
-        // const fmtEED   = hasStats && s.eed       != null ? (s.eed >= 0 ? "+" : "") + parseFloat(s.eed).toFixed(1)  : "-";
-        // const fmtOS    = hasStats && s.overswing != null ? (s.overswing ? t("stats.yes") : t("stats.no"))          : "-";
-        // const eedClass = hasStats && s.eed       != null ? (s.eed >= 0 ? "positive" : "negative")                  : "";
-        // const osClass  = hasStats && s.overswing != null ? (s.overswing ? "negative" : "positive")                 : "";
+        const fmtEED   = hasStats && s.eed       != null ? (s.eed >= 0 ? "+" : "") + parseFloat(s.eed).toFixed(1)  : "-";
+        const fmtOS    = hasStats && s.overswing != null ? (s.overswing ? t("stats.yes") : t("stats.no"))          : "-";
+        const eedClass = hasStats && s.eed       != null ? (s.eed >= 0 ? "positive" : "negative")                  : "";
+        const osClass  = hasStats && s.overswing != null ? (s.overswing ? "negative" : "positive")                 : "";
 
         const publishedAt = b.published_at ? new Date(b.published_at + "Z") : null;
         const fmtDate = publishedAt
@@ -1919,6 +1921,8 @@ function _applyMyCommunityFilter() {
                     <div class="cb-stat"><div class="cb-stat-label">${t("cb.statCost")}</div><div class="cb-stat-val">-</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.verRecoil")}</div><div class="cb-stat-val">${fmtVRec}</div></div>
                     <div class="cb-stat"><div class="cb-stat-label">${t("stats.horRecoil")}</div><div class="cb-stat-val">${fmtHRec}</div></div>
+                    <div class="cb-stat"><div class="cb-stat-label">${t("stats.eed")}</div><div class="cb-stat-val ${eedClass}">${fmtEED}</div></div>
+                    <div class="cb-stat"><div class="cb-stat-label">${t("cb.statOverswing")}</div><div class="cb-stat-val ${osClass}">${fmtOS}</div></div>
                 </div>
                 <div class="cb-stats-note">${t("cb.statsNote")}</div>
                 <div class="cb-card-footer">

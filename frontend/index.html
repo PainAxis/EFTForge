@@ -2236,6 +2236,17 @@ tr:hover .att-fav-btn,
   font-weight: 700;
 }
 
+/* EvoErgo column - muted */
+.evo-positive {
+  color: #6ea86e;
+  font-weight: 600;
+}
+
+.evo-negative {
+  color: #c96a6a;
+  font-weight: 600;
+}
+
 /* =========================
    SEARCH INPUT
 ========================= */
@@ -4015,15 +4026,14 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
 }
 
 .deprecated-group-rows > .stat-row {
-    opacity: 0.4;
     margin-bottom: 4px;
 }
 
 .deprecated-group-bracket {
     flex: 0 0 10px;
-    border-right: 1.5px solid #cc3030;
-    border-top: 1.5px solid #cc3030;
-    border-bottom: 1.5px solid #cc3030;
+    border-right: 1.5px solid #5ba8e5;
+    border-top: 1.5px solid #5ba8e5;
+    border-bottom: 1.5px solid #5ba8e5;
     border-radius: 0 3px 3px 0;
     margin: 1px 0 1px 8px;
     position: relative;
@@ -4036,18 +4046,20 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
     top: 50%;
     width: 7px;
     height: 0;
-    border-top: 1.5px solid #cc3030;
+    border-top: 1.5px solid #5ba8e5;
     transform: translateY(-50%);
 }
 
 .deprecated-group-note {
     font-size: 9.5px;
-    color: #cc3030;
+    color: #5ba8e5;
     font-style: italic;
+    align-self: center;
+    padding-left: 4px;
 }
 
 .stat-row-deprecated > :not(.deprecated-group-note) {
-    opacity: 0.4;
+    opacity: 1;
 }
 
 /* =========================
@@ -5230,7 +5242,7 @@ button.build-tag-chip.active {
   height: auto;
   border-radius: 6px;
   display: block;
-  margin: 14px 0;
+  margin: 14px auto;
 }
 
 .news-post-content video {
@@ -6789,31 +6801,31 @@ var _hmt = _hmt || [];
 
 <div id="toast-container"></div>
 <!-- ***!!IMPORTANT!!*** - Cache-busting: bump ?v= on any modified files before deploying -->
-<script src="modules/config.js?v=16"></script>
-<script src="modules/state.js?v=14"></script>
-<script src="modules/lang.js?v=19"></script>
-<script src="modules/utils.js?v=12"></script>
-<script src="modules/media-viewer.js?v=3"></script>
-<script src="modules/calculations.js?v=12"></script>
+<script src="modules/config.js?v=17"></script>
+<script src="modules/state.js?v=15"></script>
+<script src="modules/lang.js?v=20"></script>
+<script src="modules/utils.js?v=13"></script>
+<script src="modules/media-viewer.js?v=4"></script>
+<script src="modules/calculations.js?v=13"></script>
 <div id="eft-tooltip"></div>
-<script src="modules/api.js?v=14"></script>
-<script src="modules/gun-list.js?v=14"></script>
-<script src="modules/stats-panel.js?v=15"></script>
-<script src="modules/tree.js?v=13"></script>
-<script src="modules/attachment-grid.js?v=13"></script>
-<script src="modules/attachment-grid-devtool.js?v=11"></script><!-- dev only: self-exits on non-localhost -->
-<script src="modules/build-preview.js?v=10"></script>
-<script src="modules/slot-selector.js?v=16"></script>
-<script src="modules/graph.js?v=4"></script>
-<script src="modules/build-manager.js?v=15"></script>
-<script src="modules/profile.js?v=2"></script>
-<script src="app.js?v=26"></script>
-<script src="lzstring.min.js?v=11"></script>
-<script src="marked.min.js?v=11"></script>
-<script src="modules/news.js?v=12"></script>
-<script src="modules/leaderboard.js?v=12"></script>
-<script src="modules/tracker.js?v=12"></script>
-<script src="modules/tracker-devtool.js?v=10"></script><!-- dev only: self-exits on non-localhost -->
+<script src="modules/api.js?v=15"></script>
+<script src="modules/gun-list.js?v=15"></script>
+<script src="modules/stats-panel.js?v=16"></script>
+<script src="modules/tree.js?v=14"></script>
+<script src="modules/attachment-grid.js?v=14"></script>
+<script src="modules/attachment-grid-devtool.js?v=12"></script><!-- dev only: self-exits on non-localhost -->
+<script src="modules/build-preview.js?v=11"></script>
+<script src="modules/slot-selector.js?v=17"></script>
+<script src="modules/graph.js?v=5"></script>
+<script src="modules/build-manager.js?v=16"></script>
+<script src="modules/profile.js?v=3"></script>
+<script src="app.js?v=27"></script>
+<script src="lzstring.min.js?v=12"></script>
+<script src="marked.min.js?v=12"></script>
+<script src="modules/news.js?v=13"></script>
+<script src="modules/leaderboard.js?v=13"></script>
+<script src="modules/tracker.js?v=13"></script>
+<script src="modules/tracker-devtool.js?v=11"></script><!-- dev only: self-exits on non-localhost -->
 <div class="beian-footer">
   <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer">粤ICP备2026028988号-1</a>
   <a href="https://beian.mps.gov.cn/#/query/webSearch?code=44197702000132" rel="noreferrer" target="_blank" class="beian-footer-gong"><img src="assets/images/备案图标.png" alt="公网安备" width="14" height="14">粤公网安备44197702000132号</a>

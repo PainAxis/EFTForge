@@ -717,14 +717,14 @@ function _updateColumnVisibility(items) {
         (e.item.accuracy_modifier != null && e.item.accuracy_modifier !== 0)
     );
     const hasErgo    = items.some(e => e.item.ergonomics_modifier != null && e.item.ergonomics_modifier !== 0);
-    // const hasEvo     = hasErgo && items.some(e => Math.abs(e.contribution) > 0.05);
+    const hasEvo     = hasErgo && items.some(e => Math.abs(e.contribution) > 0.05);
     const hasPrice   = items.some(e => _getPriceRub(e.item) !== null);
 
     table.classList.toggle("hide-col-weight", !hasWeight);
     table.classList.toggle("hide-col-recoil", !hasRecoil);
     table.classList.toggle("hide-col-acc",    !hasAcc);
     table.classList.toggle("hide-col-ergo",   !hasErgo);
-    table.classList.add("hide-col-evo");
+    table.classList.toggle("hide-col-evo",    !hasEvo);
     table.classList.toggle("hide-col-price",  !hasPrice);
     // Combo-only columns - always hidden in list mode
     table.classList.add("hide-col-rub-recoil", "hide-col-balance");
@@ -987,7 +987,7 @@ function renderAttachmentRows(items) {
               return `-`;
           })()}</td>
           <td class="${(ghostStats ? ghostStats.ergo : bl.ergoModifier) >= 0 ? "ergo-positive" : "ergo-negative"}">${(ghostStats ? ghostStats.ergo : bl.ergoModifier) >= 0 ? "+" : ""}${formatStat(ghostStats ? ghostStats.ergo : bl.ergoModifier)}</td>
-          <td class="${(ghostStats ? ghostStats.contrib : bl.contribution) >= 0 ? "positive" : "negative"}">${(ghostStats ? ghostStats.contrib : bl.contribution) >= 0 ? "+" : ""}${(ghostStats ? ghostStats.contrib : bl.contribution).toFixed(1)}</td>
+          <td class="${(ghostStats ? ghostStats.contrib : bl.contribution) >= 0 ? "evo-positive" : "evo-negative"}">${(ghostStats ? ghostStats.contrib : bl.contribution) >= 0 ? "+" : ""}${(ghostStats ? ghostStats.contrib : bl.contribution).toFixed(1)}</td>
       `;
 
       ghostRow.addEventListener("mouseenter", () => {
@@ -1099,13 +1099,13 @@ function renderAttachmentRows(items) {
         ergoCell = `<td class="${ergoModifier >= 0 ? "ergo-positive" : "ergo-negative"}">${ergoModifier >= 0 ? "+" : ""}${formatStat(ergoModifier)}${eD !== 0
             ? `<div class="cmp-delta ${eD > 0 ? "positive" : "negative"}">${fmtD(eD, 1)}</div>` : ""}</td>`;
 
-        evoCell = `<td class="${contribution >= 0 ? "positive" : "negative"}">${contribution >= 0 ? "+" : ""}${contribution.toFixed(1)}${evD !== 0
+        evoCell = `<td class="${contribution >= 0 ? "evo-positive" : "evo-negative"}">${contribution >= 0 ? "+" : ""}${contribution.toFixed(1)}${evD !== 0
             ? `<div class="cmp-delta ${evD > 0 ? "positive" : "negative"}">${fmtD(evD, 1)}</div>` : ""}</td>`;
     } else {
         weightCell   = `<td>${parseFloat(item.weight ?? 0).toFixed(3)}</td>`;
         recoilCell   = `<td>${formatStat(recoilPercent)}%</td>`;
         ergoCell     = `<td class="${ergoModifier >= 0 ? "ergo-positive" : "ergo-negative"}">${ergoModifier >= 0 ? "+" : ""}${formatStat(ergoModifier)}</td>`;
-        evoCell      = `<td class="${contribution >= 0 ? "positive" : "negative"}">${contribution >= 0 ? "+" : ""}${contribution.toFixed(1)}</td>`;
+        evoCell      = `<td class="${contribution >= 0 ? "evo-positive" : "evo-negative"}">${contribution >= 0 ? "+" : ""}${contribution.toFixed(1)}</td>`;
     }
 
     const isFav = _getFavorites().has(item.id);
@@ -1982,14 +1982,14 @@ function _updateComboColumnVisibility(items) {
     const hasWeight = allItems.some(it => parseFloat(it.weight ?? 0) !== 0);
     const hasRecoil = allItems.some(it => it.recoil_modifier != null && it.recoil_modifier !== 0);
     const hasErgo   = allItems.some(it => it.ergonomics_modifier != null && it.ergonomics_modifier !== 0);
-    // const hasEvo    = hasErgo && items.some(e => Math.abs(e.comboEEDDelta) > 0.05);
+    const hasEvo    = hasErgo && items.some(e => Math.abs(e.comboEEDDelta) > 0.05);
     const hasPrice  = items.some(e => e.totalPrice !== null);
 
     table.classList.toggle("hide-col-weight", !hasWeight);
     table.classList.toggle("hide-col-recoil", !hasRecoil);
     table.classList.add("hide-col-acc");
     table.classList.toggle("hide-col-ergo",   !hasErgo);
-    table.classList.add("hide-col-evo");
+    table.classList.toggle("hide-col-evo",         !hasEvo);
     table.classList.toggle("hide-col-price",       !hasPrice);
     table.classList.toggle("hide-col-rub-recoil",  !(hasRecoil && hasPrice));
     table.classList.toggle("hide-col-balance",     !(hasRecoil && hasErgo));
@@ -2084,7 +2084,7 @@ function _buildComboRow(entry) {
 
     const recoilCls = entry.comboRecoilPct <= 0 ? "positive" : "negative";
     const ergoCls   = entry.comboErgoDelta >= 0 ? "ergo-positive" : "ergo-negative";
-    const evoCls    = entry.comboEEDDelta  >= 0 ? "positive" : "negative";
+    const evoCls    = entry.comboEEDDelta  >= 0 ? "evo-positive" : "evo-negative";
 
     const rrCellHtml = entry.comboRublePerRecoil !== null
         ? `<div class="att-price-wrap"><span>${_formatPrice(Math.round(entry.comboRublePerRecoil))}</span></div>`

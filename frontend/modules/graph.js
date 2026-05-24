@@ -51,7 +51,7 @@ const _GUN_METRICS = [
 ];
 const _ATT_METRICS = [
     { id: "recoilPercent",    shortKey: "graph.metricRecoilMod", axisKey: "graph.xLabel",           getValue: e => e.recoilPercent,    lowerBetter: true  },
-    // { id: "contribution",     shortKey: "graph.metricEvoErgo",   axisKey: "graph.yLabel",           getValue: e => e.contribution,     lowerBetter: false },
+    { id: "contribution",     shortKey: "graph.metricEvoErgo",   axisKey: "graph.yLabel",           getValue: e => e.contribution,     lowerBetter: false },
     { id: "ergoModifier",     shortKey: "graph.metricErgo",      axisKey: "graph.yLabelErgo",       getValue: e => e.ergoModifier,     lowerBetter: false },
 ];
 
@@ -608,14 +608,14 @@ function _buildGraphSVG(container, { fromLerp = false } = {}) {
         if (mId === "recoilVertical")   return `V: ${Math.round(v)}`;
         if (mId === "recoilHorizontal") return `H: ${Math.round(v)}`;
         if (mId === "recoilPercent")    return `R: ${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
-        // if (mId === "contribution")     return `EE: ${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
+        if (mId === "contribution")     return `EE: ${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
         return `Ergo: ${v.toFixed(1)}`;
     };
     const tipLabel = mId => {
         if (mId === "recoilVertical")   return "V";
         if (mId === "recoilHorizontal") return "H";
         if (mId === "recoilPercent")    return t("graph.tooltipRecoil");
-        // if (mId === "contribution")     return t("graph.tooltipEvoErgo");
+        if (mId === "contribution")     return t("graph.tooltipEvoErgo");
         return t("graph.tooltipErgo");
     };
 
