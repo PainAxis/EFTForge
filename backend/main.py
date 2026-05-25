@@ -2580,21 +2580,15 @@ def _gitee_wipe_build_images_folder() -> int:
     tok = {"access_token": GITEE_TOKEN}
 
     try:
-        # branch HEAD commit SHA (Gitee doesn't support git/refs/heads/* - use branches API)
+        # branch HEAD + root tree SHA - Gitee branches API includes both
         r = _req.get(
             f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/branches/{_GITEE_BRANCH}",
             params=tok, timeout=20,
         )
         r.raise_for_status()
-        head_sha = r.json()["commit"]["sha"]
-
-        # root tree SHA from that commit
-        r = _req.get(
-            f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/git/commits/{head_sha}",
-            params=tok, timeout=20,
-        )
-        r.raise_for_status()
-        root_tree_sha = r.json()["tree"]["sha"]
+        branch_data = r.json()
+        head_sha      = branch_data["commit"]["sha"]
+        root_tree_sha = branch_data["commit"]["commit"]["tree"]["sha"]
 
         # root tree entries
         r = _req.get(
