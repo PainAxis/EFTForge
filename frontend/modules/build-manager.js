@@ -675,8 +675,10 @@ function _renderSavePanelBuilds(gunId) {
         const safeId = escapeHtml(entry.id);
         const isPublished = publishedIds.has(entry.id);
         const publishBtnHtml = isPublished
-            ? `<button class="saved-build-btn publish-btn" disabled
-                       style="opacity:0.4; cursor:default;">${t("modal.publishedBtn")}</button>`
+            ? `<button class="saved-build-btn publish-btn"
+                       data-id="${safeId}"
+                       style="opacity:0.4; cursor:default;"
+                       onclick="_tryRepublishBuild(this.dataset.id)">${t("modal.publishedBtn")}</button>`
             : `<button class="saved-build-btn publish-btn"
                        data-id="${safeId}"
                        onclick="_publishSavedBuildById(this.dataset.id)">${t("modal.publishBtn")}</button>`;
@@ -1006,8 +1008,10 @@ function renderSavedBuildsList(query = "", gunId = null, showPublish = true) {
         if (showPublish) {
             const isPublished = publishedIds.has(entry.id);
             publishBtnHtml = isPublished
-                ? `<button class="saved-build-btn publish-btn" disabled
-                           style="opacity:0.4; cursor:default;">${t("modal.publishedBtn")}</button>`
+                ? `<button class="saved-build-btn publish-btn"
+                               data-id="${safeId}"
+                               style="opacity:0.4; cursor:default;"
+                               onclick="_tryRepublishBuild(this.dataset.id)">${t("modal.publishedBtn")}</button>`
                 : `<button class="saved-build-btn publish-btn"
                            data-id="${safeId}"
                            onclick="_publishSavedBuildById(this.dataset.id)">${t("modal.publishBtn")}</button>`;
@@ -1062,6 +1066,37 @@ async function _copySavedBuildById(id) {
     const { builds } = loadSavedBuilds();
     const entry = builds.find(b => b.id === id);
     if (entry) await copyBuildCode(entry.code);
+}
+
+async function _tryRepublishBuild(id) {
+    const saveData = loadSavedBuilds();
+    const entry = saveData.builds.find(b => b.id === id);
+    if (!entry) return;
+
+    const publishedId = entry.publishedId;
+    if (!publishedId) {
+        const published = new Set(JSON.parse(localStorage.getItem("eftforge_published_ids") || "[]"));
+        published.delete(id);
+        localStorage.setItem("eftforge_published_ids", JSON.stringify([...published]));
+        _publishSavedBuildById(id);
+        return;
+    }
+
+    try {
+        const myBuilds = await EFTForge.api.fetchMyBuilds();
+        if (myBuilds.some(b => b.id === publishedId)) return; // still live on server
+    } catch { /* network error - fall through and allow republish */ }
+
+    // Build no longer exists on server - clear stale local state and republish
+    const published = new Set(JSON.parse(localStorage.getItem("eftforge_published_ids") || "[]"));
+    published.delete(id);
+    localStorage.setItem("eftforge_published_ids", JSON.stringify([...published]));
+    const localEntry = saveData.builds.find(b => b.id === id);
+    if (localEntry) {
+        delete localEntry.publishedId;
+        persistSavedBuilds(saveData);
+    }
+    _publishSavedBuildById(id);
 }
 
 async function _publishSavedBuildById(id) {
