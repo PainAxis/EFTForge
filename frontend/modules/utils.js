@@ -93,6 +93,27 @@ function stopPanelLoading(state) {
 
 /* --- Toast notifications --- */
 
+const _TOAST_ICONS = {
+    success:  '<svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.6"/><path d="M6.5 10l2.5 2.5 4.5-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    warning:  '<svg width="18" height="18" viewBox="0 0 20 20" fill="none"><path d="M10 2L18 17H2L10 2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><line x1="10" y1="7.5" x2="10" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="14.5" r="1.2" fill="currentColor"/></svg>',
+    info:     '<svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.6"/><line x1="10" y1="8.5" x2="10" y2="14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="6" r="1.2" fill="currentColor"/></svg>',
+    critical: '<svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.6"/><line x1="10" y1="6" x2="10" y2="11.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="14" r="1.2" fill="currentColor"/></svg>',
+    error:    '<svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.6"/><path d="M6.5 6.5l7 7M13.5 6.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+    default:  '<svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2 2.5"/></svg>',
+};
+
+// Only the 5 admin announcement level colors get specific icons; everything else gets the neutral default
+function _toastIcon(color) {
+    switch (color.toLowerCase()) {
+        case "#4caf50": return _TOAST_ICONS.success;
+        case "#f5a623": return _TOAST_ICONS.warning;
+        case "#4a90d9": return _TOAST_ICONS.info;
+        case "#9b59b6": return _TOAST_ICONS.critical;
+        case "#e74c3c": return _TOAST_ICONS.error;
+        default:        return _TOAST_ICONS.default;
+    }
+}
+
 // actions: optional array of { label, onClick } - if provided, toast stays until an action is clicked
 // pass duration = 0 to keep the toast open indefinitely (requires actions to dismiss it)
 function _hexToRgba(hex, alpha) {
@@ -114,17 +135,24 @@ function _updateBlobColor() {
     }
 }
 
-function showToast(title, message, duration = 3000, color = "#f44336", actions = null, dismissible = true) {
+function showToast(title, message, duration = 3000, color = "#e74c3c", actions = null, dismissible = true) {
     const container = document.getElementById("toast-container");
 
     const toast = document.createElement("div");
     toast.className = "toast";
     toast.dataset.blobColor = _hexToRgba(color, 0.12);
-    toast.style.borderLeftColor = color;
+    toast.style.setProperty("--toast-accent", color);
+
+    const iconColEl = document.createElement("div");
+    iconColEl.className = "toast-icon-col";
+    iconColEl.innerHTML = _toastIcon(color);
+    toast.appendChild(iconColEl);
+
+    const contentEl = document.createElement("div");
+    contentEl.className = "toast-content";
 
     const titleEl = document.createElement("div");
     titleEl.className = "toast-title";
-    titleEl.style.color = color;
     if (title.endsWith("...")) {
         titleEl.textContent = title.slice(0, -3);
         for (let i = 0; i < 3; i++) {
@@ -136,6 +164,7 @@ function showToast(title, message, duration = 3000, color = "#f44336", actions =
     } else {
         titleEl.textContent = title;
     }
+    contentEl.appendChild(titleEl);
 
     const bodyEl = document.createElement("div");
     bodyEl.className = "toast-body";
@@ -150,9 +179,7 @@ function showToast(title, message, duration = 3000, color = "#f44336", actions =
     } else {
         bodyEl.textContent = message;
     }
-
-    toast.appendChild(titleEl);
-    toast.appendChild(bodyEl);
+    contentEl.appendChild(bodyEl);
 
     if (actions && actions.length > 0) {
         const actionsEl = document.createElement("div");
@@ -167,8 +194,10 @@ function showToast(title, message, duration = 3000, color = "#f44336", actions =
             });
             actionsEl.appendChild(btn);
         });
-        toast.appendChild(actionsEl);
+        contentEl.appendChild(actionsEl);
     }
+
+    toast.appendChild(contentEl);
 
     if (dismissible) {
         toast.classList.add("dismissible");
@@ -181,12 +210,25 @@ function showToast(title, message, duration = 3000, color = "#f44336", actions =
         });
     }
 
+    let progressEl = null;
+    if (duration > 0) {
+        progressEl = document.createElement("div");
+        progressEl.className = "toast-progress";
+        progressEl.style.animationDuration = duration + "ms";
+        toast.appendChild(progressEl);
+    }
+
     container.appendChild(toast);
 
-    setTimeout(() => { toast.classList.add("show"); _updateBlobColor(); }, 10);
+    setTimeout(() => {
+        toast.classList.add("show");
+        if (progressEl) progressEl.style.animationName = "toast-progress-drain";
+        _updateBlobColor();
+    }, 10);
 
     function dismiss() {
         toast.classList.remove("show");
+        if (progressEl) progressEl.style.display = "none";
         setTimeout(() => {
             if (toast.isConnected) container.removeChild(toast);
             _updateBlobColor();

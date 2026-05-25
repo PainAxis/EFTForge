@@ -124,7 +124,7 @@ async function stripBuild() {
     await refreshBuildStats();
     flashTree("strip");
     const { t: _t2 } = EFTForge.lang;
-    showToast(_t2("toast.strippedTitle"), _t2("toast.strippedMsg"), 2500, "#FF9800");
+    showToast(_t2("toast.strippedTitle"), _t2("toast.strippedMsg"), 2500, "#f5a623");
 }
 
 /* ===========================
@@ -2006,6 +2006,7 @@ async function _unlistMyBuild(btn, buildId) {
 
 let _notifPollInterval = null;
 const _SEEN_ANNOUNCEMENTS_KEY = "eft_seen_announcements";
+const _seenStaticThisSession = new Set(); // resets on page load so offline toasts re-show on refresh
 
 function _getSeenAnnouncements() {
     try { return new Set(JSON.parse(localStorage.getItem(_SEEN_ANNOUNCEMENTS_KEY) || "[]")); }
@@ -2099,40 +2100,55 @@ async function _pollNotifications() {
 
 async function _pollAnnouncements() {
     let items;
+    let fromStatic = false;
     try {
         items = await EFTForge.api.fetchAnnouncements();
     } catch {
-        return;
+        try {
+            items = await EFTForge.api.fetchStaticAnnouncements();
+            fromStatic = true;
+        } catch {
+            return;
+        }
     }
     if (!Array.isArray(items)) return;
 
-    // Prune IDs that no longer exist so deleted announcements don't linger in localStorage
-    const liveIds = new Set(items.map(i => i.id));
-    const seen = _getSeenAnnouncements();
-    const pruned = [...seen].filter(id => liveIds.has(id));
-    if (pruned.length !== seen.size)
-        localStorage.setItem(_SEEN_ANNOUNCEMENTS_KEY, JSON.stringify(pruned));
+    if (!fromStatic) {
+        const seen = _getSeenAnnouncements();
+        // Prune server IDs (numeric) that no longer exist; preserve string IDs from static file
+        const liveIds = new Set(items.map(i => String(i.id)));
+        const pruned = [...seen].filter(id => isNaN(Number(id)) || liveIds.has(String(id)));
+        if (pruned.length !== seen.size)
+            localStorage.setItem(_SEEN_ANNOUNCEMENTS_KEY, JSON.stringify(pruned));
 
-    if (items.length === 0) return;
-    const levelColor = {
-        info:     "#4a90d9",
-        success:  "#4CAF50",
-        warning:  "#f5a623",
-        error:    "#e74c3c",
-        critical: "#9b59b6",
-    };
-
-    for (const item of items) {
-        if (seen.has(item.id)) continue;
-        _markAnnouncementSeen(item.id);
-        showToast(
-            t("notify.announcementTitle"),
-            item.message,
-            0,
-            levelColor[item.level] || "#4a90d9",
-            null,
-            item.dismissible ?? true
-        );
+        if (items.length === 0) return;
+        const levelColor = {
+            info:     "#4a90d9",
+            success:  "#4CAF50",
+            warning:  "#f5a623",
+            error:    "#e74c3c",
+            critical: "#9b59b6",
+        };
+        for (const item of items) {
+            if (seen.has(item.id)) continue;
+            _markAnnouncementSeen(item.id);
+            showToast(t("notify.announcementTitle"), item.message, 0, levelColor[item.level] || "#4a90d9", null, item.dismissible ?? true);
+        }
+    } else {
+        // Static fallback: use session-only tracking so the toast re-appears on every page load while backend is down
+        if (items.length === 0) return;
+        const levelColor = {
+            info:     "#4a90d9",
+            success:  "#4CAF50",
+            warning:  "#f5a623",
+            error:    "#e74c3c",
+            critical: "#9b59b6",
+        };
+        for (const item of items) {
+            if (_seenStaticThisSession.has(item.id)) continue;
+            _seenStaticThisSession.add(item.id);
+            showToast(t("notify.announcementTitle"), item.message, 0, levelColor[item.level] || "#4a90d9", null, item.dismissible ?? true);
+        }
     }
 }
 
@@ -2293,7 +2309,7 @@ async function importBuildFromCode(code) {
 function exportBuildsBackup() {
     const data = loadSavedBuilds();
     if (!data.builds.length) {
-        showToast(t("toast.noBuildsToExportTitle"), t("toast.noBuildsToExport"), 2500, "#f44336");
+        showToast(t("toast.noBuildsToExportTitle"), t("toast.noBuildsToExport"), 2500, "#e74c3c");
         return;
     }
     const backup = {

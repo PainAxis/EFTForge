@@ -9,8 +9,13 @@ window.EFTForge.config = {
 
     IS_LOCAL_DEV: _isLocalDev,
 
-    APP_VERSION:    "v1.3.2",
-    APP_BUILD_DATE: "2026-05-24T05:31:31.936Z", // UTC - run new Date().toISOString() in console when bumping version
+    // Static announcements fetched as fallback when the backend is unreachable.
+    // Edit frontend/offline/announcements.json and deploy - nginx serves it at the same path in production.
+    // Format: [{id, message, level, expires_at, dismissible}] - use string IDs like "maint-2026-05-25".
+    STATIC_ANNOUNCEMENTS_URL: "/offline/announcements.json",
+
+    APP_VERSION:    "v1.3.3",
+    APP_BUILD_DATE: "2026-05-25T05:05:45.413Z", // UTC - run new Date().toISOString() in console when bumping version
 
     CALIBER_DISPLAY_MAP: {
         "Caliber20x1mm":      "20x1mm disk",

@@ -82,7 +82,7 @@ async function init() {
               const missing = ids.filter(id => !(id in EFTForge.state.fleaCachePvp));
               if (missing.length === 0) return;
               const { t: _t } = EFTForge.lang;
-              showToast(_t("stats.fleaMarket"), `${_t("stats.fleaFetching")} ${missing.length} ${_t("stats.fleaFetchingItems")}`, 4000, "#c8a84b");
+              showToast(_t("stats.fleaMarket"), `${_t("stats.fleaFetching")} ${missing.length} ${_t("stats.fleaFetchingItems")}`, 4000, "#f5a623");
               const CHUNK = 300;
               for (let i = 0; i < missing.length; i += CHUNK) {
                 await new Promise(resolve => setTimeout(resolve, 0));
@@ -646,7 +646,7 @@ function mobileWarning() {
     document.body.dataset.mobile = "true";
 
     const { t } = EFTForge.lang;
-    showToast(t("toast.mobileWarningTitle"), t("toast.mobileWarningMsg"), 6000, "#c8a84b");
+    showToast(t("toast.mobileWarningTitle"), t("toast.mobileWarningMsg"), 6000, "#f5a623");
 
     const backBtn = document.getElementById("mobile-drawer-back");
     if (backBtn) backBtn.addEventListener("click", closeMobileRightPanel);
@@ -1660,6 +1660,18 @@ async function switchLang(lang) {
                         </div>
                         <div id="dev-tracker-inject-out" class="dev-debugger-output"></div>
 
+                        <div class="dev-modal-section-label" style="padding-top:18px;">Toast Notifications</div>
+                        <div class="dev-modal-row">
+                            <span class="dev-modal-row-label">Fire example toasts</span>
+                            <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+                                <button id="dev-toast-info"     class="dev-debugger-run-btn" style="border-color:#4a90d9;color:#4a90d9;">INFO</button>
+                                <button id="dev-toast-success"  class="dev-debugger-run-btn" style="border-color:#4CAF50;color:#4CAF50;">SUCCESS</button>
+                                <button id="dev-toast-warning"  class="dev-debugger-run-btn" style="border-color:#f5a623;color:#f5a623;">WARNING</button>
+                                <button id="dev-toast-error"    class="dev-debugger-run-btn" style="border-color:#e74c3c;color:#e74c3c;">ERROR</button>
+                                <button id="dev-toast-critical" class="dev-debugger-run-btn" style="border-color:#9b59b6;color:#9b59b6;">CRITICAL</button>
+                            </div>
+                        </div>
+
                         <div class="dev-modal-section-label" style="padding-top:18px;">LocalStorage</div>
                         <div class="dev-modal-row">
                             <span class="dev-modal-row-label">eftforge_* keys</span>
@@ -1678,6 +1690,17 @@ async function switchLang(lang) {
         document.body.appendChild(overlay);
 
         document.getElementById("dev-modal-close").addEventListener("click", () => overlay.remove());
+
+        const _toastExamples = [
+            { id: "dev-toast-info",     color: "#4a90d9", title: "Info",     msg: "This is an example info announcement." },
+            { id: "dev-toast-success",  color: "#4CAF50", title: "Success",  msg: "Action completed successfully." },
+            { id: "dev-toast-warning",  color: "#f5a623", title: "Warning",  msg: "Something may need your attention." },
+            { id: "dev-toast-error",    color: "#e74c3c", title: "Error",    msg: "An error occurred. Please try again." },
+            { id: "dev-toast-critical", color: "#9b59b6", title: "Critical", msg: "Critical system alert requiring immediate action." },
+        ];
+        _toastExamples.forEach(({ id, color, title, msg }) => {
+            document.getElementById(id).addEventListener("click", () => showToast(title, msg, 5000, color));
+        });
         let _mdOnBackdrop = false;
         overlay.addEventListener("mousedown", e => { _mdOnBackdrop = e.target === overlay; });
         overlay.addEventListener("click", (e) => { if (e.target === overlay && _mdOnBackdrop) overlay.remove(); });

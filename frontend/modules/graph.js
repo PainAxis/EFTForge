@@ -1458,7 +1458,7 @@ async function _exportGraph(container) {
     const svg = container.querySelector("svg");
     if (!svg) return;
 
-    const toastEl = showToast(t("graph.exportGenerating"), t("graph.exportStatus1"), 0, "#888", null, false);
+    const toastEl = showToast(t("graph.exportGenerating"), t("graph.exportStatus1"), 0, "#4a90d9", null, false);
 
     try {
         const vb   = svg.getAttribute("viewBox")?.split(" ").map(Number) || [0, 0, 520, 320];

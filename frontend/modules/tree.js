@@ -6,7 +6,7 @@ function _showPublishLockedToast() {
     if (now - _publishLockedToastTs < 2500) return;
     _publishLockedToastTs = now;
     const { t } = EFTForge.lang;
-    showToast(t("publish.slotLockedTitle"), t("publish.slotLockedMsg"), 3000, "#c8a84b");
+    showToast(t("publish.slotLockedTitle"), t("publish.slotLockedMsg"), 3000, "#f5a623");
 }
 
 function _priceChipHtml(item) {

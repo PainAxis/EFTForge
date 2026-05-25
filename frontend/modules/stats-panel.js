@@ -90,7 +90,7 @@ async function refetchFleaPrices() {
     try {
         const { t: _t } = EFTForge.lang;
         const ids = await fetch(`${EFTForge.config.API_BASE}/items/ids`).then(r => r.json());
-        showToast(_t("stats.fleaMarket"), `${_t("stats.fleaFetching")} ${ids.length} ${_t("stats.fleaFetchingItems")}`, 4000, "#c8a84b");
+        showToast(_t("stats.fleaMarket"), `${_t("stats.fleaFetching")} ${ids.length} ${_t("stats.fleaFetchingItems")}`, 4000, "#f5a623");
         const CHUNK = 300;
         for (let i = 0; i < ids.length; i += CHUNK) {
             await new Promise(resolve => setTimeout(resolve, 0));

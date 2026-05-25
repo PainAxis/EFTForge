@@ -1836,7 +1836,7 @@ async function openComboView() {
     clearInterval(_dotsInterval);
 
     if (result.truncated) {
-        showToast(t("ui.comboTruncatedTitle"), t("ui.comboTruncatedMsg"), 8000, "#c8a84b");
+        showToast(t("ui.comboTruncatedTitle"), t("ui.comboTruncatedMsg"), 8000, "#f5a623");
     }
 
     if (!EFTForge.state.comboMode) return;

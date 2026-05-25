@@ -354,7 +354,7 @@ async function _bpGenerate(key) {
             _bpApplyImageUrl(null);
             if (resp.status === 502) {
                 const t = EFTForge.lang.t;
-                EFTForge.utils.showToast(t("toast.imgGenFailed"), t("toast.imgGenFailedMsg"), 4000, "#f44336");
+                EFTForge.utils.showToast(t("toast.imgGenFailed"), t("toast.imgGenFailedMsg"), 4000, "#e74c3c");
             }
             return;
         }

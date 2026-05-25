@@ -1641,7 +1641,7 @@ async function _exportBuildImage() {
     }
     if (!gridEl) return;
 
-    const toastEl = showToast(t("build.exportGenerating"), t("build.exportStatus1"), 0, "#888", null, false);
+    const toastEl = showToast(t("build.exportGenerating"), t("build.exportStatus1"), 0, "#4a90d9", null, false);
 
     try {
         const CELL_W = 48, CELL_H = 58, GRID_COLS = 10;
