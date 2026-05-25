@@ -1,9 +1,1 @@
-[
-  {
-    "id": "maint-example",
-    "message": "服务器正在维护中，预计 XX:XX 恢复。感谢大家对EFTForge的支持。",
-    "level": "warning",
-    "expires_at": null,
-    "dismissible": false
-  }
-]
+[]

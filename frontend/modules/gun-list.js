@@ -210,6 +210,11 @@ function updateToggleUI() {
 
 function returnToGunSelection() {
 
+    if (EFTForge.state.publishMode) {
+        EFTForge.state.publishMode = false;
+        _restoreNormalPlaceholder();
+    }
+
     EFTForge.state.currentGun = null;
     EFTForge.state.buildTree = null;
     EFTForge.state.lastParentNode = null;
