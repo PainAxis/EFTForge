@@ -2569,7 +2569,7 @@ def _gitee_delete_image(card_image_url: str | None, build_id: int) -> None:
 
 
 def _gitee_wipe_build_images_folder() -> int:
-    """Delete the entire build-images directory via a single git tree commit.
+    """Delete every file in the build-images folder via the Contents API.
     Returns the number of images deleted, or -1 on error."""
     from config import GITEE_TOKEN, GITEE_DRY_RUN
     if not GITEE_TOKEN or GITEE_DRY_RUN:
@@ -2580,106 +2580,40 @@ def _gitee_wipe_build_images_folder() -> int:
     tok = {"access_token": GITEE_TOKEN}
 
     try:
-        # branch HEAD + root tree SHA - Gitee branches API includes both
+        # list all files in the build-images folder (Gitee Contents API)
         r = _req.get(
-            f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/branches/{_GITEE_BRANCH}",
-            params=tok, timeout=20,
+            f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/contents/{_GITEE_FOLDER}",
+            params={**tok, "ref": _GITEE_BRANCH},
+            timeout=30,
         )
+        if r.status_code == 404:
+            return 0
         r.raise_for_status()
-        branch_data = r.json()
-        head_sha      = branch_data["commit"]["sha"]
-        root_tree_sha = branch_data["commit"]["commit"]["tree"]["sha"]
 
-        # root tree entries
-        r = _req.get(
-            f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/git/trees/{root_tree_sha}",
-            params=tok, timeout=20,
-        )
-        r.raise_for_status()
-        root_entries = r.json()["tree"]
-
-        sa_entry = next(
-            (e for e in root_entries if e["path"] == "streaming-assets" and e["type"] == "tree"),
-            None,
-        )
-        if not sa_entry:
+        entries = r.json()
+        if not isinstance(entries, list):
             return 0
 
-        # streaming-assets tree entries
-        r = _req.get(
-            f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/git/trees/{sa_entry['sha']}",
-            params=tok, timeout=20,
-        )
-        r.raise_for_status()
-        sa_entries = r.json()["tree"]
+        file_entries = [e for e in entries if e.get("type") == "file"]
+        deleted = 0
+        for entry in file_entries:
+            dr = _req.delete(
+                f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/contents/{entry['path']}",
+                params=tok,
+                json={
+                    "message": "ci: wipe all build images",
+                    "sha":     entry["sha"],
+                    "branch":  _GITEE_BRANCH,
+                },
+                timeout=30,
+            )
+            if dr.ok:
+                deleted += 1
+            else:
+                _logger.warning("gitee: failed to delete %s: %s", entry["path"], dr.text)
 
-        bi_entry = next(
-            (e for e in sa_entries if e["path"] == "build-images" and e["type"] == "tree"),
-            None,
-        )
-        if not bi_entry:
-            return 0
-
-        # count files being deleted
-        r = _req.get(
-            f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/git/trees/{bi_entry['sha']}",
-            params={**tok, "recursive": 1}, timeout=30,
-        )
-        r.raise_for_status()
-        file_count = len([e for e in r.json()["tree"] if e["type"] == "blob"])
-
-        # new streaming-assets tree without build-images
-        new_sa_entries = [e for e in sa_entries if e["path"] != "build-images"]
-        r = _req.post(
-            f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/git/trees",
-            params=tok,
-            json={"tree": new_sa_entries},
-            timeout=30,
-        )
-        r.raise_for_status()
-        new_sa_sha = r.json()["sha"]
-
-        # new root tree with updated streaming-assets entry
-        new_root_entries = [
-            {**e, "sha": new_sa_sha} if e["path"] == "streaming-assets" else e
-            for e in root_entries
-        ]
-        r = _req.post(
-            f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/git/trees",
-            params=tok,
-            json={"tree": new_root_entries},
-            timeout=30,
-        )
-        r.raise_for_status()
-        new_root_sha = r.json()["sha"]
-
-        # commit and advance the branch
-        r = _req.post(
-            f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/git/commits",
-            params=tok,
-            json={
-                "message": "ci: wipe all build images",
-                "tree":    new_root_sha,
-                "parents": [head_sha],
-            },
-            timeout=30,
-        )
-        r.raise_for_status()
-        new_commit_sha = r.json()["sha"]
-
-        r = _req.patch(
-            f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/git/refs/heads/{_GITEE_BRANCH}",
-            params=tok,
-            json={"sha": new_commit_sha},
-            timeout=30,
-        )
-        r.raise_for_status()
-
-        _logger.warning(
-            "gitee: wiped build-images folder (%d files) in commit %s",
-            file_count, new_commit_sha[:8],
-        )
-        return file_count
+        _logger.warning("gitee: wiped build-images folder (%d files)", deleted)
+        return deleted
 
     except Exception as exc:
         _logger.error("gitee: wipe build-images folder failed: %s", exc)
