@@ -3930,6 +3930,17 @@ def post_build_comment(
         user_avatar_url   = c_avatar or None,
     )
     db.add(comment)
+    db.flush()
+
+    if build.ip_hash and client_hash != build.ip_hash:
+        db.add(PendingNotification(
+            ip_hash    = build.ip_hash,
+            type       = "new_comment",
+            data_json  = json.dumps({"build_id": build_id, "build_name": build.build_name}),
+            created_at = datetime.now(timezone.utc).replace(tzinfo=None),
+            delivered  = False,
+        ))
+
     db.commit()
     db.refresh(comment)
 

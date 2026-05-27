@@ -4540,6 +4540,24 @@ button.build-tag-chip.active {
     flex-shrink: 0;
 }
 
+.has-new-comment {
+    position: relative;
+    overflow: visible !important;
+}
+.has-new-comment::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    width: 8px;
+    height: 8px;
+    background: #f5c542;
+    border-radius: 50%;
+    box-shadow: 0 0 5px rgba(245, 197, 66, 0.8);
+    pointer-events: none;
+    z-index: 10;
+}
+
 .saved-build-btn {
     background: #1a1a1a;
     border: 1px solid #333;
@@ -6712,7 +6730,7 @@ var _hmt = _hmt || [];
         <span class="header-nav-btn-icon"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="3" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.5"/><line x1="5" y1="6" x2="13" y2="6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="5" y1="9" x2="13" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="5" y1="12" x2="9" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
         <span class="header-nav-btn-label">News</span>
       </button>
-      <button id="builds-btn" class="header-nav-btn" onclick="showBuildsDialog()">
+      <button id="builds-btn" class="header-nav-btn" data-badge="" data-badge-pulse="false" onclick="showBuildsDialog()">
         <span class="header-nav-btn-icon"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 2L16 6.5L9 11L2 6.5L9 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M2 10.5L9 15L16 10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         <span class="header-nav-btn-label">Builds</span>
       </button>

@@ -757,6 +757,7 @@ function showBuildsDialog() {
         },
     });
     if (!overlay) return;
+    _updateNewCommentBadge();
 
     document.getElementById("bm-tab-saves").innerHTML = `
         <div class="modal-section">
@@ -1673,6 +1674,9 @@ async function _toggleBuildComments(event, buildId) {
         return;
     }
     section.style.display = "block";
+    _clearNewCommentBuildId(buildId);
+    _updateNewCommentBadge();
+    document.querySelectorAll(`.cb-comments-toggle-btn[data-build-id="${buildId}"]`).forEach(b => b.classList.remove("has-new-comment"));
     _renderBuildCommentsSection(section, buildId);
 }
 window._toggleBuildComments = _toggleBuildComments;
@@ -1913,6 +1917,8 @@ function _applyMyCommunityFilter() {
 
     container._displayedMyBuilds = builds;
 
+    const _newCommentIds = _getNewCommentBuildIds();
+
     container.innerHTML = builds.map((b, idx) => {
         const gunName    = gunLookup.get(b.gun_id) || b.gun_name || "";
         const gunObj     = (EFTForge.state.allGuns || []).find(g => g.id === b.gun_id);
@@ -1970,7 +1976,7 @@ function _applyMyCommunityFilter() {
                     </div>
                     <button class="saved-build-btn unlist-btn" data-build-id="${b.id}"
                             onclick="_confirmUnlistMyBuild(this,'${b.id}')">${t("modal.unlistBtn")}</button>
-                    <button class="saved-build-btn cb-comments-toggle-btn" data-build-id="${b.id}"
+                    <button class="saved-build-btn cb-comments-toggle-btn${_newCommentIds.has(b.id) ? " has-new-comment" : ""}" data-build-id="${b.id}"
                             onclick="_toggleBuildComments(event,${b.id})">${t("cb.comments")}${b.comment_count > 0 ? ` (${b.comment_count})` : ""}</button>
                     <button class="saved-build-btn load-btn" data-my-idx="${idx}"
                             onclick="_loadMyCommunityBuildByIdx(this.dataset.myIdx)">${t("ui.load")}</button>
@@ -2103,6 +2109,37 @@ async function _checkStoredBan() {
     }
 }
 
+const _NEW_COMMENT_KEY = "eftforge_new_comment_builds";
+
+function _getNewCommentBuildIds() {
+    try { return new Set(JSON.parse(localStorage.getItem(_NEW_COMMENT_KEY) || "[]")); }
+    catch { return new Set(); }
+}
+
+function _addNewCommentBuildId(buildId) {
+    const ids = _getNewCommentBuildIds();
+    ids.add(buildId);
+    localStorage.setItem(_NEW_COMMENT_KEY, JSON.stringify([...ids]));
+}
+
+function _clearNewCommentBuildId(buildId) {
+    const ids = _getNewCommentBuildIds();
+    ids.delete(buildId);
+    localStorage.setItem(_NEW_COMMENT_KEY, JSON.stringify([...ids]));
+}
+
+function _updateNewCommentBadge() {
+    const ids = _getNewCommentBuildIds();
+    const count = ids.size;
+    const badge = count > 0 ? (count > 99 ? "99+" : String(count)) : "";
+
+    const btn = document.getElementById("builds-btn");
+    if (btn) btn.dataset.badge = badge;
+
+    const tabBtn = document.querySelector('#builds-dialog .modal-tab[data-target="bm-tab-community"]');
+    if (tabBtn) tabBtn.classList.toggle("has-new-comment", count > 0);
+}
+
 async function _pollNotifications() {
     let notes;
     try {
@@ -2129,6 +2166,12 @@ async function _pollNotifications() {
         } else if (note.type === "unban") {
             localStorage.removeItem("eftforge_ban");
             showToast(t("notify.unbannedTitle"), t("notify.unbanned"), 8000, "#4CAF50");
+        } else if (note.type === "new_comment") {
+            const buildId = note.data?.build_id;
+            if (buildId != null) {
+                _addNewCommentBuildId(buildId);
+                _updateNewCommentBadge();
+            }
         }
     }
 }
@@ -2189,6 +2232,7 @@ async function _pollAnnouncements() {
 
 function _startNotificationPolling() {
     _checkStoredBan();
+    _updateNewCommentBadge();
     _pollNotifications();
     _pollAnnouncements();
     document.addEventListener("visibilitychange", () => {

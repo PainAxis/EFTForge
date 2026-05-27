@@ -2,8 +2,8 @@
   "posts": [
     {
       "id": "2026-05-27-v134-release",
-      "title": "v1.3.4 - Mobile Compatibility Optimizations Iteration 2",
-      "title_zh": "v1.3.4 - 移动端适配优化（第二阶段）",
+      "title": "v1.3.4 - Comment Notifications, Mobile Compatibility Optimizations Iteration 2",
+      "title_zh": "v1.3.4 - 评论提示、移动端适配优化（第二阶段）",
       "date": "2026-05-27",
       "tags": ["patch-notes", "small-patch"],
       "file": "2026-05-27-v134-release.md",
