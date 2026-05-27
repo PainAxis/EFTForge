@@ -1373,19 +1373,12 @@ header:not(.header-expanded) .header-nav-btn-icon {
   font-size: 17px;
   color: #555;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.1s, color 0.1s;
+  transition: color 0.1s;
   align-self: center;
 }
 
 .att-fav-btn.active {
   color: #f0c040;
-  opacity: 1;
-}
-
-tr:hover .att-fav-btn,
-.att-fav-btn:focus-visible {
-  opacity: 1;
 }
 
 .att-fav-btn:hover {
@@ -6130,7 +6123,7 @@ body[data-mobile="true"] #price-overview {
 body[data-mobile="true"] .right-panel {
   position: fixed;
   left: 0; right: 0; bottom: 0;
-  top: 44px;
+  top: 25%;
   z-index: 150;
   transform: translateY(100%);
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -6138,47 +6131,48 @@ body[data-mobile="true"] .right-panel {
   padding: 0 12px 16px;
   contain: none; /* remove paint containment so fixed children use the viewport */
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
 }
 
 body[data-mobile="true"].mobile-right-open .right-panel { transform: translateY(0); }
 body[data-mobile="true"] .container:not(.no-gun) .right-panel { background-color: #111; }
 
 /* Dim backdrop behind the open drawer */
-body[data-mobile="true"].mobile-right-open::before {
-  content: "";
+#mobile-panel-backdrop {
+  display: none;
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
   z-index: 149;
 }
+body[data-mobile="true"].mobile-right-open #mobile-panel-backdrop { display: block; }
 
-/* Drag-handle pip at top of drawer */
-body[data-mobile="true"] .right-panel::before {
+/* Drag-handle pip: hidden by default, shown as sticky bar on mobile */
+.mobile-drag-handle { display: none; }
+body[data-mobile="true"] .mobile-drag-handle {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 12px 0 8px;
+  position: sticky;
+  top: 0;
+  left: 0;
+  right: 0;
+  margin: 0 -12px;
+  z-index: 2;
+  background: #111;
+  flex-shrink: 0;
+}
+body[data-mobile="true"] .mobile-drag-handle::after {
   content: "";
-  display: block;
   width: 36px;
   height: 4px;
   background: #333;
   border-radius: 2px;
-  margin: 12px auto 4px;
-  flex-shrink: 0;
 }
 
-/* Back button (shown only on mobile) */
-body[data-mobile="true"] #mobile-drawer-back {
-  display: flex;
-  align-items: center;
-  padding: 10px 0 12px;
-  color: #888;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  border-bottom: 1px solid #222;
-  margin-bottom: 8px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
+/* Back button hidden on mobile - swipe down closes the drawer instead */
+body[data-mobile="true"] #mobile-drawer-back { display: none; }
 
 /* Scrollbars: hidden on touch */
 body[data-mobile="true"] .right-panel,
@@ -6221,10 +6215,45 @@ body[data-mobile="true"] .swipe-removable.swipe-revealing::after { transform: tr
 /* Modals: centered, constrained to screen on all mobile orientations */
 body[data-mobile="true"] .modal-window {
   min-width: unset;
-  max-width: calc(100vw - 32px);
+  max-width: calc(100vw - 32px) !important;
   max-height: 85vh;
   overflow-y: auto;
 }
+
+/* Tabbed modals: stack vertically on mobile (tab rail becomes top bar) */
+body[data-mobile="true"] .modal-outer {
+  flex-direction: column;
+  align-items: stretch;
+  max-width: calc(100vw - 32px);
+  max-height: 90vh;
+}
+body[data-mobile="true"] .modal-tab-rail {
+  flex-direction: row;
+  padding: 8px 8px 0;
+  gap: 4px;
+  width: 100%;
+  box-sizing: border-box;
+}
+body[data-mobile="true"] .modal-tab {
+  writing-mode: horizontal-tb;
+  border-radius: 4px;
+  border: 1px solid #2a2a2a;
+  border-right: 1px solid #2a2a2a;
+  flex: 1;
+  padding: 8px 4px;
+  text-align: center;
+}
+body[data-mobile="true"] .modal-tab.active {
+  margin-right: 0;
+  border-right: 1px solid #333;
+  border-color: #333;
+  color: #f5c542;
+  background: #1a1a1a;
+}
+
+/* Community builds: 1 column on mobile */
+body[data-mobile="true"] #public-builds-list,
+body[data-mobile="true"] #my-community-list { grid-template-columns: 1fr; }
 
 /* Touch targets (apply on all touch devices) */
 body[data-mobile="true"] .tree-slot-inner { padding: 5px 8px; font-size: 13px; }
@@ -6246,7 +6275,7 @@ body[data-mobile="true"] .back-button { padding: 8px 10px; }
 body[data-mobile="true"] .saved-build-btn { padding: 8px 10px; }
 
 /* Attachment table: sticky header fix */
-body[data-mobile="true"] .attachment-table th { top: 0; padding-top: 10px; }
+body[data-mobile="true"] .attachment-table th { top: 24px; padding-top: 10px; background: #111; }
 
 /* Gun cards: disable mouse-only effects, add tap feedback */
 body[data-mobile="true"] .gun-card::before,
@@ -6255,9 +6284,8 @@ body[data-mobile="true"] .gun-card:hover img { transform: none; }
 body[data-mobile="true"] .gun-card:active { border-color: #f5c542; opacity: 0.85; }
 body[data-mobile="true"] .gun-card-border-cg { display: none; }
 
-/* Toasts: full width */
-body[data-mobile="true"] #toast-container { left: 12px; right: 12px; bottom: 12px; }
-body[data-mobile="true"] .toast { min-width: unset; max-width: unset; width: 100%; box-sizing: border-box; }
+/* Toasts: nudge position on mobile */
+body[data-mobile="true"] #toast-container { right: 12px; bottom: 12px; }
 
 /* Tree: reduced indentation */
 body[data-mobile="true"] .tree-children { margin-left: 12px; padding-left: 8px; }
@@ -6278,16 +6306,46 @@ body[data-mobile="true"] .cb-stat-label { font-size: 8px; }
 body[data-mobile="true"] .cb-stat-val { font-size: 11px; }
 body[data-mobile="true"] .cb-card-footer { padding: 4px 6px; }
 
-/* Mobile: attachment table - name column only */
-body[data-mobile="true"] .attachment-table th:not(:first-child),
-body[data-mobile="true"] .attachment-table td:not(:first-child) { display: none !important; }
+/* Mobile: restore acc(6) and ergo(7) hidden by the 767px media query */
+body[data-mobile="true"] .attachment-table th:nth-child(6),
+body[data-mobile="true"] .attachment-table td:nth-child(6),
+body[data-mobile="true"] .attachment-table th:nth-child(7),
+body[data-mobile="true"] .attachment-table td:nth-child(7) { display: table-cell; }
+/* Let hide-col-* autohide still work - these selectors are more specific so they win */
+body[data-mobile="true"] .attachment-table.hide-col-acc th:nth-child(6),
+body[data-mobile="true"] .attachment-table.hide-col-acc td:nth-child(6),
+body[data-mobile="true"] .attachment-table.hide-col-ergo th:nth-child(7),
+body[data-mobile="true"] .attachment-table.hide-col-ergo td:nth-child(7) { display: none; }
+/* Compact name cell: drop vote buttons, shrink icon, tighten layout */
+body[data-mobile="true"] .att-rating { display: none; }
+body[data-mobile="true"] .attachment-icon,
+body[data-mobile="true"] .attachment-icon-wrapper { width: 32px; height: 32px; }
+body[data-mobile="true"] .attachment-name-wrapper { gap: 6px; }
+body[data-mobile="true"] .attachment-table td { padding: 5px 5px; }
+body[data-mobile="true"] .attachment-table tbody tr { height: 46px; }
+body[data-mobile="true"] .att-table-close-btn { display: none; }
+
+/* Mobile: attachment table horizontal scroll handled by right-panel */
 
 /* Mobile: attachment table header */
-body[data-mobile="true"] .att-table-header h3 { font-size: 13px; }
-body[data-mobile="true"] .att-table-header-toggles { flex-direction: column; align-items: center; gap: 6px; }
+body[data-mobile="true"] .att-table-header { flex-wrap: wrap; gap: 8px; }
+body[data-mobile="true"] .att-table-gun-img { height: 72px; max-width: 200px; }
+body[data-mobile="true"] .att-table-header h3 { font-size: 14px; flex: 1; }
+body[data-mobile="true"] .att-table-header-toggles { flex-direction: row; flex-wrap: wrap; width: 100%; margin-left: 0; gap: 8px; }
+body[data-mobile="true"] .combo-view-btns { flex: 1; }
+body[data-mobile="true"] .combo-view-btns .toggle-btn { flex: 1; padding: 6px 4px; }
+/* Mobile: hide short name badge on attachment icons in table */
+body[data-mobile="true"] .attachment-table .slot-shortname { display: none; }
+/* Mobile: combo name cell needs minimum width to show icons; table scrolls to cover stats */
+body[data-mobile="true"] .attachment-table td.combo-name-cell { min-width: 200px; }
+/* Mobile: combo icon area is touch-scrollable instead of hover-animated */
+body[data-mobile="true"] .combo-icon-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+body[data-mobile="true"] .combo-icon-scroll::-webkit-scrollbar { display: none; }
 
 /* Mobile: disabled features */
-body[data-mobile="true"] #view-grid-btn { display: none !important; }
+body[data-mobile="true"] .saved-build-btn.publish-btn { display: none; }
+body[data-mobile="true"] #view-grid-btn,
+body[data-mobile="true"] #view-list-btn { display: none !important; }
 body[data-mobile="true"] #graph-view-btn { display: none !important; }
 body[data-mobile="true"] .ag-export-img-btn { display: none !important; }
 body[data-mobile="true"] #compare-toggle-btn { display: none !important; }
@@ -6312,7 +6370,8 @@ body[data-mobile="true"] #build-controls .back-button { white-space: normal; min
   #tarkov-clock { display: none; }
   .header-btn { padding: 5px 8px; font-size: 11px; letter-spacing: 0.5px; }
   .header-nav-btn { padding: 0 10px; font-size: 11px; }
-  #about-btn { display: none; }
+  /* #about-btn visible on mobile */
+  .header-title-group { display: none; }
 
   /* iOS zoom-on-focus fix */
   .search-input, input[type="text"] { font-size: 16px; }
@@ -6713,6 +6772,9 @@ var _hmt = _hmt || [];
   <!-- MOBILE PUBLISH TRAY (fixed bottom bar, mobile-only, publish mode only) -->
   <div id="mobile-publish-tray"></div>
 
+  <!-- MOBILE PANEL BACKDROP (real element so it blocks clicks through) -->
+  <div id="mobile-panel-backdrop"></div>
+
   <!-- PANEL RESIZER -->
   <div id="panel-resizer" class="panel-resizer">
     <div class="panel-resizer-handle"></div>
@@ -6726,6 +6788,7 @@ var _hmt = _hmt || [];
   <!-- RIGHT PANEL -->
     <div class="right-panel">
 
+        <div class="mobile-drag-handle"></div>
         <div id="mobile-drawer-back">&#8592; Back to Build</div>
 
         <div id="attachment-placeholder" class="attachment-placeholder">
@@ -6838,9 +6901,9 @@ var _hmt = _hmt || [];
 
 <div id="toast-container"></div>
 <!-- ***!!IMPORTANT!!*** - Cache-busting: bump ?v= on any modified files before deploying -->
-<script src="modules/config.js?v=20"></script>
+<script src="modules/config.js?v=21"></script>
 <script src="modules/state.js?v=16"></script>
-<script src="modules/lang.js?v=21"></script>
+<script src="modules/lang.js?v=22"></script>
 <script src="modules/utils.js?v=17"></script>
 <script src="modules/media-viewer.js?v=5"></script>
 <script src="modules/calculations.js?v=14"></script>
@@ -6852,11 +6915,11 @@ var _hmt = _hmt || [];
 <script src="modules/attachment-grid.js?v=16"></script>
 <script src="modules/attachment-grid-devtool.js?v=13"></script><!-- dev only: self-exits on non-localhost -->
 <script src="modules/build-preview.js?v=13"></script>
-<script src="modules/slot-selector.js?v=19"></script>
+<script src="modules/slot-selector.js?v=20"></script>
 <script src="modules/graph.js?v=7"></script>
-<script src="modules/build-manager.js?v=20"></script>
+<script src="modules/build-manager.js?v=21"></script>
 <script src="modules/profile.js?v=5"></script>
-<script src="app.js?v=29"></script>
+<script src="app.js?v=30"></script>
 <script src="lzstring.min.js?v=13"></script>
 <script src="marked.min.js?v=13"></script>
 <script src="modules/news.js?v=14"></script>

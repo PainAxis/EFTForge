@@ -596,7 +596,7 @@ function _renderSaveBuildBody(prefill, existingTags = null) {
             <div class="modal-label" style="display:flex; align-items:center; gap:6px;">
                 ${t("modal.myBuilds")} <span style="color:#f5c542; font-weight:700;">${escapeHtml(gun.name)}</span>
             </div>
-            <div style="font-size:12px; color:#555; margin-bottom:8px;">${t("modal.publishHint")}</div>
+            <div style="font-size:12px; color:#555; margin-bottom:8px;">${t(isMobileLayout() ? "modal.publishHintMobile" : "modal.publishHint")}</div>
             <div id="save-panel-builds-list" style="max-height:220px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:#444 #111;"></div>
         </div>
     `;

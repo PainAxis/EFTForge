@@ -648,17 +648,40 @@ function mobileWarning() {
     const { t } = EFTForge.lang;
     showToast(t("toast.mobileWarningTitle"), t("toast.mobileWarningMsg"), 6000, "#f5a623");
 
-    const backBtn = document.getElementById("mobile-drawer-back");
-    if (backBtn) backBtn.addEventListener("click", closeMobileRightPanel);
+    const _sb = (id, key) => { const el = document.getElementById(id); if (el) el.textContent = t(key); };
+    _sb("back-btn",      "btn.backShort");
+    _sb("reset-btn",     "btn.resetShort");
+    _sb("strip-btn",     "btn.stripShort");
+    _sb("save-share-btn","btn.saveShareShort");
+    _sb("gun-builds-btn","btn.gunBuildsShort");
+
+    const rp = document.querySelector(".right-panel");
+    if (rp) {
+        let _swipeStartY = 0, _swipeTracking = false;
+        rp.addEventListener("touchstart", (e) => {
+            _swipeStartY = e.touches[0].clientY;
+            _swipeTracking = rp.scrollTop === 0;
+        }, { passive: true });
+        rp.addEventListener("touchmove", (e) => {
+            if (!_swipeTracking) return;
+            if (rp.scrollTop > 0) { _swipeTracking = false; return; }
+            const dy = e.touches[0].clientY - _swipeStartY;
+            if (dy > 0) rp.style.transform = `translateY(${dy}px)`;
+        }, { passive: true });
+        rp.addEventListener("touchend", (e) => {
+            if (!_swipeTracking) return;
+            _swipeTracking = false;
+            const dy = e.changedTouches[0].clientY - _swipeStartY;
+            rp.style.transform = "";
+            if (dy > 72) closeMobileRightPanel();
+        }, { passive: true });
+    }
 
     const publishTray = document.getElementById("mobile-publish-tray");
     if (publishTray) publishTray.addEventListener("click", openMobileRightPanel);
 
-    document.addEventListener("pointerdown", (e) => {
-        if (!document.body.classList.contains("mobile-right-open")) return;
-        const rp = document.querySelector(".right-panel");
-        if (rp && !rp.contains(e.target)) closeMobileRightPanel();
-    });
+    const backdrop = document.getElementById("mobile-panel-backdrop");
+    if (backdrop) backdrop.addEventListener("click", closeMobileRightPanel);
 
     _initSwipeObserver();
 

@@ -1440,7 +1440,9 @@ function renderAttachmentRows(items) {
     });
 
     // Swipe-left to remove (touch devices - auto-registered by MutationObserver in app.js)
-    if (installedId && String(installedId) === String(item.id)) {
+    // Disabled on mobile: table rows scroll horizontally to show stats, swipe-to-remove
+    // lives in the workbench tree slots instead.
+    if (!isMobileLayout() && installedId && String(installedId) === String(item.id)) {
         row.classList.add("swipe-removable");
         row._swipeRemoveFn = () => {
             if (EFTForge.state.publishMode) return;
