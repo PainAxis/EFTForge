@@ -1459,6 +1459,15 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .bp-imggen-toggle.active .compare-toggle-track { background: #1e1800; border-color: #f5c542; }
 .bp-imggen-toggle.active .compare-toggle-knob  { background: #f5c542; }
 
+.bp-imggen-globally-disabled {
+    opacity: 0.45;
+    cursor: not-allowed !important;
+}
+.bp-imggen-globally-disabled * {
+    cursor: not-allowed !important;
+    pointer-events: none;
+}
+
 #favorites-filter-btn.active,
 #purchasable-toggle-btn.active { color: #555; }
 #favorites-filter-btn.active:hover,
@@ -6388,7 +6397,9 @@ body[data-mobile="true"] #build-controls .back-button { white-space: normal; min
 
 @media (max-width: 767px) {
   /* Header compression */
-  header { padding: 0 10px; gap: 8px; }
+  header { padding: 0 10px; gap: 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none; }
+  header::-webkit-scrollbar { display: none; }
+  .header-content { min-width: max-content; }
   #tarkov-clock { display: none; }
   .header-btn { padding: 5px 8px; font-size: 11px; letter-spacing: 0.5px; }
   .header-nav-btn { padding: 0 10px; font-size: 11px; }
@@ -6923,9 +6934,9 @@ var _hmt = _hmt || [];
 
 <div id="toast-container"></div>
 <!-- ***!!IMPORTANT!!*** - Cache-busting: bump ?v= on any modified files before deploying -->
-<script src="modules/config.js?v=21"></script>
+<script src="modules/config.js?v=22"></script>
 <script src="modules/state.js?v=16"></script>
-<script src="modules/lang.js?v=22"></script>
+<script src="modules/lang.js?v=23"></script>
 <script src="modules/utils.js?v=17"></script>
 <script src="modules/media-viewer.js?v=5"></script>
 <script src="modules/calculations.js?v=14"></script>
@@ -6933,15 +6944,15 @@ var _hmt = _hmt || [];
 <script src="modules/api.js?v=17"></script>
 <script src="modules/gun-list.js?v=17"></script>
 <script src="modules/stats-panel.js?v=18"></script>
-<script src="modules/tree.js?v=16"></script>
-<script src="modules/attachment-grid.js?v=16"></script>
+<script src="modules/tree.js?v=17"></script>
+<script src="modules/attachment-grid.js?v=17"></script>
 <script src="modules/attachment-grid-devtool.js?v=13"></script><!-- dev only: self-exits on non-localhost -->
-<script src="modules/build-preview.js?v=13"></script>
+<script src="modules/build-preview.js?v=14"></script>
 <script src="modules/slot-selector.js?v=20"></script>
 <script src="modules/graph.js?v=7"></script>
 <script src="modules/build-manager.js?v=21"></script>
 <script src="modules/profile.js?v=5"></script>
-<script src="app.js?v=30"></script>
+<script src="app.js?v=31"></script>
 <script src="lzstring.min.js?v=13"></script>
 <script src="marked.min.js?v=13"></script>
 <script src="modules/news.js?v=14"></script>

@@ -229,6 +229,9 @@ _community_builds_disabled: bool = os.path.exists(_COMMUNITY_BUILDS_LOCK_FILE)
 # tarkov.dev data is still catching up to the new game state.
 _HYPERACTIVE_LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hyperactive.lock")
 _hyperactive_mode: bool = os.path.exists(_HYPERACTIVE_LOCK_FILE)
+
+_IMGGEN_DISABLED_LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "imggen_disabled.lock")
+_imggen_disabled: bool = os.path.exists(_IMGGEN_DISABLED_LOCK_FILE)
 _SYNC_INTERVAL_HYPERACTIVE_SECS = 1800   # 30 minutes
 _sync_running: bool = False
 _last_sync_at: float | None = None
@@ -2359,7 +2362,7 @@ async def _do_pw_request(id: str, items: list, weapon_name: str) -> dict:
 
 @app.get("/build-image/busy")
 async def build_image_busy():
-    return {"busy": _pw_in_flight > 0}
+    return {"busy": _pw_in_flight > 0, "disabled": _imggen_disabled}
 
 @app.post("/build-image")
 async def proxy_build_image(
@@ -2367,6 +2370,9 @@ async def proxy_build_image(
     items: List[dict] = Body(...),
     db:    Session    = Depends(get_db),
 ):
+    if _imggen_disabled:
+        raise HTTPException(status_code=503, detail="Build preview generation is temporarily disabled")
+
     # Stable cache key: hash of sorted item tpl+slot pairs
     cache_key_src = json.dumps(sorted((i.get("_tpl","") + i.get("slotId","")) for i in items))
     cache_key = hashlib.sha256(cache_key_src.encode()).hexdigest()[:16]
@@ -2987,6 +2993,32 @@ async def admin_set_hyperactive_mode(
             os.remove(_HYPERACTIVE_LOCK_FILE)
         _sync_trigger.set()   # wake the background loop so it sees mode=False
     return {"hyperactive_mode": enabled}
+
+
+@app.get("/admin/imggen-disabled")
+def admin_get_imggen_disabled(
+    request:     Request,
+    x_admin_key: str = Header(None),
+):
+    _require_admin(request, x_admin_key)
+    return {"imggen_disabled": _imggen_disabled}
+
+
+@app.post("/admin/imggen-disabled")
+def admin_set_imggen_disabled(
+    request:     Request,
+    disabled:    bool = Body(...),
+    x_admin_key: str  = Header(None),
+):
+    global _imggen_disabled
+    _require_admin(request, x_admin_key)
+    _imggen_disabled = disabled
+    if disabled:
+        open(_IMGGEN_DISABLED_LOCK_FILE, "w").close()
+    else:
+        if os.path.exists(_IMGGEN_DISABLED_LOCK_FILE):
+            os.remove(_IMGGEN_DISABLED_LOCK_FILE)
+    return {"imggen_disabled": disabled}
 
 
 # ---------------------------------------------------

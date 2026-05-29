@@ -26,7 +26,51 @@ let _bpPlaceholderUrl   = null;   // URL shown on the placeholder (persists acro
 const _BP_STORAGE_KEY = "eftforge_imggen_enabled";
 let _bpEnabled = localStorage.getItem(_BP_STORAGE_KEY) !== "false";
 
+// True when an admin has globally disabled image generation server-side.
+let _bpGlobalDisabled = false;
+
+function _bpApplyGlobalDisabledClass() {
+    const tip = _bpGlobalDisabled ? EFTForge.lang.t("toast.imgGenDisabledTip") : null;
+    document.querySelectorAll(".bp-imggen-toggle").forEach(btn => {
+        btn.classList.toggle("bp-imggen-globally-disabled", _bpGlobalDisabled);
+        if (tip) {
+            btn.dataset.tooltip = tip;
+        } else {
+            delete btn.dataset.tooltip;
+        }
+    });
+}
+
+function _bpSetGlobalDisabled(disabled) {
+    _bpGlobalDisabled = disabled;
+    _bpApplyGlobalDisabledClass();
+    if (disabled) {
+        // Abort any in-flight generation
+        clearTimeout(_bpDebounceTimer);
+        if (_bpAbortController) { _bpAbortController.abort(); _bpAbortController = null; }
+        _bpInflight   = false;
+        _bpSetQueued(false);
+        _bpPendingKey = null;
+    }
+}
+
+async function initBpGlobalStatus() {
+    try {
+        const resp = await fetch(`${EFTForge.config.API_BASE}/build-image/busy`);
+        if (resp.ok) {
+            const data = await resp.json();
+            if (typeof data.disabled === "boolean") {
+                _bpSetGlobalDisabled(data.disabled);
+            }
+        }
+    } catch (_) {}
+}
+
+window.initBpGlobalStatus = initBpGlobalStatus;
+
 function toggleImgGen() {
+    if (_bpGlobalDisabled) return;
+
     _bpEnabled = !_bpEnabled;
     localStorage.setItem(_BP_STORAGE_KEY, String(_bpEnabled));
 
@@ -329,12 +373,15 @@ async function _bpGenerate(key) {
             return;
         }
 
-        // Check if another user's generation is already in flight on the server.
-        // The server serializes requests through a single lock, so we'll be queued.
+        // Check server state: queue status and global disabled flag.
         try {
             const busyResp = await fetch(`${EFTForge.config.API_BASE}/build-image/busy`, { signal });
             if (busyResp.ok) {
                 const busyData = await busyResp.json();
+                if (typeof busyData.disabled === "boolean" && busyData.disabled !== _bpGlobalDisabled) {
+                    _bpSetGlobalDisabled(busyData.disabled);
+                }
+                if (_bpGlobalDisabled) return;
                 if (busyData.busy) _bpSetQueued(true);
             }
         } catch (_) {}
@@ -402,7 +449,7 @@ async function _bpGenerate(key) {
 let _bpDebounceTimer = null;
 
 function scheduleBuildPreview() {
-    if (!_bpEnabled || !EFTForge.state.currentGun) return;
+    if (!_bpEnabled || _bpGlobalDisabled || !EFTForge.state.currentGun) return;
 
     const key = _bpPairsKey();
 

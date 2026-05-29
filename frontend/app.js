@@ -40,6 +40,7 @@ devVersionCheck();
 mobileWarning();
 initTarkovClock();
 initHeaderExpand();
+initBpGlobalStatus();
 
 async function init() {
   const loadingOverlay = startPanelLoading(document.querySelector(".left-panel"));
