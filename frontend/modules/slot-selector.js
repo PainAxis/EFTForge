@@ -199,7 +199,7 @@ function _restoreStatBarsToCurrent() {
     if (rhFill)   rhFill.style.width   = EFTForge.state.lastRecoilH !== null ? Math.min(Math.round(EFTForge.state.lastRecoilH), 500) / 5 + "%" : "0%";
     if (rhVal)    rhVal.textContent    = EFTForge.state.lastRecoilH !== null ? Math.round(EFTForge.state.lastRecoilH) : "-";
     const moa = EFTForge.state.lastAccuracyMoa ?? null;
-    if (accFill)  accFill.style.width  = moa !== null ? Math.min(moa / 20, 1) * 100 + "%" : "0%";
+    if (accFill)  accFill.style.width  = moa !== null ? Math.min(moa / 10, 1) * 100 + "%" : "0%";
     if (accVal)   accVal.textContent   = moa !== null ? moa.toFixed(2) + " MOA" : "-";
     _setExtraStats(EFTForge.state.lastTotalWeight, EFTForge.state.lastEED);
 }
@@ -1010,7 +1010,7 @@ function renderAttachmentRows(items) {
               if (rhVal)  rhVal.textContent = Math.round(bl.simRecoilH);
           }
           if (bl.simAccuracyMoa !== null) {
-              if (accFill) accFill.style.width = Math.min(bl.simAccuracyMoa / 20, 1) * 100 + "%";
+              if (accFill) accFill.style.width = Math.min(bl.simAccuracyMoa / 10, 1) * 100 + "%";
               if (accVal)  accVal.textContent = bl.simAccuracyMoa.toFixed(2) + " MOA";
           }
       });
@@ -1294,9 +1294,9 @@ function renderAttachmentRows(items) {
 
         // Accuracy bar (lower MOA = better = more fill, cap at 3 MOA)
         if (entry.simAccuracyMoa !== null && refAccuracyMoa !== null && accFill) {
-            const accBase  = Math.min(refAccuracyMoa / 20, 1) * 100;
+            const accBase  = Math.min(refAccuracyMoa / 10, 1) * 100;
             const accDelta = entry.simAccuracyMoa - refAccuracyMoa;
-            const accSim   = Math.min((refAccuracyMoa + accDelta) / 20, 1) * 100;
+            const accSim   = Math.min((refAccuracyMoa + accDelta) / 10, 1) * 100;
             accFill.style.width = accBase + "%";
             let deltaEl = accFill.parentElement.querySelector(".delta-bar");
             if (!deltaEl) {
@@ -1422,7 +1422,7 @@ function renderAttachmentRows(items) {
         if (rvVal)    rvVal.textContent    = displayRv !== null ? Math.round(displayRv) : "-";
         if (rhFill)   rhFill.style.width   = displayRh !== null ? Math.min(Math.round(displayRh), 500) / 5 + "%" : "0%";
         if (rhVal)    rhVal.textContent    = displayRh !== null ? Math.round(displayRh) : "-";
-        if (accFill)  accFill.style.width  = displayAcc !== null ? Math.min(displayAcc / 20, 1) * 100 + "%" : "0%";
+        if (accFill)  accFill.style.width  = displayAcc !== null ? Math.min(displayAcc / 10, 1) * 100 + "%" : "0%";
         if (accVal)   accVal.textContent   = displayAcc !== null ? displayAcc.toFixed(2) + " MOA" : "-";
 
         // Restore weight and EED to baseline stats (if set) or current build

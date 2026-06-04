@@ -248,7 +248,7 @@ async function renderPriceOverview() {
         if (attPrice) totalRub += attPrice.priceRub;
     }
 
-    if (ammo) {
+    if (ammo && EFTForge.state.assumeFullMag) {
         const ammoPrice = _priceInfoForItem(ammo);
         const ammoName = `${ammo.name || ammo.short_name || t("stats.ammoRow")} x${magCap}`;
         const ammoIcon = _itemIcon(ammo.icon_link);
