@@ -403,9 +403,18 @@ function renderGunList(guns, forceStagger = false) {
           img: card.querySelector("img"),
           shadow: card.querySelector(".gun-card-shadow"),
         };
+        card.tabIndex = 0;
+        card.setAttribute("role", "button");
+        card.setAttribute("aria-label", gun.name);
         card.onclick = gun.caliber === 'Caliber20x1mm'
             ? () => _selectGunOrRestoreSnapshot(gun, card).then(() => EFTForge.news.showSecretPost())
             : () => _selectGunOrRestoreSnapshot(gun, card);
+        card.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            card.click();
+          }
+        });
         list.appendChild(card);
       });
   });

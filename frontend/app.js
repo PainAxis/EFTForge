@@ -906,6 +906,9 @@ function setupCustomSelect(selectId) {
     const sel = document.getElementById(selectId);
     if (!sel) return null;
 
+    // The hidden native select would otherwise remain an invisible tab stop
+    sel.tabIndex = -1;
+
     const wrapper = document.createElement("div");
     wrapper.className = "custom-select-wrapper";
     wrapper.id = selectId + "-custom";
@@ -913,6 +916,10 @@ function setupCustomSelect(selectId) {
 
     const trigger = document.createElement("div");
     trigger.className = "custom-select-trigger";
+    trigger.tabIndex = 0;
+    trigger.setAttribute("role", "button");
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
     wrapper.appendChild(trigger);
 
     const list = document.createElement("div");
@@ -941,7 +948,7 @@ function setupCustomSelect(selectId) {
             item.addEventListener("click", () => {
                 sel.value = opt.value;
                 sel.dispatchEvent(new Event("change"));
-                wrapper.classList.remove("open");
+                setOpen(false);
                 syncTrigger();
             });
             list.appendChild(item);
@@ -949,16 +956,44 @@ function setupCustomSelect(selectId) {
         syncTrigger();
     }
 
+    function setOpen(open) {
+        wrapper.classList.toggle("open", open);
+        trigger.setAttribute("aria-expanded", String(open));
+    }
+
     trigger.addEventListener("click", (e) => {
         e.stopPropagation();
         // close any other open custom selects
         document.querySelectorAll(".custom-select-wrapper.open").forEach(w => {
-            if (w !== wrapper) w.classList.remove("open");
+            if (w !== wrapper) {
+                w.classList.remove("open");
+                w.querySelector(".custom-select-trigger")?.setAttribute("aria-expanded", "false");
+            }
         });
-        wrapper.classList.toggle("open");
+        setOpen(!wrapper.classList.contains("open"));
     });
 
-    document.addEventListener("click", () => wrapper.classList.remove("open"));
+    trigger.addEventListener("keydown", (e) => {
+        // mirror the pointer-events:none mouse block of disabled selects
+        if (wrapper.classList.contains("ammo-disabled")) return;
+        if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            trigger.click();
+        } else if (e.key === "Escape") {
+            setOpen(false);
+        } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            // Closed-state native select behavior: arrows step through options
+            e.preventDefault();
+            const step = e.key === "ArrowDown" ? 1 : -1;
+            const next = sel.selectedIndex + step;
+            if (next < 0 || next >= sel.options.length) return;
+            sel.selectedIndex = next;
+            sel.dispatchEvent(new Event("change"));
+            syncTrigger();
+        }
+    });
+
+    document.addEventListener("click", () => setOpen(false));
 
     // rebuild when options are added/removed
     const observer = new MutationObserver(rebuild);

@@ -1206,14 +1206,13 @@ function _restoreNormalPlaceholder() {
 
     placeholder.innerHTML = `
         <div class="placeholder-inner">
-            <img id="gun-display-image"
+            <img id="gun-display-image" class="gun-display-image"
                  src="${escapeHtml(imgSrc)}"
-                 style="${imgSrc ? "" : "display:none;"}max-height:120px; object-fit:contain; margin-bottom:16px;" />
-            <div id="gun-display-name"
-                 style="font-size:22px; font-weight:700; color:#f5c542; margin-bottom:8px;">
+                 ${imgSrc ? "" : 'style="display:none;"'} />
+            <div id="gun-display-name" class="gun-display-name">
                 ${escapeHtml(gun.name)}
             </div>
-            <div id="build-display-tags" style="margin-bottom:8px;">${_tagChipsHtml(_currentBuildTags())}</div>
+            <div id="build-display-tags" class="build-display-tags">${_tagChipsHtml(_currentBuildTags())}</div>
             <strong><em id="placeholder-main">${escapeHtml(t("placeholder.modding"))}</em></strong>
             <span class="placeholder-sub">
                 <strong><em id="placeholder-sub">${escapeHtml(t(isMobileLayout() ? "placeholder.longPress" : "placeholder.rightClick"))}</em></strong>

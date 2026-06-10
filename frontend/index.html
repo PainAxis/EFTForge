@@ -48,6 +48,27 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+::selection {
+  background: rgba(245, 197, 66, 0.25);
+  color: #fff;
+}
+
+/* Unified focus treatment: keyboard users get a consistent ring on
+   interactive controls; mouse/touch focus stays quiet. */
+:where(button, a, select, summary, [role="button"], [tabindex],
+       input[type="range"], input[type="checkbox"], input[type="radio"]):focus-visible {
+  outline: 2px solid rgba(245, 197, 66, 0.7);
+  outline-offset: 2px;
+}
+
+/* Text fields signal focus via border + soft glow instead of a ring */
+input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(245, 197, 66, 0.55);
+  box-shadow: 0 0 0 3px rgba(245, 197, 66, 0.08);
+}
+
 /* =========================
    HEADER
 ========================= */
@@ -900,7 +921,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
   left: 0;
   right: 0;
   background: #1a1a1a;
-  border: none;
+  border: 1px solid #2e2e2e;
   border-radius: 10px;
   max-height: 260px;
   overflow-y: auto;
@@ -1947,11 +1968,8 @@ header:not(.header-expanded) .header-nav-btn-icon {
   font-size: 11px;
   font-family: "Bender", Arial, sans-serif;
   padding: 3px 7px;
-  outline: none;
   min-width: 0;
-}
-.graph-search-input:focus {
-  border-color: #3a3a3a;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .graph-search-filters {
@@ -2262,14 +2280,11 @@ header:not(.header-expanded) .header-nav-btn-icon {
   border-radius: 4px;
   color: #eee;
   font-family: "Bender", Arial, sans-serif;
-}
-
-.search-input:focus {
-  outline: none;
-  border-color: #f5c542;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .search-input::placeholder {
+  color: #5a5a5a;
   user-select: none;
 }
 
@@ -2408,13 +2423,15 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
   font-size: 13px;
   cursor: pointer;
   margin: 8px 20px 12px 0;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
   flex-shrink: 0;
   width: calc(100% - 20px);
 }
 
 .back-button:hover {
-  background-color: #2a2a2a;
+  background-color: #252525;
+  color: #fff;
+  border-color: #444;
 }
 
 .back-button:active {
@@ -2422,10 +2439,30 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
   transition: transform 0.08s ease, background-color 0.15s ease;
 }
 
+#build-controls {
+  display: flex;
+  gap: 8px;
+  margin: 8px 20px 4px 0;
+}
+
 #build-controls .back-button {
   font-size: 12px;
   padding: 5px 6px;
   white-space: nowrap;
+  margin: 0;
+  width: auto;
+  flex: 1;
+}
+
+#view-toggle {
+  display: flex;
+  gap: 8px;
+  margin: 6px 20px 12px 0;
+}
+
+#view-toggle .toggle-btn {
+  font-size: 12px;
+  padding: 5px 6px;
 }
 
 .conflict-row {
@@ -2457,13 +2494,15 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
     white-space: pre-line;
     pointer-events: none;
     opacity: 0;
-    transition: opacity 0.1s ease;
+    transform: translateY(4px);
+    transition: opacity 0.12s ease, transform 0.12s ease;
     text-transform: none;
     letter-spacing: normal;
 }
 
 #eft-tooltip.visible {
     opacity: 1;
+    transform: translateY(0);
 }
 
 #eft-tooltip.html-tip {
@@ -3792,6 +3831,26 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
     user-select: none;
 }
 
+/* Gun image + name shown in the placeholder while modding.
+   Shared by the static markup and build-manager's rebuilt placeholder. */
+.gun-display-image {
+    max-width: 100%;
+    max-height: 180px;
+    object-fit: contain;
+    margin-bottom: 16px;
+}
+
+.gun-display-name {
+    font-size: 22px;
+    font-weight: 700;
+    color: #f5c542;
+    margin-bottom: 8px;
+}
+
+.build-display-tags {
+    margin-bottom: 8px;
+}
+
 .placeholder-sub {
     display: block;
     margin-top: 8px;
@@ -4174,7 +4233,7 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
   max-width: 460px;
   width: 100%;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-  animation: modalSlideIn 0.15s ease;
+  animation: modalSlideIn 0.2s cubic-bezier(0.22, 1, 0.36, 1);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -4182,8 +4241,8 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
 }
 
 @keyframes modalSlideIn {
-  from { transform: translateY(-12px); opacity: 0; }
-  to   { transform: translateY(0);     opacity: 1; }
+  from { transform: translateY(-10px) scale(0.98); opacity: 0; }
+  to   { transform: translateY(0)     scale(1);    opacity: 1; }
 }
 
 .modal-header {
@@ -4780,11 +4839,7 @@ button.build-tag-chip.active {
     resize: vertical;
     width: 100%;
     box-sizing: border-box;
-}
-
-.cb-comment-textarea:focus {
-    outline: none;
-    border-color: #555;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .cb-comment-form-footer {
@@ -5023,11 +5078,16 @@ button.build-tag-chip.active {
   gap: 10px;
 }
 
+/* Cards follow the toast design language: squared corners,
+   hairline border, top accent bar. */
 .news-post-card {
-  background: #151515;
-  border: 1px solid #222;
-  border-left: 3px solid #f5c542;
-  border-radius: 8px;
+  --news-accent: #f5c542;
+  --news-accent-hover: #ffd966;
+  background: #1e1e1e;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-top: 4px solid var(--news-accent);
+  border-radius: 3px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.45);
   padding: 18px 20px;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, transform 0.15s;
@@ -5040,9 +5100,9 @@ button.build-tag-chip.active {
 }
 
 .news-post-card:hover {
-  background: #1c1c1c;
-  border-color: #333;
-  border-left-color: #ffd966;
+  background: #232323;
+  border-color: rgba(255,255,255,0.12);
+  border-top-color: var(--news-accent-hover);
   transform: translateY(-2px);
 }
 
@@ -5073,12 +5133,13 @@ button.build-tag-chip.active {
   pointer-events: none;
 }
 
+/* Fade colors must match the card's resting/hover backgrounds */
 .news-card-media-wrap::before {
-  background: linear-gradient(to right, #151515, transparent);
+  background: linear-gradient(to right, #1e1e1e, transparent);
 }
 
 .news-card-media-wrap::after {
-  background: linear-gradient(to right, #1c1c1c, transparent);
+  background: linear-gradient(to right, #232323, transparent);
   opacity: 0;
   transition: opacity 0.2s;
 }
@@ -5171,10 +5232,8 @@ button.build-tag-chip.active {
   background: #2a0808;
 }
 .news-post-card--dev {
-  border-left-color: #ef5350;
-}
-.news-post-card--dev:hover {
-  border-left-color: #ef9a9a;
+  --news-accent: #ef5350;
+  --news-accent-hover: #ef9a9a;
 }
 
 .news-card-summary {
@@ -5573,12 +5632,7 @@ button.build-tag-chip.active {
   font-family: "Bender", Arial, sans-serif;
   font-size: 13px;
   padding: 5px 14px;
-  outline: none;
-  transition: border-color 0.15s;
-}
-
-.lb-gun-input:focus {
-  border-color: #666;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .lb-gun-input::placeholder {
@@ -5943,11 +5997,9 @@ button.build-tag-chip.active {
   font-size: 12px;
   padding: 5px 10px;
   border-radius: 3px;
-  outline: none;
   font-family: inherit;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.tracker-search:focus { border-color: #555; }
 .tracker-search::placeholder { color: #444; }
 .tracker-type-filter {
   display: flex;
@@ -6831,16 +6883,16 @@ var _hmt = _hmt || [];
     </div>
 
     <div id="left-build-area" style="display:none;">
-        <div id="build-controls" style="display:flex; gap:8px; margin:8px 20px 4px 0;">
-            <button id="back-btn" class="back-button" style="margin:0; width:auto; flex:1;" onclick="returnToGunSelection()">&#x2190; Back</button>
-            <button id="reset-btn" class="back-button" style="margin:0; width:auto; flex:1;" onclick="resetBuild()">&#x21BA; Reset Build</button>
-            <button id="strip-btn" class="back-button" style="margin:0; width:auto; flex:1;" onclick="stripBuild()">&#x2702; Strip Build</button>
-            <button id="save-share-btn" class="back-button" style="margin:0; width:auto; flex:1;" onclick="showSaveBuildDialog()">Save / Share</button>
-            <button id="gun-builds-btn" class="back-button" style="margin:0; width:auto; flex:1;" data-badge-pulse="false" onclick="showGunBuildsDialog()">&#128190; Builds</button>
+        <div id="build-controls">
+            <button id="back-btn" class="back-button" onclick="returnToGunSelection()">&#x2190; Back</button>
+            <button id="reset-btn" class="back-button" onclick="resetBuild()">&#x21BA; Reset Build</button>
+            <button id="strip-btn" class="back-button" onclick="stripBuild()">&#x2702; Strip Build</button>
+            <button id="save-share-btn" class="back-button" onclick="showSaveBuildDialog()">Save / Share</button>
+            <button id="gun-builds-btn" class="back-button" data-badge-pulse="false" onclick="showGunBuildsDialog()">&#128190; Builds</button>
         </div>
-        <div id="view-toggle" style="display:flex; gap:8px; margin:6px 20px 12px 0;">
-            <button id="view-build-btn" class="toggle-btn active" style="font-size:12px; padding:5px 6px;" onclick="showBuildView()"></button>
-            <button id="view-price-btn" class="toggle-btn" style="font-size:12px; padding:5px 6px;" onclick="showPriceView()"></button>
+        <div id="view-toggle">
+            <button id="view-build-btn" class="toggle-btn active" onclick="showBuildView()"></button>
+            <button id="view-price-btn" class="toggle-btn" onclick="showPriceView()"></button>
         </div>
         <div id="stats"></div>
         <div id="slots"></div>
@@ -6872,9 +6924,9 @@ var _hmt = _hmt || [];
 
         <div id="attachment-placeholder" class="attachment-placeholder">
             <div class="placeholder-inner">
-                <img id="gun-display-image" style="display:none; max-width:100%; max-height:180px; object-fit:contain; margin-bottom:16px;" />
-                <div id="gun-display-name" style="font-size:22px; font-weight:700; color:#f5c542; margin-bottom:8px;"></div>
-                <div id="build-display-tags" style="margin-bottom:8px;"></div>
+                <img id="gun-display-image" class="gun-display-image" style="display:none;" />
+                <div id="gun-display-name" class="gun-display-name"></div>
+                <div id="build-display-tags" class="build-display-tags"></div>
                 <strong><em id="placeholder-main">
                     Select an attachment slot to begin modding...
                 </em></strong>
@@ -6980,7 +7032,7 @@ var _hmt = _hmt || [];
 
 <div id="toast-container"></div>
 <!-- ***!!IMPORTANT!!*** - Cache-busting: bump ?v= on any modified files before deploying -->
-<script src="modules/config.js?v=23"></script>
+<script src="modules/config.js?v=24"></script>
 <script src="modules/state.js?v=16"></script>
 <script src="modules/lang.js?v=23"></script>
 <script src="modules/utils.js?v=17"></script>
@@ -6988,7 +7040,7 @@ var _hmt = _hmt || [];
 <script src="modules/calculations.js?v=14"></script>
 <div id="eft-tooltip"></div>
 <script src="modules/api.js?v=17"></script>
-<script src="modules/gun-list.js?v=17"></script>
+<script src="modules/gun-list.js?v=18"></script>
 <script src="modules/stats-panel.js?v=19"></script>
 <script src="modules/tree.js?v=17"></script>
 <script src="modules/attachment-grid.js?v=17"></script>
@@ -6996,9 +7048,9 @@ var _hmt = _hmt || [];
 <script src="modules/build-preview.js?v=14"></script>
 <script src="modules/slot-selector.js?v=21"></script>
 <script src="modules/graph.js?v=7"></script>
-<script src="modules/build-manager.js?v=21"></script>
+<script src="modules/build-manager.js?v=22"></script>
 <script src="modules/profile.js?v=5"></script>
-<script src="app.js?v=31"></script>
+<script src="app.js?v=32"></script>
 <script src="lzstring.min.js?v=13"></script>
 <script src="marked.min.js?v=13"></script>
 <script src="modules/news.js?v=14"></script>
