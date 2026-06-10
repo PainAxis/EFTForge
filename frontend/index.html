@@ -2719,6 +2719,7 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
     linear-gradient(#fff 0 0);
   mask-composite: exclude;
   pointer-events: none;
+  z-index: 3;
 }
 
 .gun-card::after {
@@ -2732,6 +2733,7 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
     transparent 70%
   );
   pointer-events: none;
+  z-index: 2;
 }
 
 .gun-card img {
@@ -2744,8 +2746,10 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
   user-select: none;
   -webkit-user-drag: none;
   pointer-events: none;
+  position: relative;
+  z-index: 1;
 
-  transition: transform 0.18s ease;
+  transition: transform 0.18s ease, filter 0.25s ease;
 }
 
 .gun-name {
@@ -2755,42 +2759,83 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
   color: #cfcfcf;
   opacity: 0.87;
   user-select: none;
+  position: relative;
+  z-index: 1;
 }
 
+/* No scale on hover: upscaling a composited layer mid-animation blurs it,
+   since the browser stretches the 1:1 raster instead of re-rasterizing */
 .gun-card:hover img {
-  transform: scale(1.05);
+  filter: brightness(1.1);
 }
 
-@property --border-sweep {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
+/* Target-lock corner brackets: only opacity/transform animate (compositor-only) */
+.gun-card-corners {
+  position: absolute;
+  inset: 7px;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0;
+  transform: scale(1.18);
+  transition: opacity 0.14s ease-out, transform 0.22s cubic-bezier(0.2, 1.1, 0.3, 1.15);
+  --corner-color: rgba(245, 197, 66, 0.9);
 }
 
-.gun-card-border-cg {
+.gun-card-corners i {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--corner-color);
+}
+
+.gun-card-corners i:nth-child(1) { top: 0;    left: 0;  border-right: 0; border-bottom: 0; border-top-left-radius: 4px; }
+.gun-card-corners i:nth-child(2) { top: 0;    right: 0; border-left: 0;  border-bottom: 0; border-top-right-radius: 4px; }
+.gun-card-corners i:nth-child(3) { bottom: 0; left: 0;  border-right: 0; border-top: 0;    border-bottom-left-radius: 4px; }
+.gun-card-corners i:nth-child(4) { bottom: 0; right: 0; border-left: 0;  border-top: 0;    border-bottom-right-radius: 4px; }
+
+.gun-card:hover .gun-card-corners {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* ===== Display-case depth layers ===================================
+   All hover/parallax motion below animates transform/opacity only,
+   so it stays on the compositor. Gradients are painted once. */
+
+/* Shadow the gun casts on the back wall. JS drifts it slightly more
+   than the gun image so they separate with viewing angle. */
+.gun-card-shadow {
+  position: absolute;
+  left: 14%;
+  top: 54px;
+  width: 72%;
+  height: 12px;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.6), transparent);
+  pointer-events: none;
+  opacity: 0.5;
+  transition: opacity 0.25s ease;
+}
+
+.gun-card:hover .gun-card-shadow {
+  opacity: 0.85;
+}
+
+/* Overhead display light switching on over the inspected item */
+.gun-card-light {
   position: absolute;
   inset: 0;
-  border-radius: 8px;
-  padding: 1px;
   pointer-events: none;
-  background: conic-gradient(
-    from var(--entry-angle, 0deg),
-    rgba(245, 197, 66, 0.85) 0deg,
-    rgba(245, 197, 66, 0.85) var(--border-sweep),
-    transparent var(--border-sweep),
-    transparent calc(360deg - var(--border-sweep)),
-    rgba(245, 197, 66, 0.85) calc(360deg - var(--border-sweep)),
-    rgba(245, 197, 66, 0.85) 360deg
-  );
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  transition: --border-sweep 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  z-index: 2;
+  background: radial-gradient(120% 95% at 50% -12%,
+    rgba(255, 248, 224, 0.05),
+    rgba(255, 248, 224, 0.015) 45%,
+    transparent 65%);
 }
 
-.gun-card-border-cg.border-active {
-  filter: drop-shadow(0 0 4px rgba(245, 197, 66, 0.45));
+.gun-card:hover .gun-card-light {
+  opacity: 1;
 }
 
 .gun-card.selected {
@@ -6311,9 +6356,10 @@ body[data-mobile="true"] .attachment-table th { top: 24px; padding-top: 10px; ba
 /* Gun cards: disable mouse-only effects, add tap feedback */
 body[data-mobile="true"] .gun-card::before,
 body[data-mobile="true"] .gun-card::after { display: none; }
-body[data-mobile="true"] .gun-card:hover img { transform: none; }
+body[data-mobile="true"] .gun-card:hover img { filter: none; }
 body[data-mobile="true"] .gun-card:active { border-color: #f5c542; opacity: 0.85; }
-body[data-mobile="true"] .gun-card-border-cg { display: none; }
+body[data-mobile="true"] .gun-card-corners { display: none; }
+body[data-mobile="true"] .gun-card-light { display: none; }
 
 /* Toasts: nudge position on mobile */
 body[data-mobile="true"] #toast-container { right: 12px; bottom: 12px; }

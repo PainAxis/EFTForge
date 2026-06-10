@@ -63,38 +63,6 @@ let _rafPending = false;
 let _gunResizeObserver = null;
 let _hoveredTiltCard = null;
 
-function _handleCardBorderEnter(e) {
-  const card = this;
-  const cRect = card.getBoundingClientRect();
-  const cx = cRect.width  / 2;
-  const cy = cRect.height / 2;
-
-  // Angle from card center to mouse entry point, clockwise from top (matches CSS conic-gradient origin)
-  const dx  = e.clientX - cRect.left - cx;
-  const dy  = e.clientY - cRect.top  - cy;
-  const deg = ((Math.atan2(dx, -dy) * 180 / Math.PI) + 360) % 360;
-
-  const el = card.querySelector('.gun-card-border-cg');
-  if (!el) return;
-
-  // Snap entry angle and reset sweep to 0 with no transition, then animate sweep to 180deg
-  el.style.transition = 'none';
-  el.style.setProperty('--entry-angle', `${deg.toFixed(2)}deg`);
-  el.style.setProperty('--border-sweep', '0deg');
-  el.classList.add('border-active');
-  card.offsetHeight;
-  el.style.transition = '--border-sweep 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-  el.style.setProperty('--border-sweep', '180deg');
-}
-
-function _handleCardBorderLeave() {
-  const el = this.querySelector('.gun-card-border-cg');
-  if (!el) return;
-  el.style.transition = '--border-sweep 0.22s ease-in';
-  el.style.setProperty('--border-sweep', '0deg');
-  el.addEventListener('transitionend', () => el.classList.remove('border-active'), { once: true });
-}
-
 function _updateGunCardRects() {
   for (const entry of _cachedGunCards) {
     entry.rect = entry.card.getBoundingClientRect();
@@ -114,11 +82,17 @@ function attachGunCardProximityEffect() {
   _rafPending = false;
   _updateGunCardRects();
 
-  const MAX_TILT = 12; // degrees
-  const IMG_SHIFT = 4; // px - subtle counter-drift gives the card a window/depth illusion
+  // Tilt kept shallow with a long perspective: steeper rotation perspective-
+  // magnifies the near edge of the rasterized card and blurs the gun image.
+  // Depth drama comes from the translation parallax instead, which stays sharp.
+  const MAX_TILT = 7;  // degrees
+  const PERSPECTIVE = 1000; // px
+  const IMG_SHIFT = 6;     // px - gun floats mid-depth, drifts against the mouse
+  const SHADOW_SHIFT = 11; // px - back wall is deeper, so its shadow drifts further
+  const SPOTLIGHT_RANGE = 240; // px - outer spotlight circle is 220px; beyond this it's invisible
 
   function springBack(card) {
-    const img = card.querySelector("img");
+    const fx = card._fx || {};
 
     card.style.transition = "border-color 0.15s ease, transform 0.6s ease-out";
     card.style.removeProperty("transform");
@@ -129,24 +103,43 @@ function attachGunCardProximityEffect() {
     };
     card.addEventListener("transitionend", onDone);
 
-    if (img) {
-      img.style.transition = "transform 0.6s ease-out";
-      img.style.removeProperty("transform");
-      img.addEventListener("transitionend", () => img.style.removeProperty("transition"), { once: true });
-    }
+    const settle = (el, dur) => {
+      if (!el) return;
+      // Keep the CSS opacity fade alive while the transform eases home
+      el.style.transition = `opacity 0.3s ease, transform ${dur} ease-out`;
+      el.style.removeProperty("transform");
+      el.addEventListener("transitionend", () => el.style.removeProperty("transition"), { once: true });
+    };
+    settle(fx.img, "0.6s");
+    settle(fx.shadow, "0.5s");
   }
 
   _gunProximityHandler = (e) => {
     if (_rafPending) return;
     _rafPending = true;
     requestAnimationFrame(() => {
-      // Spotlight glow on all cards
-      for (const { card, rect } of _cachedGunCards) {
-        card.style.setProperty("--mouse-x", (e.clientX - rect.left) + "px");
-        card.style.setProperty("--mouse-y", (e.clientY - rect.top) + "px");
+      // Spotlight glow, only on cards within range of the cursor - the
+      // gradient repaint is the expensive part, so skip cards it can't reach
+      for (const entry of _cachedGunCards) {
+        const { card, rect } = entry;
+        if (!rect) continue;
+        const near =
+          e.clientX > rect.left  - SPOTLIGHT_RANGE &&
+          e.clientX < rect.right + SPOTLIGHT_RANGE &&
+          e.clientY > rect.top    - SPOTLIGHT_RANGE &&
+          e.clientY < rect.bottom + SPOTLIGHT_RANGE;
+        if (near) {
+          card.style.setProperty("--mouse-x", (e.clientX - rect.left) + "px");
+          card.style.setProperty("--mouse-y", (e.clientY - rect.top) + "px");
+          entry.lit = true;
+        } else if (entry.lit) {
+          card.style.removeProperty("--mouse-x");
+          card.style.removeProperty("--mouse-y");
+          entry.lit = false;
+        }
       }
 
-      // 3D tilt on hovered card only
+      // 3D tilt + depth parallax on hovered card only
       const target = e.target.closest(".gun-card");
       if (_hoveredTiltCard && _hoveredTiltCard !== target) {
         springBack(_hoveredTiltCard);
@@ -159,13 +152,22 @@ function attachGunCardProximityEffect() {
         const r = target.getBoundingClientRect();
         const dx = (e.clientX - (r.left + r.width  / 2)) / (r.width  / 2);
         const dy = (e.clientY - (r.top  + r.height / 2)) / (r.height / 2);
-        target.style.transform = `perspective(500px) rotateX(${(-dy * MAX_TILT).toFixed(2)}deg) rotateY(${(dx * MAX_TILT).toFixed(2)}deg) translateY(-2px) scale(1.02)`;
+        // No scale: rotation/translation sample the rasterized layer at native
+        // resolution, while any upscale stretches it and blurs the card
+        target.style.transform = `perspective(${PERSPECTIVE}px) rotateX(${(-dy * MAX_TILT).toFixed(2)}deg) rotateY(${(dx * MAX_TILT).toFixed(2)}deg) translateY(-2px)`;
 
-        // Counter-translate the image so it appears to float at a different depth
-        const img = target.querySelector("img");
-        if (img) {
-          img.style.removeProperty("transition");
-          img.style.transform = `scale(1.05) translate(${(-dx * IMG_SHIFT).toFixed(2)}px, ${(-dy * IMG_SHIFT).toFixed(2)}px)`;
+        const fx = target._fx || {};
+
+        // Gun floats mid-depth: counter-drifts against the mouse
+        if (fx.img) {
+          fx.img.style.removeProperty("transition");
+          fx.img.style.transform = `translate(${(-dx * IMG_SHIFT).toFixed(2)}px, ${(-dy * IMG_SHIFT).toFixed(2)}px)`;
+        }
+
+        // Back-wall shadow: deeper layer, drifts further so it slides under the gun
+        if (fx.shadow) {
+          fx.shadow.style.removeProperty("transition");
+          fx.shadow.style.transform = `translate3d(${(-dx * SHADOW_SHIFT).toFixed(2)}px, ${(-dy * SHADOW_SHIFT * 0.5).toFixed(2)}px, 0)`;
         }
 
         _hoveredTiltCard = target;
@@ -176,9 +178,10 @@ function attachGunCardProximityEffect() {
   };
 
   _gunProximityLeaveHandler = () => {
-    for (const { card } of _cachedGunCards) {
-      card.style.removeProperty("--mouse-x");
-      card.style.removeProperty("--mouse-y");
+    for (const entry of _cachedGunCards) {
+      entry.card.style.removeProperty("--mouse-x");
+      entry.card.style.removeProperty("--mouse-y");
+      entry.lit = false;
     }
     if (_hoveredTiltCard) {
       springBack(_hoveredTiltCard);
@@ -389,15 +392,20 @@ function renderGunList(guns, forceStagger = false) {
           cardIndex++;
         }
         card.innerHTML = `
-          <div class="gun-card-border-cg" aria-hidden="true"></div>
+          <div class="gun-card-shadow" aria-hidden="true"></div>
           <img src="${escapeHtml(gun.image_512_link || gun.icon_link)}" />
           <div class="gun-name">${escapeHtml(gun.name)}</div>
+          <div class="gun-card-light" aria-hidden="true"></div>
+          <div class="gun-card-corners" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
         `;
+        // Cache layer refs so the per-frame parallax handler never queries the DOM
+        card._fx = {
+          img: card.querySelector("img"),
+          shadow: card.querySelector(".gun-card-shadow"),
+        };
         card.onclick = gun.caliber === 'Caliber20x1mm'
             ? () => _selectGunOrRestoreSnapshot(gun, card).then(() => EFTForge.news.showSecretPost())
             : () => _selectGunOrRestoreSnapshot(gun, card);
-        card.addEventListener('mouseenter', _handleCardBorderEnter);
-        card.addEventListener('mouseleave', _handleCardBorderLeave);
         list.appendChild(card);
       });
   });
