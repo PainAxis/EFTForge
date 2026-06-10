@@ -53,6 +53,18 @@ STRENGTH_LEVEL_MAX = 51   # 0 = no skill, 51 = elite
 EQUIP_ERGO_MIN = -1.0     # negative = armor/rig ergonomics penalty
 EQUIP_ERGO_MAX = 1.0      # positive = ergonomics bonus
 
+# Request complexity caps - generous for real clients, block abuse of the
+# CPU-heavy calculation endpoints with arbitrarily large payloads.
+MAX_INSTALLED_IDS = 300
+MAX_CANDIDATE_IDS = 2000
+MAX_COMBO_BATCH   = 5000
+MAX_IMAGE_ITEMS   = 150
+MAX_STATS_JSON_CHARS = 2000
+
+def _cap_list(name: str, value: list, limit: int) -> None:
+    if len(value) > limit:
+        raise HTTPException(status_code=422, detail=f"{name} exceeds maximum length of {limit}")
+
 app.add_middleware(GZIPMiddleware, minimum_size=500)
 app.add_middleware(
     CORSMiddleware,
@@ -99,6 +111,12 @@ def _migrate_builds_db():
         if "user_avatar_url" not in comment_cols:
             conn.execute(text("ALTER TABLE build_comments ADD COLUMN user_avatar_url TEXT"))
             conn.commit()
+
+        # Indexes for hot query paths (create_all only adds them to new tables)
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_public_builds_ip_hash ON public_builds (ip_hash)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_build_vote_created_at ON build_votes (created_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_build_comments_ip_hash ON build_comments (ip_hash)"))
+        conn.commit()
 
 
 def _migrate_items_db():
@@ -208,14 +226,19 @@ def _get_client_ip(request: Request) -> str:
             return xri.strip()
     return direct_ip
 
-# Admin brute-force lockout: ip -> (fail_count, lockout_until_monotonic)
-_admin_failures: dict[str, tuple[int, float]] = {}
+# Admin brute-force lockout: ip -> (fail_count, lockout_until_monotonic, last_failure_monotonic)
+_admin_failures: dict[str, tuple[int, float, float]] = {}
 _ADMIN_MAX_FAILURES = 5
 _ADMIN_LOCKOUT_SECONDS = 600  # 10 minutes
 
 def _evict_expired_admin_failures(now: float) -> None:
-    """Remove lockout entries whose window has fully passed."""
-    expired = [ip for ip, (_, lockout_until) in _admin_failures.items() if lockout_until > 0 and lockout_until < now]
+    """Remove expired lockouts and idle below-threshold entries so the dict
+    cannot grow without bound under failed-auth probes from many IPs."""
+    expired = [
+        ip for ip, (_, lockout_until, last_fail) in _admin_failures.items()
+        if (lockout_until > 0 and lockout_until < now)
+        or (lockout_until == 0 and now - last_fail > _ADMIN_LOCKOUT_SECONDS)
+    ]
     for ip in expired:
         del _admin_failures[ip]
 
@@ -247,14 +270,14 @@ def _require_admin(request: Request, x_admin_key: str = Header(None)) -> None:
     now = time.monotonic()
     _evict_expired_admin_failures(now)
 
-    fail_count, lockout_until = _admin_failures.get(ip, (0, 0.0))
+    fail_count, lockout_until, _ = _admin_failures.get(ip, (0, 0.0, 0.0))
     if lockout_until > now:
         raise HTTPException(status_code=429, detail="Too many failed attempts. Try again later.")
 
     if not x_admin_key or not hmac.compare_digest(x_admin_key, ADMIN_API_KEY):
         new_count = fail_count + 1
         locked_until = (now + _ADMIN_LOCKOUT_SECONDS) if new_count >= _ADMIN_MAX_FAILURES else 0.0
-        _admin_failures[ip] = (new_count, locked_until)
+        _admin_failures[ip] = (new_count, locked_until, now)
         raise HTTPException(status_code=403, detail="Forbidden")
 
     # Success - reset counter
@@ -532,21 +555,53 @@ def get_sync_status():
 # ---------------------------------------------------
 
 _PROXY_ALLOWED_HOSTS = {"assets.tarkov.dev", "image-gen.tarkov-changes.com", "gitee.com", "raw.giteeusercontent.com"}
+_PROXY_MAX_BYTES = 20 * 1024 * 1024  # 20 MB cap per proxied asset
+
+# Shared session: connection pooling for proxy + Gitee API calls
+import requests as _requests
+_http_session = _requests.Session()
 
 @app.get("/proxy-asset")
 def proxy_asset(url: str, request: Request):
     from urllib.parse import urlparse
-    import requests as _req
     parsed = urlparse(url)
     if parsed.netloc not in _PROXY_ALLOWED_HOSTS or parsed.scheme != "https":
         raise HTTPException(status_code=400, detail="URL not in proxy allowlist")
     try:
-        r = _req.get(url, timeout=8, stream=True)
+        # allow_redirects=False: a redirect could otherwise escape the host allowlist
+        r = _http_session.get(url, timeout=8, stream=True, allow_redirects=False)
         r.raise_for_status()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    content_type = r.headers.get("content-type", "application/octet-stream")
-    return StreamingResponse(r.iter_content(chunk_size=65536), media_type=content_type)
+    if 300 <= r.status_code < 400:
+        raise HTTPException(status_code=502, detail="Upstream redirect not followed")
+
+    # Only images may be proxied. gitee.com hosts arbitrary user repos, so serving
+    # upstream HTML/JS from our origin would be an XSS vector.
+    content_type = r.headers.get("content-type", "application/octet-stream").split(";")[0].strip().lower()
+    if not (content_type.startswith("image/") or content_type == "application/octet-stream"):
+        r.close()
+        raise HTTPException(status_code=415, detail="Only image assets may be proxied")
+
+    def _capped_stream():
+        sent = 0
+        for chunk in r.iter_content(chunk_size=65536):
+            sent += len(chunk)
+            if sent > _PROXY_MAX_BYTES:
+                r.close()
+                return
+            yield chunk
+
+    return StreamingResponse(
+        _capped_stream(),
+        media_type=content_type,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": "inline",
+            # short cache only: avatar files are overwritten in place on re-upload
+            "Cache-Control": "public, max-age=300",
+        },
+    )
 
 # ---------------------------------------------------
 # Traders
@@ -801,6 +856,8 @@ def validate_attachment(
     db: Session = Depends(get_db),
 ):
 
+    _cap_list("installed_ids", installed_ids, MAX_INSTALLED_IDS)
+
     base_item = db.query(Item).filter(Item.id == base_item_id).first()
     if not base_item:
         raise HTTPException(status_code=404, detail="Base item not found")
@@ -954,6 +1011,9 @@ def batch_process(
     if not (EQUIP_ERGO_MIN <= equip_ergo_modifier <= EQUIP_ERGO_MAX):
         raise HTTPException(status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}")
 
+    _cap_list("installed_ids", installed_ids, MAX_INSTALLED_IDS)
+    _cap_list("candidate_ids", candidate_ids, MAX_CANDIDATE_IDS)
+
     base_item = db.query(Item).filter(Item.id == base_item_id).first()
     if not base_item:
         raise HTTPException(status_code=404, detail="Base item not found")
@@ -1032,13 +1092,19 @@ def combo_batch_process(
     if not (EQUIP_ERGO_MIN <= equip_ergo_modifier <= EQUIP_ERGO_MAX):
         raise HTTPException(status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}")
 
+    _cap_list("installed_ids", installed_ids, MAX_INSTALLED_IDS)
+    _cap_list("combos", combos, MAX_COMBO_BATCH)
+
     base_item = db.query(Item).filter(Item.id == base_item_id).first()
     if not base_item:
         raise HTTPException(status_code=404, detail="Base item not found")
 
     all_needed_ids = set(installed_ids)
     for combo in combos:
-        all_needed_ids.update(combo.get("add_ids", []))
+        add_ids = combo.get("add_ids", [])
+        if not isinstance(add_ids, list) or len(add_ids) > MAX_INSTALLED_IDS:
+            raise HTTPException(status_code=422, detail="Invalid add_ids in combo")
+        all_needed_ids.update(add_ids)
 
     items_map = {
         item.id: item
@@ -1082,6 +1148,10 @@ def combo_full(
         raise HTTPException(status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}")
     if not (EQUIP_ERGO_MIN <= equip_ergo_modifier <= EQUIP_ERGO_MAX):
         raise HTTPException(status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}")
+
+    _cap_list("installed_ids", installed_ids, MAX_INSTALLED_IDS)
+    _cap_list("exclude_child_slot_names", exclude_child_slot_names, 200)
+    _cap_list("exclude_item_ids", exclude_item_ids, 2000)
 
     _cache_key = (
         base_item_id,
@@ -1934,6 +2004,9 @@ def post_build_vote(build_id: int, vote: str = Body(..., embed=True), x_client_i
     if vote != "like":
         raise HTTPException(status_code=422, detail='vote must be "like"')
 
+    if not db.query(PublicBuild.id).filter(PublicBuild.id == build_id).first():
+        raise HTTPException(status_code=404, detail="Build not found.")
+
     ip_hash = _get_client_id_hash(x_client_id)
 
     existing = db.query(BuildVote).filter(
@@ -2372,6 +2445,8 @@ async def proxy_build_image(
 ):
     if _imggen_disabled:
         raise HTTPException(status_code=503, detail="Build preview generation is temporarily disabled")
+
+    _cap_list("items", items, MAX_IMAGE_ITEMS)
 
     # Stable cache key: hash of sorted item tpl+slot pairs
     cache_key_src = json.dumps(sorted((i.get("_tpl","") + i.get("slotId","")) for i in items))
@@ -3278,6 +3353,11 @@ def publish_build(
     _ALLOWED_TAGS = {"meta", "budget", "cqb", "sniper", "recoil", "ergo", "pve", "beginner", "hybrid"}
     clean_tags = [t for t in (tags or []) if t in _ALLOWED_TAGS][:5]
 
+    # stats is stored verbatim and echoed back to every client - cap its size
+    stats_serialized = json.dumps(stats) if stats else None
+    if stats_serialized and len(stats_serialized) > MAX_STATS_JSON_CHARS:
+        raise HTTPException(status_code=422, detail="stats payload too large.")
+
     build = PublicBuild(
         gun_id            = gun_id,
         gun_name          = gun.name,
@@ -3287,7 +3367,7 @@ def publish_build(
         ip_snapshot       = _get_client_ip(request),
         author_id         = None,
         is_admin_build    = False,
-        stats_json        = json.dumps(stats) if stats else None,
+        stats_json        = stats_serialized,
         user_display_name = u_name or None,
         user_avatar_url   = u_avatar or None,
         total_price_rub   = total_price,
@@ -3424,16 +3504,31 @@ def get_public_builds(
     ]
 
 
+# load-count cooldown: (client_ip, build_id) -> monotonic time of last counted load
+_load_count_last: dict[tuple[str, int], float] = {}
+_LOAD_COUNT_COOLDOWN = 60.0
+
 @app.post("/builds/{build_id}/load")
 def record_build_load(
     build_id: int,
+    request: Request,
     db: Session = Depends(get_builds_db),
 ):
     build = db.query(PublicBuild).filter(PublicBuild.id == build_id).first()
     if not build:
         raise HTTPException(status_code=404, detail="Build not found.")
-    build.load_count = (build.load_count or 0) + 1
-    db.commit()
+
+    # Count at most one load per IP per build per cooldown window to deter
+    # load-count inflation. Repeat loads still succeed, they just don't count.
+    key = (_get_client_ip(request), build_id)
+    now_mono = time.monotonic()
+    stale = [k for k, ts in _load_count_last.items() if now_mono - ts > _LOAD_COUNT_COOLDOWN * 2]
+    for k in stale:
+        del _load_count_last[k]
+    if now_mono - _load_count_last.get(key, 0.0) >= _LOAD_COUNT_COOLDOWN:
+        build.load_count = (build.load_count or 0) + 1
+        db.commit()
+        _load_count_last[key] = now_mono
     return {"load_count": build.load_count}
 
 

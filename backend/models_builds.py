@@ -43,6 +43,7 @@ class PublicBuild(BuildsBase):
 
     __table_args__ = (
         Index("ix_public_builds_gun_id", "gun_id"),
+        Index("ix_public_builds_ip_hash", "ip_hash"),
     )
 
 
@@ -93,6 +94,7 @@ class BuildVote(BuildsBase):
     __table_args__ = (
         UniqueConstraint("build_id", "ip_hash", name="uq_build_vote_build_ip"),
         Index("ix_build_vote_build_id", "build_id"),
+        Index("ix_build_vote_created_at", "created_at"),
     )
 
 
@@ -119,4 +121,5 @@ class BuildComment(BuildsBase):
 
     __table_args__ = (
         Index("ix_build_comments_build_id", "build_id"),
+        Index("ix_build_comments_ip_hash", "ip_hash"),
     )

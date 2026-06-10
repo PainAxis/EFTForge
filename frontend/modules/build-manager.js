@@ -1546,7 +1546,7 @@ function _applyPublicBuildsFilter() {
             <div class="cb-card${b.is_featured ? " featured" : ""}">
                 ${featuredLabel}
                 <div class="cb-gun-area">
-                    ${cardImgSrc ? `<img class="cb-gun-img" src="${escapeHtml(cardImgSrc)}" alt="" referrerpolicy="no-referrer" onerror="this.src='${escapeHtml(gunImgSrc)}'; this.onerror=null;" />` : ""}
+                    ${cardImgSrc ? `<img class="cb-gun-img" src="${escapeHtml(cardImgSrc)}" alt="" referrerpolicy="no-referrer" data-fallback="${escapeHtml(gunImgSrc)}" onerror="this.onerror=null; this.src=this.dataset.fallback;" />` : ""}
                 </div>
                 <div class="cb-card-body">
                     <div class="cb-build-name">
@@ -1948,7 +1948,7 @@ function _applyMyCommunityFilter() {
             <div class="cb-card${b.is_featured ? " featured" : ""}">
                 ${featuredLabel}
                 <div class="cb-gun-area">
-                    ${cardImgSrc ? `<img class="cb-gun-img" src="${escapeHtml(cardImgSrc)}" alt="" referrerpolicy="no-referrer" onerror="this.src='${escapeHtml(gunImgSrc)}'; this.onerror=null;" />` : ""}
+                    ${cardImgSrc ? `<img class="cb-gun-img" src="${escapeHtml(cardImgSrc)}" alt="" referrerpolicy="no-referrer" data-fallback="${escapeHtml(gunImgSrc)}" onerror="this.onerror=null; this.src=this.dataset.fallback;" />` : ""}
                 </div>
                 <div class="cb-card-body">
                     <div class="cb-build-name"><span class="marquee-text">${escapeHtml(b.build_name)}</span></div>

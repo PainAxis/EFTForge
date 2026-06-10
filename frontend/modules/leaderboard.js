@@ -510,7 +510,8 @@ window.EFTForge.leaderboard = (function () {
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     // mirror of _pairsKey in build-manager.js - must produce identical output
