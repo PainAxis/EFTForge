@@ -561,20 +561,42 @@ _PROXY_MAX_BYTES = 20 * 1024 * 1024  # 20 MB cap per proxied asset
 import requests as _requests
 _http_session = _requests.Session()
 
+def _proxy_host_allowed(netloc: str) -> bool:
+    # Exact match or subdomain of an allowed host (e.g. foruda.gitee.com for gitee.com avatars)
+    return netloc in _PROXY_ALLOWED_HOSTS or any(netloc.endswith("." + h) for h in _PROXY_ALLOWED_HOSTS)
+
 @app.get("/proxy-asset")
 def proxy_asset(url: str, request: Request):
     from urllib.parse import urlparse
     parsed = urlparse(url)
-    if parsed.netloc not in _PROXY_ALLOWED_HOSTS or parsed.scheme != "https":
+    if not _proxy_host_allowed(parsed.netloc) or parsed.scheme != "https":
         raise HTTPException(status_code=400, detail="URL not in proxy allowlist")
     try:
-        # allow_redirects=False: a redirect could otherwise escape the host allowlist
-        r = _http_session.get(url, timeout=8, stream=True, allow_redirects=False)
-        r.raise_for_status()
+        # Follow redirects manually so each hop is validated against the allowlist.
+        # Gitee avatar URLs redirect to CDN subdomains (e.g. foruda.gitee.com) which
+        # are allowed as subdomains of gitee.com but would escape a naive allow_redirects=True.
+        current_url = url
+        r = None
+        for _ in range(5):
+            r = _http_session.get(current_url, timeout=8, stream=True, allow_redirects=False)
+            if 300 <= r.status_code < 400:
+                r.close()
+                location = r.headers.get("Location", "")
+                if not location:
+                    raise HTTPException(status_code=502, detail="Redirect with no Location header")
+                loc_parsed = urlparse(location)
+                if not _proxy_host_allowed(loc_parsed.netloc) or loc_parsed.scheme != "https":
+                    raise HTTPException(status_code=502, detail="Redirect escapes proxy allowlist")
+                current_url = location
+                continue
+            r.raise_for_status()
+            break
+        else:
+            raise HTTPException(status_code=502, detail="Too many redirects")
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    if 300 <= r.status_code < 400:
-        raise HTTPException(status_code=502, detail="Upstream redirect not followed")
 
     # Only images may be proxied. gitee.com hosts arbitrary user repos, so serving
     # upstream HTML/JS from our origin would be an XSS vector.
