@@ -2096,6 +2096,9 @@ def delete_build_vote(build_id: int, x_client_id: str = Header(None), db: Sessio
 _IMAGE_GEN_CACHE: dict[str, str] = {}   # hash -> image_url
 _IMAGE_GEN_MAX   = 500                  # evict when cache exceeds this size
 
+_IMGGEN_HEALTH_CACHE: dict = {}  # {"status": str, "ts": float, "error": str|None}
+_IMGGEN_HEALTH_TTL   = 300       # 5 min - one real probe per UptimeRobot polling cycle
+
 # Patchright runs in a dedicated thread with its own ProactorEventLoop so that
 # asyncio.create_subprocess_exec (used internally to launch the browser) works
 # on Windows regardless of which event loop uvicorn chooses.
@@ -2458,6 +2461,41 @@ async def _do_pw_request(id: str, items: list, weapon_name: str) -> dict:
 @app.get("/build-image/busy")
 async def build_image_busy():
     return {"busy": _pw_in_flight > 0, "disabled": _imggen_disabled}
+
+
+@app.get("/health/imggen")
+async def health_imggen(db: Session = Depends(get_db)):
+    """Fires a real image-gen probe and returns 200/{"status":"ok"} or 503.
+    Result is cached for _IMGGEN_HEALTH_TTL seconds so UptimeRobot polling
+    doesn't trigger a Playwright run on every check."""
+    now = time.monotonic()
+    cached = _IMGGEN_HEALTH_CACHE.get("result")
+    if cached and (now - cached["ts"]) < _IMGGEN_HEALTH_TTL:
+        if cached["status"] == "ok":
+            return {"status": "ok"}
+        raise HTTPException(status_code=503, detail=cached.get("error", "down"))
+
+    weapon = db.query(Item).filter(Item.is_weapon == True).first()
+    if not weapon:
+        raise HTTPException(status_code=503, detail="No weapons in database")
+
+    items = _build_spt_items(weapon.id, [])
+    _pw_loop_ready.wait(timeout=10)
+    future = asyncio.run_coroutine_threadsafe(
+        _do_pw_request(weapon.id, items, weapon.name), _pw_loop
+    )
+    try:
+        uvloop = asyncio.get_event_loop()
+        data = await uvloop.run_in_executor(None, lambda: future.result(timeout=120))
+        _IMGGEN_HEALTH_CACHE["result"] = {"status": "ok", "ts": now, "error": None}
+        return {"status": "ok"}
+    except Exception as exc:
+        future.cancel()
+        asyncio.run_coroutine_threadsafe(_reset_pw_page(), _pw_loop)
+        err = str(exc)
+        _IMGGEN_HEALTH_CACHE["result"] = {"status": "down", "ts": now, "error": err}
+        raise HTTPException(status_code=503, detail=err)
+
 
 @app.post("/build-image")
 async def proxy_build_image(
