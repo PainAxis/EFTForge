@@ -2463,8 +2463,8 @@ async def build_image_busy():
     return {"busy": _pw_in_flight > 0, "disabled": _imggen_disabled}
 
 
-@app.get("/health/imggen")
-async def health_imggen(db: Session = Depends(get_db)):
+@app.api_route("/health/imggen", methods=["GET", "HEAD"])
+async def health_imggen():
     """Fires a real image-gen probe and returns 200/{"status":"ok"} or 503.
     Result is cached for _IMGGEN_HEALTH_TTL seconds so UptimeRobot polling
     doesn't trigger a Playwright run on every check."""
@@ -2475,14 +2475,18 @@ async def health_imggen(db: Session = Depends(get_db)):
             return {"status": "ok"}
         raise HTTPException(status_code=503, detail=cached.get("error", "down"))
 
-    weapon = db.query(Item).filter(Item.is_weapon == True).first()
-    if not weapon:
-        raise HTTPException(status_code=503, detail="No weapons in database")
+    with BuildsSessionLocal() as bdb:
+        build = bdb.query(PublicBuild).filter(
+            PublicBuild.pairs_json != "[]"
+        ).order_by(PublicBuild.id.desc()).first()
+    if not build:
+        raise HTTPException(status_code=503, detail="No builds available for probe")
 
-    items = _build_spt_items(weapon.id, [])
+    pairs = json.loads(build.pairs_json)
+    items = _build_spt_items(build.gun_id, pairs)
     _pw_loop_ready.wait(timeout=10)
     future = asyncio.run_coroutine_threadsafe(
-        _do_pw_request(weapon.id, items, weapon.name), _pw_loop
+        _do_pw_request(build.gun_id, items, build.gun_name), _pw_loop
     )
     try:
         uvloop = asyncio.get_event_loop()

@@ -15,7 +15,7 @@ window.EFTForge.config = {
     STATIC_ANNOUNCEMENTS_URL: "/offline/announcements.json",
 
     APP_VERSION:    "v1.3.7",
-    APP_BUILD_DATE: "2026-06-13T07:14:20.192Z", // UTC - run new Date().toISOString() in console when bumping version
+    APP_BUILD_DATE: "2026-06-13T07:36:39.178Z", // UTC - run new Date().toISOString() in console when bumping version
 
     CALIBER_DISPLAY_MAP: {
         "Caliber20x1mm":      "20x1mm disk",
