@@ -1581,6 +1581,7 @@ function _findComboRootSlot() {
 let _comboChildSlotCache   = {};   // item_id -> slots[]  (used only for availability check)
 let _comboAvailableChecked = false; // true once we've finished the availability check for the current slot
 let _comboAbortController  = null;  // AbortController for the in-flight comboFull request
+let _comboCalcInFlight     = false; // true while a comboFull fetch is in progress
 
 const _COMBO_BATCH_SIZE  = 60;
 let _comboLazyItems      = [];   // full sorted list for lazy rendering
@@ -1611,6 +1612,7 @@ function _abortComboCalc() {
         _comboAbortController.abort();
         _comboAbortController = null;
     }
+    _comboCalcInFlight = false;
 }
 
 function _updateViewBtns() {
@@ -1799,6 +1801,7 @@ async function openComboView() {
 
     _abortComboCalc();
     _comboAbortController = new AbortController();
+    _comboCalcInFlight = true;
     const signal = _comboAbortController.signal;
 
     let result;
@@ -1816,7 +1819,7 @@ async function openComboView() {
         }, signal, (ev) => {
             const progressEl = document.getElementById("combo-loading-progress");
             if (!progressEl) return;
-            const text = t("ui.comboProgress")
+            const text = t(ev.capped ? "ui.comboProgressCapped" : "ui.comboProgress")
                 .replace("{slot}",     ev.slot)
                 .replace("{parent}",   ev.parent)
                 .replace("{frontier}", ev.frontier)
@@ -1824,6 +1827,7 @@ async function openComboView() {
             progressEl.textContent = text;
         });
     } catch (err) {
+        _comboCalcInFlight = false;
         clearInterval(_dotsInterval);
         if (err.name === "AbortError") return;
         console.error("Combo full failed:", err);
@@ -1835,6 +1839,7 @@ async function openComboView() {
         return;
     }
 
+    _comboCalcInFlight = false;
     clearInterval(_dotsInterval);
 
     if (result.truncated) {
@@ -1911,6 +1916,7 @@ async function openComboView() {
 function applyComboSort() {
     const items = EFTForge.state.lastComboItems;
     if (!items || !items.length) {
+        if (_comboCalcInFlight) return;
         const { t } = EFTForge.lang;
         const tbody = document.getElementById("attachment-body");
         if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="combo-status-row">${escapeHtml(t("ui.comboNone"))}</td></tr>`;
