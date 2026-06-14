@@ -298,13 +298,18 @@ function initPanelResizer() {
     const leftPanel = document.querySelector(".left-panel");
     const container = document.getElementById("main-container");
 
-    const DEFAULT_WIDTH = 554;
-    const MIN_LEFT      = 554;
+    const DEFAULT_WIDTH = 660;
+    const MIN_LEFT      = 660;
     const MIN_RIGHT     = 720;
 
-    const saved = parseInt(localStorage.getItem("eftforge_panel_width"));
-    const maxInit = container.offsetWidth - MIN_RIGHT - resizer.offsetWidth;
-    leftPanel.style.width = (saved >= MIN_LEFT && saved <= maxInit ? saved : DEFAULT_WIDTH) + "px";
+    const savedRaw = parseInt(localStorage.getItem("eftforge_panel_width"));
+    const maxInit  = container.offsetWidth - MIN_RIGHT - resizer.offsetWidth;
+    const initWidth = (savedRaw >= MIN_LEFT && savedRaw <= maxInit) ? savedRaw : DEFAULT_WIDTH;
+    leftPanel.style.width = initWidth + "px";
+    // Auto-correct legacy users whose saved width is below the new minimum
+    if (!savedRaw || savedRaw < MIN_LEFT) {
+        localStorage.setItem("eftforge_panel_width", initWidth);
+    }
 
     let dragging = false;
     let startX, startW;

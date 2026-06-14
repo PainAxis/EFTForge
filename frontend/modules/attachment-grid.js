@@ -1460,7 +1460,7 @@ function _buildGridDOM(slotEntries, positions, gunRow, totalRows, container) {
     grid.id = "attachment-grid";
     grid.className = "attachment-grid";
     // Rows are dynamic; columns are defined in CSS
-    grid.style.gridTemplateRows = `repeat(${totalRows}, 58px)`;
+    grid.style.gridTemplateRows = `repeat(${totalRows}, 66px)`;
 
     // Gun image cell - spans 3 columns (cols 7, 8, 9)
     const gunCell = document.createElement("div");

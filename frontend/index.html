@@ -392,7 +392,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
 
 .left-panel {
   flex: 0 0 auto;
-  width: 560px; /* overridden by JS */
+  width: 660px; /* overridden by JS */
 
   display: flex;
   flex-direction: column;
@@ -3146,7 +3146,7 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
     top: 2px;
     left: 2px;
     font-family: "Bender", sans-serif;
-    font-size: 8px;
+    font-size: 10px;
     color: #ccc;
     text-shadow: 0 0 3px #000, 0 0 6px #000;
     pointer-events: none;
@@ -3175,18 +3175,18 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
 }
 
 /* Slot placeholder image (list view - fixed size to match .empty-slot) */
-.tree-slot-item > .slot-placeholder-img {
+.tree-slot:not(.ag-cell) .tree-slot-item > .slot-placeholder-img {
     width: 48px;
     height: 48px;
 }
 
 /* Slot name label beneath the icon */
 .ag-label {
-    font-size: 8px;
+    font-size: 10px;
     color: #aaa;
     text-align: center;
     line-height: 1;
-    max-width: 46px;
+    max-width: 54px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3233,8 +3233,8 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
 
 .attachment-grid {
     display: grid;
-    grid-template-columns: repeat(10, 48px);
-    /* grid-template-rows set dynamically in JS: repeat(N, 48px) */
+    grid-template-columns: repeat(10, 56px);
+    /* grid-template-rows set dynamically in JS: repeat(N, 66px) */
     gap: 0;
     user-select: none;
     -webkit-user-select: none;
@@ -3311,14 +3311,14 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
 }
 .ag-extras .tree-slot.ag-cell {
     position: relative;
-    width: 48px;
-    height: 58px;
+    width: 56px;
+    height: 66px;
 }
 
 /* Mobile scaling */
 @media (max-width: 480px) {
     .attachment-grid { grid-template-columns: repeat(10, 40px); }
-    .ag-extras .tree-slot.ag-cell { width: 40px; height: 40px; }
+    .ag-extras .tree-slot.ag-cell { width: 40px; height: 48px; }
     .ag-empty { font-size: 14px; }
 }
 
