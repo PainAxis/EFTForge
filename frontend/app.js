@@ -193,7 +193,24 @@ async function init() {
 
     applyStaticTranslations();
 
-    setupCustomSelect("lang-select");
+    const langCustom = setupCustomSelect("lang-select");
+    if (langCustom) {
+        const langTrigger = langCustom.querySelector(".custom-select-trigger");
+        const langList    = langCustom.querySelector(".custom-select-list");
+        langTrigger.addEventListener("click", () => {
+            requestAnimationFrame(() => {
+                if (!langCustom.classList.contains("open")) return;
+                if (window.innerWidth <= 767) {
+                    const rect = langTrigger.getBoundingClientRect();
+                    langList.style.position = "fixed";
+                    langList.style.top      = (rect.bottom + 4) + "px";
+                    langList.style.left     = rect.left + "px";
+                    langList.style.right    = "auto";
+                    langList.style.minWidth = rect.width + "px";
+                }
+            });
+        });
+    }
 
     renderSavedBuildsList();
 
