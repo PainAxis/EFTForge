@@ -77,6 +77,18 @@ async function fetchSlotAllowedItems(slotId) {
     return res.json();
 }
 
+async function fetchSlotAllowedItemsBatch(slotIds) {
+    const res = await _post("/slots/allowed-items/batch", { slot_ids: slotIds, lang: _lang() });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    return res.json(); // { slotId: [items...] }
+}
+
+async function fetchItemSlotsBatch(itemIds) {
+    const res = await _post("/items/slots/batch", { item_ids: itemIds });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    return res.json(); // { itemId: [slots...] }
+}
+
 async function calculateBuild(payload) {
     const res = await _post("/build/calculate", payload);
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -415,4 +427,4 @@ async function fetchMyBuilds() {
     return res.json();
 }
 
-EFTForge.api = { fetchTraders, fetchGuns, fetchGunInit, fetchAmmo, fetchItemSlots, fetchSlotAllowedItems, calculateBuild, validateBuild, batchProcessCandidates, comboBatchProcess, comboFull, fetchFleaPrices, fetchBulkRatings, postVote, deleteVote, fetchBulkBuildRatings, postBuildVote, deleteBuildVote, publishBuild, fetchPublicBuilds, fetchMyBuilds, recordBuildLoad, unlistBuild, fetchBanStatus, fetchNotifications, fetchAnnouncements, fetchStaticAnnouncements, fetchLeaderboardBuilds, fetchLeaderboardAttachments, fetchStatChangelog, fetchBuildComments, postBuildComment, deleteOwnComment, adminDeleteComment, uploadAvatar, updateUserProfile, transferPreview, transferAccount };
+EFTForge.api = { fetchTraders, fetchGuns, fetchGunInit, fetchAmmo, fetchItemSlots, fetchSlotAllowedItems, fetchSlotAllowedItemsBatch, fetchItemSlotsBatch, calculateBuild, validateBuild, batchProcessCandidates, comboBatchProcess, comboFull, fetchFleaPrices, fetchBulkRatings, postVote, deleteVote, fetchBulkBuildRatings, postBuildVote, deleteBuildVote, publishBuild, fetchPublicBuilds, fetchMyBuilds, recordBuildLoad, unlistBuild, fetchBanStatus, fetchNotifications, fetchAnnouncements, fetchStaticAnnouncements, fetchLeaderboardBuilds, fetchLeaderboardAttachments, fetchStatChangelog, fetchBuildComments, postBuildComment, deleteOwnComment, adminDeleteComment, uploadAvatar, updateUserProfile, transferPreview, transferAccount };

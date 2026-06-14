@@ -865,6 +865,90 @@ def get_allowed_items(slot_id: str, lang: str = "en", db: Session = Depends(get_
     ]
 
 # ---------------------------------------------------
+# Batch endpoints for build reconstruction
+# ---------------------------------------------------
+
+@app.post("/slots/allowed-items/batch")
+def get_allowed_items_batch(
+    slot_ids: List[str] = Body(...),
+    lang: str = Body(default="en"),
+    db: Session = Depends(get_db),
+):
+    if not slot_ids:
+        return {}
+    allowed_rows = db.query(SlotAllowedItem).filter(
+        SlotAllowedItem.slot_id.in_(slot_ids)
+    ).all()
+    all_item_ids = list({row.allowed_item_id for row in allowed_rows})
+    items_by_id = {
+        item.id: item
+        for item in db.query(Item).filter(Item.id.in_(all_item_ids)).all()
+    } if all_item_ids else {}
+    result = {sid: [] for sid in slot_ids}
+    for row in allowed_rows:
+        item = items_by_id.get(row.allowed_item_id)
+        if item:
+            result[row.slot_id].append({
+                "id": item.id,
+                "name": _item_name(item, lang),
+                "short_name": _item_short_name(item, lang),
+                "weight": item.weight,
+                "ergonomics_modifier": item.ergonomics_modifier,
+                "recoil_modifier": item.recoil_modifier,
+                "accuracy_modifier": item.accuracy_modifier,
+                "center_of_impact": item.center_of_impact,
+                "deviation_curve": item.deviation_curve,
+                "deviation_max": item.deviation_max,
+                "sighting_range": item.sighting_range,
+                "icon_link": item.icon_link,
+                "base_image_link": item.base_image_link,
+                "conflicting_item_ids": item.conflicting_item_ids,
+                "conflicting_slot_ids": item.conflicting_slot_ids,
+                "magazine_capacity": item.magazine_capacity,
+                "caliber": item.caliber,
+                "is_weapon": item.is_weapon,
+                "trader_price":     item.trader_price,
+                "trader_price_rub": item.trader_price_rub,
+                "trader_currency":  item.trader_currency,
+                "trader_vendor":    item.trader_vendor,
+                "trader_min_level": item.trader_min_level,
+                "task_unlock_id":      item.task_unlock_id,
+                "task_unlock_name":    item.task_unlock_name,
+                "task_unlock_name_zh": item.task_unlock_name_zh,
+            })
+    return result
+
+
+@app.post("/items/slots/batch")
+def get_item_slots_batch(
+    item_ids: List[str] = Body(..., embed=True),
+    db: Session = Depends(get_db),
+):
+    if not item_ids:
+        return {}
+    slots = db.query(Slot).filter(Slot.parent_item_id.in_(item_ids)).all()
+    slot_ids = [s.id for s in slots]
+    counts = {}
+    if slot_ids:
+        counts = dict(
+            db.query(SlotAllowedItem.slot_id, func.count(SlotAllowedItem.allowed_item_id))
+            .filter(SlotAllowedItem.slot_id.in_(slot_ids))
+            .group_by(SlotAllowedItem.slot_id)
+            .all()
+        )
+    result = {iid: [] for iid in item_ids}
+    for s in slots:
+        result[s.parent_item_id].append({
+            "id": s.id,
+            "parent_item_id": s.parent_item_id,
+            "slot_name": s.slot_name,
+            "slot_game_name": s.slot_game_name,
+            "has_allowed_items": counts.get(s.id, 0) > 0,
+        })
+    return result
+
+
+# ---------------------------------------------------
 # Build Compatibility Validation
 # ---------------------------------------------------
 

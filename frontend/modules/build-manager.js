@@ -2307,18 +2307,25 @@ async function loadBuildFromPayload({ g: gunId, p: pairs, a: ammoId = null, ua: 
         return;
     }
 
-    // Pre-fetch allowed-items for any slots not yet in EFTForge.state.allowedCache
+    // Batch pre-warm both caches in two parallel requests instead of N individual fetches
     const uncachedSlotIds = [...new Set(
         pairs.map(([sid]) => sid).filter(sid => !EFTForge.state.allowedCache[sid])
     )];
-    await Promise.all(uncachedSlotIds.map(async sid => {
-        try {
-            const allowed = await fetchSlotAllowedItems(sid);
-            cacheSet(EFTForge.state.allowedCache, sid, allowed);
-        } catch {}
-    }));
+    const uncachedItemIds = [...new Set(
+        pairs.map(([, iid]) => iid).filter(iid => !EFTForge.state.slotCache[iid])
+    )];
+    const [batchAllowed, batchItemSlots] = await Promise.all([
+        uncachedSlotIds.length ? fetchSlotAllowedItemsBatch(uncachedSlotIds).catch(() => ({})) : Promise.resolve({}),
+        uncachedItemIds.length ? fetchItemSlotsBatch(uncachedItemIds).catch(() => ({})) : Promise.resolve({}),
+    ]);
+    for (const [sid, items] of Object.entries(batchAllowed)) {
+        cacheSet(EFTForge.state.allowedCache, sid, items);
+    }
+    for (const [iid, slots] of Object.entries(batchItemSlots)) {
+        cacheSet(EFTForge.state.slotCache, iid, slots);
+    }
 
-    // BFS install - pairs are in parent-before-child order
+    // BFS install - pairs are in parent-before-child order; both caches are fully warm
     let missingCount = 0;
     for (const [slotId, itemId] of pairs) {
         const allowed = EFTForge.state.allowedCache[slotId];
@@ -2335,15 +2342,6 @@ async function loadBuildFromPayload({ g: gunId, p: pairs, a: ammoId = null, ua: 
         if (!parentNode) { missingCount++; continue; }
 
         parentNode.children[slotId] = { item: itemObj, children: {} };
-
-        // Pre-warm EFTForge.state.slotCache for the newly placed item so its child slots
-        // appear in the map for subsequent pairs
-        if (!EFTForge.state.slotCache[itemObj.id]) {
-            try {
-                const slots = await fetchItemSlots(itemObj.id);
-                cacheSet(EFTForge.state.slotCache, itemObj.id, slots);
-            } catch {}
-        }
     }
 
     EFTForge.state.processedCache = {};
