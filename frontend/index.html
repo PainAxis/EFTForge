@@ -6252,24 +6252,24 @@ button.build-tag-chip.active {
   gap: 16px;
 }
 
-/* ---- Legend ---- */
-.ammo-legend-section { background: #222; border: 1px solid #333; border-radius: 4px; }
-.ammo-legend-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 12px; cursor: pointer; user-select: none;
+/* ---- Disclaimer ---- */
+.ammo-disclaimer {
+  font-size: 11px; color: #777; line-height: 1.5;
+  background: #1c1c1c; border: 1px solid #2e2e2e; border-radius: 4px;
+  padding: 8px 12px;
 }
-.ammo-legend-header-title { font-size: 11px; font-weight: 700; letter-spacing: 1px; color: #ccc; text-transform: uppercase; }
-.ammo-legend-toggle { background: none; border: none; color: #aaa; font-size: 16px; cursor: pointer; line-height: 1; }
-.ammo-legend-body { padding: 0 12px 12px; }
-.ammo-legend-body.ammo-legend-collapsed { display: none; }
-.ammo-legend-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.ammo-legend-table th { padding: 4px 8px; text-align: left; color: #888; font-weight: 600; border-bottom: 1px solid #333; }
-.ammo-legend-table td { padding: 4px 8px; border-bottom: 1px solid #2a2a2a; }
+.ammo-disclaimer-link { color: #a08828; text-decoration: underline; }
+.ammo-disclaimer-link:hover { color: #f5c542; }
 .ammo-legend-eff { font-weight: 700; border-radius: 3px; padding: 2px 8px !important; }
 
 /* ---- Caliber nav ---- */
 .ammo-nav-title { font-size: 11px; font-weight: 700; letter-spacing: 1px; color: #ccc; text-transform: uppercase; margin-bottom: 8px; }
 .ammo-cal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.ammo-cal-type-label {
+  grid-column: 1 / -1; font-size: 10px; font-weight: 700; letter-spacing: 0.8px;
+  color: #666; text-transform: uppercase; padding: 6px 2px 2px; margin-top: 2px;
+}
+.ammo-cal-type-label:first-child { padding-top: 0; margin-top: 0; }
 .ammo-cal-chip {
   background: #252525; border: 1px solid #383838; border-radius: 3px;
   color: #999; font-size: 11px; font-family: inherit; padding: 4px 8px;
@@ -6308,6 +6308,7 @@ button.build-tag-chip.active {
 .ammo-sort-desc::after { content: ' ↓'; color: #f5c542; }
 .ammo-th.ammo-col-name { text-align: left; }
 
+.ammo-caliber-row { scroll-margin-top: calc(var(--ammo-hdr-h, 46px) + 32px); }
 .ammo-caliber-row td {
   background: #242424;
   font-size: 11px; font-weight: 700; color: #f5c542;
@@ -7189,14 +7190,8 @@ var _hmt = _hmt || [];
     <button class="ammo-close-btn" id="ammo-close-btn">&#x2715;</button>
   </div>
   <div class="ammo-panel-body">
-    <!-- How to read legend -->
-    <div class="ammo-legend-section">
-      <div class="ammo-legend-header" id="ammo-legend-header">
-        <span class="ammo-legend-header-title" id="ammo-legend-title-text">HOW TO READ</span>
-        <button class="ammo-legend-toggle" id="ammo-legend-toggle">−</button>
-      </div>
-      <div class="ammo-legend-body" id="ammo-legend-body"></div>
-    </div>
+    <!-- Effectiveness disclaimer -->
+    <div class="ammo-disclaimer" id="ammo-disclaimer"></div>
     <!-- Caliber quick selection -->
     <div>
       <div class="ammo-nav-title" id="ammo-nav-title">CALIBER QUICK SELECTION</div>
