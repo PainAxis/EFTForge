@@ -36,6 +36,25 @@ class Item(Base):
     magazine_capacity = Column(Integer)
     is_ammo = Column(Boolean, default=False, index=True)
 
+    # Ammo ballistic stats
+    ammo_damage          = Column(Integer, nullable=True)
+    penetration_power    = Column(Integer, nullable=True)
+    armor_damage         = Column(Integer, nullable=True)
+    velocity             = Column(Float,   nullable=True)
+    tracer               = Column(Boolean, nullable=True)
+    tracer_color         = Column(String,  nullable=True)
+    ammo_type            = Column(String,  nullable=True)
+    projectile_count     = Column(Integer, nullable=True)
+    fragmentation_chance = Column(Float,   nullable=True)
+    ricochet_chance      = Column(Float,   nullable=True)
+    stack_max_size       = Column(Integer, nullable=True)
+    ammo_accuracy_modifier = Column(Float, nullable=True)
+    ammo_recoil_modifier   = Column(Float, nullable=True)
+    light_bleed_delta    = Column(Float,   nullable=True)
+    heavy_bleed_delta    = Column(Float,   nullable=True)
+    penetration_chance        = Column(Float, nullable=True)
+    penetration_power_deviation = Column(Float, nullable=True)
+
     conflicting_item_ids = Column(Text)
     conflicting_slot_ids = Column(Text)
 

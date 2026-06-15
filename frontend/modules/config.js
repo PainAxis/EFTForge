@@ -15,7 +15,7 @@ window.EFTForge.config = {
     STATIC_ANNOUNCEMENTS_URL: "/offline/announcements.json",
 
     APP_VERSION:    "Development Build",
-    APP_BUILD_DATE: "2026-06-14T11:19:37.549Z", // UTC - run new Date().toISOString() in console when bumping version
+    APP_BUILD_DATE: "2026-06-15T08:09:52.787Z", // UTC - run new Date().toISOString() in console when bumping version
 
     CALIBER_DISPLAY_MAP: {
         "Caliber20x1mm":      "20x1mm disk",
@@ -42,11 +42,10 @@ window.EFTForge.config = {
         "Caliber762x35":      ".300 BLK",
         "Caliber68x51":       "6.8x51",
         "Caliber40x46":       "40x46mm Grenade",
+        "Caliber40mmRU":      "40mm VOG",
         "Caliber26x75":       "26x75mm Flare",
-        "Caliber30Carbine":   ".30 Carbine",
         "Caliber9x33R":       ".357 Magnum",
         "Caliber46x30":       "4.6x30",
-        "Caliber338LM":       ".338 LM",
         "Caliber86x70":       ".338 LM",
         "Caliber127x33":      ".50 AE",
         "Caliber93x64":       "9.3x64",
@@ -75,9 +74,9 @@ window.EFTForge.config = {
         "7.62x39", "7.62x51", "7.62x54R", "7.62x25 TT",
         ".300 BLK", ".308", ".338 LM", ".366 TKM", "9.3x64",
         "9x18", "9x19", "9x21", "9x39", "5.7x28", "4.6x30", ".357 Magnum",
-        ".45 ACP", ".50 AE", ".30 Carbine",
+        ".45 ACP", ".50 AE",
         "12/70", "20/70", "23x75",
-        "12.7x55", "40x46 Grenade", ".50 BMG",
+        "12.7x55", "40x46mm Grenade", "40mm VOG", ".50 BMG",
     ],
 
     CLASS_ORDER: [

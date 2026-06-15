@@ -143,6 +143,57 @@ def _migrate_items_db():
         if "base_image_link" not in existing:
             conn.execute(text("ALTER TABLE items ADD COLUMN base_image_link TEXT"))
             conn.commit()
+        if "ammo_damage" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN ammo_damage INTEGER"))
+            conn.commit()
+        if "penetration_power" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN penetration_power INTEGER"))
+            conn.commit()
+        if "armor_damage" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN armor_damage INTEGER"))
+            conn.commit()
+        if "velocity" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN velocity REAL"))
+            conn.commit()
+        if "tracer" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN tracer INTEGER"))
+            conn.commit()
+        if "tracer_color" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN tracer_color TEXT"))
+            conn.commit()
+        if "ammo_type" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN ammo_type TEXT"))
+            conn.commit()
+        if "projectile_count" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN projectile_count INTEGER"))
+            conn.commit()
+        if "fragmentation_chance" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN fragmentation_chance REAL"))
+            conn.commit()
+        if "ricochet_chance" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN ricochet_chance REAL"))
+            conn.commit()
+        if "stack_max_size" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN stack_max_size INTEGER"))
+            conn.commit()
+        if "ammo_accuracy_modifier" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN ammo_accuracy_modifier REAL"))
+            conn.commit()
+        if "ammo_recoil_modifier" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN ammo_recoil_modifier REAL"))
+            conn.commit()
+        if "light_bleed_delta" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN light_bleed_delta REAL"))
+            conn.commit()
+        if "heavy_bleed_delta" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN heavy_bleed_delta REAL"))
+            conn.commit()
+        if "penetration_chance" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN penetration_chance REAL"))
+            conn.commit()
+        if "penetration_power_deviation" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN penetration_power_deviation REAL"))
+            conn.commit()
 
 
 
@@ -755,6 +806,59 @@ def get_graph_searchable_items(db: Session = Depends(get_db)):
         ],
     }
 
+def _ammo_dto(a, lang: str) -> dict:
+    return {
+        "id":                   a.id,
+        "name":                 _item_name(a, lang),
+        "short_name":           _item_short_name(a, lang),
+        "icon_link":            a.icon_link,
+        "weight":               a.weight,
+        "caliber":              a.caliber,
+        "ammo_type":            a.ammo_type,
+        "damage":               a.ammo_damage,
+        "penetration_power":    a.penetration_power,
+        "penetration_chance":   a.penetration_chance,
+        "penetration_power_deviation": a.penetration_power_deviation,
+        "armor_damage":         a.armor_damage,
+        "velocity":             a.velocity,
+        "tracer":               a.tracer,
+        "tracer_color":         a.tracer_color,
+        "projectile_count":     a.projectile_count,
+        "fragmentation_chance": a.fragmentation_chance,
+        "ricochet_chance":      a.ricochet_chance,
+        "stack_max_size":       a.stack_max_size,
+        "accuracy_modifier":    a.ammo_accuracy_modifier,
+        "recoil_modifier":      a.ammo_recoil_modifier,
+        "light_bleed_delta":    a.light_bleed_delta,
+        "heavy_bleed_delta":    a.heavy_bleed_delta,
+        "trader_price":         a.trader_price,
+        "trader_price_rub":     a.trader_price_rub,
+        "trader_currency":      a.trader_currency,
+        "trader_vendor":        a.trader_vendor,
+        "trader_min_level":     a.trader_min_level,
+    }
+
+
+# Calibers that are flares / signal cartridges - no meaningful ballistic stats
+_AMMO_EXCLUDED_CALIBERS = {"Caliber26x75"}
+
+
+@app.get("/ammo/all")
+def get_all_ammo(lang: str = "en", db: Session = Depends(get_db)):
+    rows = (
+        db.query(Item)
+        .filter(Item.is_ammo == True)
+        .filter(Item.caliber.notin_(_AMMO_EXCLUDED_CALIBERS))
+        .order_by(Item.caliber.asc(), Item.penetration_power.asc())
+        .all()
+    )
+    result = {}
+    for a in rows:
+        cal = a.caliber or "Unknown"
+        result.setdefault(cal, []).append(_ammo_dto(a, lang))
+    return result
+
+
 @app.get("/ammo/{caliber}")
 def get_ammo_for_caliber(caliber: str, lang: str = "en", db: Session = Depends(get_db)):
     ammo = db.query(Item).filter(
@@ -762,20 +866,7 @@ def get_ammo_for_caliber(caliber: str, lang: str = "en", db: Session = Depends(g
         Item.caliber == caliber
     ).order_by(Item.weight.asc()).all()
 
-    return [
-        {
-            "id":             a.id,
-            "name":           _item_name(a, lang),
-            "weight":         a.weight,
-            "icon_link":      a.icon_link,
-            "trader_price":     a.trader_price,
-            "trader_price_rub": a.trader_price_rub,
-            "trader_currency":  a.trader_currency,
-            "trader_vendor":    a.trader_vendor,
-            "trader_min_level": a.trader_min_level,
-        }
-        for a in ammo
-    ]
+    return [_ammo_dto(a, lang) for a in ammo]
 
 # ---------------------------------------------------
 # Item IDs (for client-side flea price prefetch)
@@ -4517,13 +4608,13 @@ def get_stat_changelog(
         .all()
     } if item_ids else set()
 
-    def _is_weapon_or_attachment(item_id):
+    def _is_tracked_item(item_id):
         item = items_map.get(item_id)
         if item is None:
             return False
-        return item.is_weapon or item_id in attachment_ids
+        return item.is_weapon or item_id in attachment_ids or item.is_ammo
 
-    rows = [r for r in rows if _is_weapon_or_attachment(r.item_id)]
+    rows = [r for r in rows if _is_tracked_item(r.item_id)]
 
     return [
         {
@@ -4532,6 +4623,7 @@ def get_stat_changelog(
             "item_name_zh": items_map[row.item_id].name_zh   if row.item_id in items_map else None,
             "icon_link":    items_map[row.item_id].icon_link  if row.item_id in items_map else None,
             "is_weapon":    items_map[row.item_id].is_weapon  if row.item_id in items_map else None,
+            "is_ammo":      items_map[row.item_id].is_ammo    if row.item_id in items_map else None,
             "stat_name":    row.stat_name,
             "old_value":    row.old_value,
             "new_value":    row.new_value,

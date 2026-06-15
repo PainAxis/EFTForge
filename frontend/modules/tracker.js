@@ -143,7 +143,8 @@ window.EFTForge.tracker = (function () {
         var q = _searchQuery.toLowerCase().trim();
         return items.filter(function (item) {
             if (_typeFilter === 'weapons'     && !item.is_weapon) return false;
-            if (_typeFilter === 'attachments' &&  item.is_weapon) return false;
+            if (_typeFilter === 'attachments' && (item.is_weapon || item.is_ammo)) return false;
+            if (_typeFilter === 'ammo'        && !item.is_ammo)  return false;
             if (q) {
                 var name   = (item.item_name    || '').toLowerCase();
                 var nameZh = (item.item_name_zh || '').toLowerCase();
@@ -171,6 +172,7 @@ window.EFTForge.tracker = (function () {
             'tracker-filter-all':        'tracker.filter.all',
             'tracker-filter-weapons':    'tracker.filter.weapons',
             'tracker-filter-attachments':'tracker.filter.attachments',
+            'tracker-filter-ammo':       'tracker.filter.ammo',
             'tracker-col-label-buff':    'tracker.col.buffs',
             'tracker-col-label-nerf':    'tracker.col.nerfs',
             'tracker-col-label-mixed':   'tracker.col.mixed',
@@ -220,6 +222,7 @@ window.EFTForge.tracker = (function () {
                     item_name_zh: entry.item_name_zh,
                     icon_link:    entry.icon_link,
                     is_weapon:    entry.is_weapon,
+                    is_ammo:      entry.is_ammo,
                     detected_at:  entry.detected_at,
                     stats: [],
                 });

@@ -1,0 +1,614 @@
+window.EFTForge = window.EFTForge || {};
+
+/* ============================================================
+   AMMO TABLE MODULE
+   Full ballistics chart modelled on the EFT wiki.
+   Sections: How to read legend | Caliber quick-nav | Table
+   Table columns: Caliber | Name | DMG | Pen | Armor% |
+                  Acc% | Recoil | Lt Bleed% | Hv Bleed% | m/s |
+                  Class 1-6 effectiveness
+============================================================ */
+
+window.EFTForge.ammoTable = (function () {
+
+    var _cache      = null;
+    var _sortCol    = 'penetration_power';
+    var _sortAsc    = true;
+    var _globalSort = false;
+    var _search     = '';
+    var _activeCat  = 'all';
+
+    /* ---- Caliber display names.
+       Ammo and weapon items share the same caliber IDs, so config.js
+       CALIBER_DISPLAY_MAP is the single source of truth. Look up live so the
+       two never drift apart. ---- */
+    function _calName(cal) {
+        var map = (window.EFTForge && EFTForge.config && EFTForge.config.CALIBER_DISPLAY_MAP) || {};
+        return map[cal] || cal;
+    }
+
+    /* ---- Armor class effectiveness ----
+       Mirrors the in-game ammo screen's discrete scale instead of a 0-6 number.
+
+       Each armor class C (1-6) has an effective durability of C * 10:
+       - pen >= C*10  -> the round beats that class reliably -> "Very High".
+       - The first class the round can NOT beat is the "stopping" class; its
+         rating comes from the ones digit of the pen value:
+             8-9 -> High, 6-7 -> Medium, 3-5 -> Low, 0-2 -> Very Low.
+       - Every class above the stopping class is already stopped -> "Very Low".
+
+       Tier keys (strong -> weak): vhigh | high | med | low | vlow. ---- */
+    var EFF_TIERS = ['vhigh', 'high', 'med', 'low', 'vlow'];
+
+    // Multi-pellet ammo: tagged "buckshot", or fires several projectiles like
+    // the Piranha (10 pellets, but typed "bullet"). A 2-projectile Dual Sabot
+    // slug stays a slug, so require 3+ pellets for the untagged case.
+    // Used to keep buckshot grouped above slugs in the per-caliber sort.
+    function _isBuckshot(row) {
+        return row.ammo_type === 'buckshot' || (row.projectile_count || 1) >= 3;
+    }
+
+    function _digitTier(pen) {
+        var d = pen % 10;
+        if (d >= 8) return 'high';   // 8-9
+        if (d >= 6) return 'med';    // 6-7
+        if (d >= 3) return 'low';    // 3-5
+        return 'vlow';               // 0-2
+    }
+
+    function _calcEff(pen, classIdx) {
+        if (pen == null) return null;
+        var dur = (classIdx + 1) * 10;          // this class's effective durability
+        if (pen >= dur) return 'vhigh';
+        // Not beaten: the stopping class (first one not beaten) gets the digit
+        // tier; any class beyond it is already stopped -> very low.
+        var prevDur = classIdx * 10;            // class below this one
+        if (classIdx === 0 || pen >= prevDur) return _digitTier(pen);
+        return 'vlow';
+    }
+
+    /* ===========================
+       PUBLIC API
+    =========================== */
+
+    function showPanel() {
+        var overlay  = document.getElementById('ammo-overlay');
+        var backdrop = document.getElementById('ammo-backdrop');
+        if (!overlay) return;
+
+        overlay.classList.add('visible');
+        if (backdrop) backdrop.classList.add('visible');
+        document.getElementById('main-container')?.setAttribute('inert', '');
+        if (document.activeElement) document.activeElement.blur();
+
+        _updateStaticText();
+        _loadData();
+    }
+
+    function hidePanel() {
+        var overlay  = document.getElementById('ammo-overlay');
+        var backdrop = document.getElementById('ammo-backdrop');
+        if (overlay)  overlay.classList.remove('visible');
+        if (backdrop) backdrop.classList.remove('visible');
+        document.getElementById('main-container')?.removeAttribute('inert');
+    }
+
+    function onLangChange() {
+        var overlay = document.getElementById('ammo-overlay');
+        if (!overlay || !overlay.classList.contains('visible')) return;
+        _updateStaticText();
+        if (_cache) _render();
+    }
+
+    function init() {
+        var closeBtn = document.getElementById('ammo-close-btn');
+        if (closeBtn) closeBtn.addEventListener('click', hidePanel);
+
+        var backdrop = document.getElementById('ammo-backdrop');
+        if (backdrop) backdrop.addEventListener('click', hidePanel);
+
+        var searchEl = document.getElementById('ammo-search');
+        if (searchEl) {
+            searchEl.addEventListener('input', function () {
+                _search = searchEl.value.trim().toLowerCase();
+                if (_cache) _render();
+            });
+        }
+
+        var legendToggle = document.getElementById('ammo-legend-toggle');
+        if (legendToggle) {
+            legendToggle.addEventListener('click', function () {
+                var body = document.getElementById('ammo-legend-body');
+                if (!body) return;
+                var collapsed = body.classList.toggle('ammo-legend-collapsed');
+                legendToggle.textContent = collapsed ? '+' : '−';
+            });
+        }
+
+        _buildLegend();
+        _buildCaliberNav();
+        _buildDenotationNotes();
+    }
+
+    /* ===========================
+       PRIVATE - DATA
+    =========================== */
+
+    async function _loadData() {
+        if (_cache) { _render(); return; }
+
+        var container = document.getElementById('ammo-table-container');
+        if (container) container.innerHTML = '<div class="ammo-loading">' + _t('ammo.loading') + '</div>';
+
+        try {
+            var lang = (EFTForge.lang && EFTForge.lang.current) || 'en';
+            var res  = await fetch(EFTForge.config.API_BASE + '/ammo/all?lang=' + lang);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            _cache = await res.json();
+            // Rebuild chips now that we have the real caliber keys from the API
+            var chipsWrap = document.querySelector('.ammo-cal-chips-wrap');
+            if (chipsWrap) _renderCaliberChips(chipsWrap);
+            _render();
+        } catch (err) {
+            console.error('[ammo-table] load error:', err);
+            var c = document.getElementById('ammo-table-container');
+            if (c) c.innerHTML = '<div class="ammo-error">' + _t('ammo.loadError') + '</div>';
+        }
+    }
+
+    /* ===========================
+       PRIVATE - RENDER
+    =========================== */
+
+    function _render() {
+        var container = document.getElementById('ammo-table-container');
+        if (!container || !_cache) return;
+
+        // Flatten all rows, apply search + category filter
+        var rows = _getFilteredRows();
+
+        if (rows.length === 0) {
+            container.innerHTML = '<div class="ammo-no-results">' + _t('ammo.noResults') + '</div>';
+            return;
+        }
+
+        if (_globalSort) {
+            rows = _sortRows(rows);
+            container.innerHTML = '';
+            container.appendChild(_buildTable(rows, false));
+        } else {
+            // Group by caliber, sort within each group
+            var groups = _groupByCaliber(rows);
+            container.innerHTML = '';
+            var table = _buildTable(groups, true);
+            container.appendChild(table);
+        }
+
+        _updateCaliberNavHighlight();
+    }
+
+    function _getFilteredRows() {
+        if (!_cache) return [];
+        var all = [];
+        var cals = Object.keys(_cache);
+        cals.forEach(function (cal) {
+            if (_activeCat !== 'all') {
+                var catCals = CAT_CALIBERS[_activeCat] || [];
+                if (catCals.indexOf(cal) === -1) return;
+            }
+            var rows = _cache[cal] || [];
+            rows.forEach(function (r) {
+                if (!_search || r.name.toLowerCase().includes(_search)) {
+                    all.push(r);
+                }
+            });
+        });
+        return all;
+    }
+
+    function _groupByCaliber(rows) {
+        // Maintain caliber order from keys (sorted server-side by caliber name)
+        var seen = [];
+        var map  = {};
+        rows.forEach(function (r) {
+            var cal = r.caliber || 'Unknown';
+            if (!map[cal]) { map[cal] = []; seen.push(cal); }
+            map[cal].push(r);
+        });
+        return seen.map(function (cal) {
+            return { caliber: cal, rows: _sortGroupRows(map[cal]) };
+        });
+    }
+
+    function _sortGroupRows(rows) {
+        // Within a caliber, keep buckshot/pellet ammo as a top block and
+        // slugs (and anything else) as a block below, each sorted independently
+        // by the active sort column. Only shotgun-type calibers mix the two.
+        var sorted = _sortRows(rows);
+        var buck = [], rest = [];
+        sorted.forEach(function (r) {
+            (_isBuckshot(r) ? buck : rest).push(r);
+        });
+        if (buck.length === 0 || rest.length === 0) return sorted;
+        return buck.concat(rest);
+    }
+
+    function _sortVal(row, col) {
+        // Damage column sorts by effective total (pellets x per-pellet damage)
+        if (col === 'damage' && row.damage != null) {
+            return row.damage * (row.projectile_count || 1);
+        }
+        return row[col];
+    }
+
+    function _sortRows(rows) {
+        return rows.slice().sort(function (a, b) {
+            var va = _sortVal(a, _sortCol);
+            var vb = _sortVal(b, _sortCol);
+            if (va == null && vb == null) return 0;
+            if (va == null) return 1;
+            if (vb == null) return -1;
+            if (typeof va === 'string') {
+                var cmp = va.localeCompare(vb);
+                return _sortAsc ? cmp : -cmp;
+            }
+            return _sortAsc ? va - vb : vb - va;
+        });
+    }
+
+    /* ---- Table DOM builder ---- */
+
+    function _buildTable(data, grouped) {
+        var tbl = document.createElement('table');
+        tbl.className = 'ammo-table';
+
+        // Header
+        var thead = document.createElement('thead');
+        var hRow  = document.createElement('tr');
+
+        var cols = _getColumns(grouped);
+        cols.forEach(function (col) {
+            var th = document.createElement('th');
+            th.className = 'ammo-th';
+            if (col.key) {
+                th.dataset.col = col.key;
+                th.classList.add('ammo-th-sortable');
+                if (_sortCol === col.key) {
+                    th.classList.add(_sortAsc ? 'ammo-sort-asc' : 'ammo-sort-desc');
+                }
+                th.addEventListener('click', function () { _onSortClick(col.key); });
+            }
+            if (col.class) th.classList.add(col.class);
+            th.textContent = col.label;
+            if (col.tip) th.title = col.tip;
+            hRow.appendChild(th);
+        });
+        thead.appendChild(hRow);
+        tbl.appendChild(thead);
+
+        // Body
+        var tbody = document.createElement('tbody');
+        if (grouped) {
+            data.forEach(function (group) {
+                _appendGroupRows(tbody, group.caliber, group.rows, cols);
+            });
+        } else {
+            data.forEach(function (row) {
+                tbody.appendChild(_buildDataRow(row, cols, null));
+            });
+        }
+        tbl.appendChild(tbody);
+        return tbl;
+    }
+
+    function _appendGroupRows(tbody, caliber, rows, cols) {
+        if (!rows || rows.length === 0) return;
+        var anchor = _calName(caliber);
+        // Anchor row (caliber header)
+        var hr = document.createElement('tr');
+        hr.className = 'ammo-caliber-row';
+        hr.id = 'ammo-cal-' + _safeId(caliber);
+        var td = document.createElement('td');
+        td.colSpan = cols.length;
+        td.className = 'ammo-caliber-label';
+        td.textContent = anchor;
+        hr.appendChild(td);
+        tbody.appendChild(hr);
+
+        rows.forEach(function (row) {
+            tbody.appendChild(_buildDataRow(row, cols, caliber));
+        });
+    }
+
+    function _buildDataRow(row, cols, caliberContext) {
+        var tr = document.createElement('tr');
+        tr.className = 'ammo-data-row';
+
+        cols.forEach(function (col) {
+            var td = document.createElement('td');
+            td.className = 'ammo-td';
+            if (col.class) td.classList.add(col.class);
+
+            if (col.key === '_caliber') {
+                td.textContent = _calName(row.caliber) || row.caliber || '';
+            } else if (col.key === 'name') {
+                _renderNameCell(td, row);
+            } else if (col.key === 'damage') {
+                _renderDamageCell(td, row);
+            } else if (col.key === 'accuracy_modifier' || col.key === 'recoil_modifier') {
+                _renderDeltaCell(td, row[col.key], col.key === 'recoil_modifier', col.key === 'recoil_modifier');
+            } else if (col.key === 'light_bleed_delta' || col.key === 'heavy_bleed_delta') {
+                _renderBleedCell(td, row[col.key]);
+            } else if (col.key && col.key.startsWith('_class')) {
+                var classIdx = parseInt(col.key.replace('_class', ''), 10) - 1;
+                _renderEffCell(td, row, classIdx);
+            } else if (col.key === 'fragmentation_chance' || col.key === 'ricochet_chance') {
+                td.textContent = (row[col.key] != null) ? Math.round(row[col.key] * 100) + '%' : '';
+            } else if (col.key === 'velocity') {
+                td.textContent = (row.velocity != null) ? Math.round(row.velocity) : '';
+            } else if (col.key === 'trader_price_rub') {
+                _renderPriceCell(td, row);
+            } else {
+                var v = (col.key && row[col.key] != null) ? row[col.key] : '';
+                td.textContent = v;
+            }
+
+            tr.appendChild(td);
+        });
+
+        return tr;
+    }
+
+    function _renderDamageCell(td, row) {
+        var dmg = row.damage;
+        if (dmg == null) { td.textContent = ''; return; }
+        var pellets = row.projectile_count || 1;
+        if (pellets > 1) {
+            // Shotgun / pellet ammo: damage column is per-pellet; show count x per-pellet
+            td.textContent = pellets + '×' + dmg;
+            td.title = (_t('ammo.col.dmgTotal') || 'Total') + ': ' + (pellets * dmg);
+            td.classList.add('ammo-dmg-multi');
+        } else {
+            td.textContent = dmg;
+        }
+    }
+
+    function _renderNameCell(td, row) {
+        var span = document.createElement('span');
+        span.textContent = row.name || '';
+
+        var sups = '';
+        // tarkov.dev ammoType is never "subsonic"; detect by muzzle velocity below ~343 m/s
+        var isSubsonic = (row.velocity != null && row.velocity < 343) ||
+                         (row.ammo_type && row.ammo_type.toLowerCase().includes('subsonic'));
+        if (isSubsonic) {
+            sups += '<sup class="ammo-sup ammo-sup-sub" title="Subsonic">S</sup>';
+        }
+        if (row.tracer) {
+            var tc = _sanitizeColor(row.tracer_color);
+            var color = tc ? ' style="color:' + tc + '"' : '';
+            sups += '<sup class="ammo-sup ammo-sup-tracer"' + color + ' title="Tracer">T</sup>';
+        }
+
+        if (sups) {
+            td.innerHTML = '';
+            span.textContent = row.name || '';
+            td.appendChild(span);
+            var sup = document.createElement('span');
+            sup.innerHTML = sups;
+            td.appendChild(sup);
+        } else {
+            td.appendChild(span);
+        }
+    }
+
+    function _renderDeltaCell(td, val, invert, noPct) {
+        if (val == null) { td.textContent = ''; return; }
+        // tarkov.dev stores accuracy/recoil modifiers as fractions (-0.05 = -5%)
+        var pct = Math.round(val * 100);
+        if (pct === 0) { td.textContent = ''; return; }
+        td.textContent = (pct > 0 ? '+' : '') + pct + (noPct ? '' : '%');
+        // For recoil, higher is worse, so invert: positive = red, negative = green.
+        var good = invert ? (pct < 0) : (pct > 0);
+        td.classList.add(good ? 'delta-pos' : 'delta-neg');
+    }
+
+    function _renderBleedCell(td, val) {
+        if (val == null || val === 0) { td.textContent = ''; return; }
+        // tarkov.dev stores bleed modifiers as fractions (0.35 = +35%)
+        var pct = Math.round(val * 100);
+        if (pct === 0) { td.textContent = ''; return; }
+        td.textContent = (pct > 0 ? '+' : '') + pct + '%';
+    }
+
+    function _renderEffCell(td, row, classIdx) {
+        var tier = _calcEff(row.penetration_power, classIdx);
+        if (tier === null) { td.textContent = ''; return; }
+        td.textContent = _t('ammo.eff.' + tier);
+        td.classList.add('ammo-eff');
+        td.classList.add('eff-' + tier);
+    }
+
+    function _renderPriceCell(td, row) {
+        if (!row.trader_price_rub) { td.textContent = ''; return; }
+        td.textContent = row.trader_price_rub.toLocaleString() + ' ₽';
+    }
+
+    /* ---- Column definitions ---- */
+
+    function _getColumns(grouped) {
+        var t = _t.bind(null);
+        var cols = [];
+
+        if (!grouped) {
+            cols.push({ key: '_caliber', label: t('ammo.col.caliber'), class: 'ammo-col-caliber' });
+        }
+        cols.push({ key: 'name',                label: t('ammo.col.name'),       class: 'ammo-col-name' });
+        cols.push({ key: 'damage',              label: t('ammo.col.dmg'),         class: 'ammo-col-num', tip: t('ammo.col.dmgTip') });
+        cols.push({ key: 'penetration_power',   label: t('ammo.col.pen'),         class: 'ammo-col-num', tip: t('ammo.col.penTip') });
+        cols.push({ key: 'armor_damage',        label: t('ammo.col.armorDmg'),    class: 'ammo-col-num', tip: t('ammo.col.armorDmgTip') });
+        cols.push({ key: 'accuracy_modifier',   label: t('ammo.col.acc'),         class: 'ammo-col-delta', tip: t('ammo.col.accTip') });
+        cols.push({ key: 'recoil_modifier',     label: t('ammo.col.recoil'),      class: 'ammo-col-delta', tip: t('ammo.col.recoilTip') });
+        cols.push({ key: 'light_bleed_delta',   label: t('ammo.col.ltBleed'),     class: 'ammo-col-delta', tip: t('ammo.col.ltBleedTip') });
+        cols.push({ key: 'heavy_bleed_delta',   label: t('ammo.col.hvBleed'),     class: 'ammo-col-delta', tip: t('ammo.col.hvBleedTip') });
+        cols.push({ key: 'velocity',            label: t('ammo.col.velocity'),    class: 'ammo-col-num', tip: t('ammo.col.velocityTip') });
+        cols.push({ key: '_class1', label: '1', class: 'ammo-col-class', tip: t('ammo.col.class1Tip') });
+        cols.push({ key: '_class2', label: '2', class: 'ammo-col-class', tip: t('ammo.col.class2Tip') });
+        cols.push({ key: '_class3', label: '3', class: 'ammo-col-class', tip: t('ammo.col.class3Tip') });
+        cols.push({ key: '_class4', label: '4', class: 'ammo-col-class', tip: t('ammo.col.class4Tip') });
+        cols.push({ key: '_class5', label: '5', class: 'ammo-col-class', tip: t('ammo.col.class5Tip') });
+        cols.push({ key: '_class6', label: '6', class: 'ammo-col-class', tip: t('ammo.col.class6Tip') });
+        return cols;
+    }
+
+    /* ===========================
+       PRIVATE - LEGEND
+    =========================== */
+
+    function _buildLegend() {
+        var body = document.getElementById('ammo-legend-body');
+        if (!body) return;
+        body.innerHTML = '';
+        var tbl = document.createElement('table');
+        tbl.className = 'ammo-legend-table';
+        var thead = document.createElement('thead');
+        var hRow  = document.createElement('tr');
+        ['ammo.legend.hdrTier','ammo.legend.hdrDesc'].forEach(function (k) {
+            var th = document.createElement('th');
+            th.textContent = _t(k);
+            hRow.appendChild(th);
+        });
+        thead.appendChild(hRow);
+        tbl.appendChild(thead);
+        var tbody = document.createElement('tbody');
+        EFF_TIERS.forEach(function (tier) {
+            var tr = document.createElement('tr');
+            var effTd = document.createElement('td');
+            effTd.className = 'ammo-legend-eff eff-' + tier;
+            effTd.textContent = _t('ammo.eff.' + tier);
+            tr.appendChild(effTd);
+            var descTd = document.createElement('td');
+            descTd.textContent = _t('ammo.legend.tier.' + tier);
+            tr.appendChild(descTd);
+            tbody.appendChild(tr);
+        });
+        tbl.appendChild(tbody);
+        body.appendChild(tbl);
+    }
+
+    /* ===========================
+       PRIVATE - CALIBER NAV
+    =========================== */
+
+    function _buildCaliberNav() {
+        var navEl = document.getElementById('ammo-caliber-nav');
+        if (!navEl) return;
+        navEl.innerHTML = '';
+        var chipsWrap = document.createElement('div');
+        chipsWrap.className = 'ammo-cal-chips-wrap';
+        navEl.appendChild(chipsWrap);
+        _renderCaliberChips(chipsWrap);
+    }
+
+    function _renderCaliberChips(container) {
+        if (!container) return;
+        container.innerHTML = '';
+        // Use actual cache keys once data is loaded so chips match real table sections
+        var cals = _cache ? Object.keys(_cache) : [];
+        var grid = document.createElement('div');
+        grid.className = 'ammo-cal-grid';
+        cals.forEach(function (cal) {
+            var chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'ammo-cal-chip';
+            chip.textContent = _calName(cal);
+            chip.addEventListener('click', function () {
+                var target = document.getElementById('ammo-cal-' + _safeId(cal));
+                if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+            grid.appendChild(chip);
+        });
+        container.appendChild(grid);
+    }
+
+    function _updateCaliberNavHighlight() { /* no-op: category tabs removed */ }
+
+    /* ===========================
+       PRIVATE - DENOTATION NOTES
+    =========================== */
+
+    function _buildDenotationNotes() {
+        var el = document.getElementById('ammo-notes');
+        if (!el) return;
+        el.innerHTML =
+            '<sup class="ammo-sup ammo-sup-sub">S</sup> ' + _t('ammo.note.subsonic') +
+            ' ' +
+            '<sup class="ammo-sup ammo-sup-tracer">T</sup> ' + _t('ammo.note.tracer');
+    }
+
+    /* ===========================
+       PRIVATE - SORTING
+    =========================== */
+
+    function _onSortClick(colKey) {
+        if (_sortCol === colKey) {
+            _sortAsc = !_sortAsc;
+        } else {
+            _sortCol = colKey;
+            _sortAsc = true;
+        }
+        if (_cache) _render();
+    }
+
+    /* ===========================
+       PRIVATE - HELPERS
+    =========================== */
+
+    function _t(key) {
+        if (window.EFTForge && EFTForge.lang && EFTForge.lang.t) {
+            return EFTForge.lang.t(key);
+        }
+        return key;
+    }
+
+    function _safeId(str) {
+        return (str || '').replace(/[^a-zA-Z0-9]/g, '_');
+    }
+
+    function _sanitizeColor(color) {
+        // Returns a valid CSS color for the tracer mark, or null to fall back to
+        // the default CSS color. Whitelisted to prevent XSS.
+        if (!color) return null;
+        if (/^#[0-9a-fA-F]{3,6}$/.test(color)) return color;
+        // tarkov.dev names tracers like "tracerRed"/"tracerGreen"; strip prefix.
+        var lower = color.toLowerCase().replace(/^tracer/, '');
+        // EFT only has red, green and yellow tracers - there are no white tracers.
+        var valid = ['red', 'green', 'yellow'];
+        return valid.indexOf(lower) !== -1 ? lower : null;
+    }
+
+    function _updateStaticText() {
+        var titleEl = document.getElementById('ammo-panel-title');
+        if (titleEl) titleEl.textContent = _t('ammo.title');
+        var searchEl = document.getElementById('ammo-search');
+        if (searchEl) searchEl.placeholder = _t('ammo.searchPlaceholder');
+        var secTitle = document.getElementById('ammo-legend-title-text');
+        if (secTitle) secTitle.textContent = _t('ammo.legend.title');
+        var navTitle = document.getElementById('ammo-nav-title');
+        if (navTitle) navTitle.textContent = _t('ammo.nav.title');
+        _buildDenotationNotes();
+        // Rebuild legend + caliber nav labels in the current language
+        _buildLegend();
+        _buildCaliberNav();
+    }
+
+    /* ===========================
+       EXPOSE
+    =========================== */
+
+    // Scripts are loaded at the end of <body> so DOM is ready; init immediately.
+    init();
+
+    return { showPanel: showPanel, hidePanel: hidePanel, onLangChange: onLangChange };
+
+}());

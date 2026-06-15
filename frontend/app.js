@@ -1060,10 +1060,12 @@ function applyStaticTranslations() {
     setNavLabel("builds-btn",      "btn.builds");
     setNavLabel("leaderboard-btn", "btn.leaderboard");
     setNavLabel("tracker-btn",     "btn.tracker");
+    setNavLabel("ammo-btn",        "btn.ammo");
     if (EFTForge.profile) EFTForge.profile.updateBtn();
 
     if (EFTForge.leaderboard) EFTForge.leaderboard.onLangChange();
     if (EFTForge.tracker)     EFTForge.tracker.onLangChange();
+    if (EFTForge.ammoTable)   EFTForge.ammoTable.onLangChange();
 
     const newsCloseBtn = document.getElementById("news-close-btn");
     if (newsCloseBtn) newsCloseBtn.textContent = "\u2715";
@@ -1138,8 +1140,9 @@ async function switchLang(lang) {
     localStorage.setItem("eftforge_lang", lang);
 
     applyStaticTranslations();
-    if (window.EFTForge && EFTForge.news)    EFTForge.news.onLangChange();
-    if (window.EFTForge && EFTForge.tracker) EFTForge.tracker.onLangChange();
+    if (window.EFTForge && EFTForge.news)      EFTForge.news.onLangChange();
+    if (window.EFTForge && EFTForge.tracker)   EFTForge.tracker.onLangChange();
+    if (window.EFTForge && EFTForge.ammoTable) EFTForge.ammoTable.onLangChange();
 
     // Clear caches - item names are baked into cached objects
     EFTForge.state.slotCache      = {};

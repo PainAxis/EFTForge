@@ -6180,6 +6180,187 @@ button.build-tag-chip.active {
 }
 
 /* =============================================
+   AMMO TABLE OVERLAY
+============================================= */
+
+#ammo-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 1100;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+#ammo-backdrop.visible { opacity: 1; pointer-events: auto; }
+
+#ammo-overlay {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: min(1320px, 98vw);
+  background: #1a1a1a;
+  z-index: 1101;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  opacity: 0;
+  transition: transform 0.28s cubic-bezier(0.4,0,0.2,1), opacity 0.2s ease;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a #1a1a1a;
+  --ammo-hdr-h: 46px;
+}
+#ammo-overlay::-webkit-scrollbar { width: 6px; }
+#ammo-overlay::-webkit-scrollbar-track { background: #1a1a1a; }
+#ammo-overlay::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
+#ammo-overlay::-webkit-scrollbar-thumb:hover { background: #555; }
+#ammo-overlay.visible { transform: translateX(0); opacity: 1; }
+
+.ammo-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  height: var(--ammo-hdr-h, 46px);
+  box-sizing: border-box;
+  background: #1a1a1a;
+  z-index: 5;
+}
+.ammo-panel-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #f5c542;
+  text-transform: uppercase;
+}
+.ammo-close-btn {
+  background: none; border: none; color: #aaa; font-size: 18px;
+  cursor: pointer; line-height: 1; padding: 4px 6px;
+}
+.ammo-close-btn:hover { color: #fff; }
+
+.ammo-panel-body {
+  flex: 1;
+  padding: 14px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ---- Legend ---- */
+.ammo-legend-section { background: #222; border: 1px solid #333; border-radius: 4px; }
+.ammo-legend-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; cursor: pointer; user-select: none;
+}
+.ammo-legend-header-title { font-size: 11px; font-weight: 700; letter-spacing: 1px; color: #ccc; text-transform: uppercase; }
+.ammo-legend-toggle { background: none; border: none; color: #aaa; font-size: 16px; cursor: pointer; line-height: 1; }
+.ammo-legend-body { padding: 0 12px 12px; }
+.ammo-legend-body.ammo-legend-collapsed { display: none; }
+.ammo-legend-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ammo-legend-table th { padding: 4px 8px; text-align: left; color: #888; font-weight: 600; border-bottom: 1px solid #333; }
+.ammo-legend-table td { padding: 4px 8px; border-bottom: 1px solid #2a2a2a; }
+.ammo-legend-eff { font-weight: 700; border-radius: 3px; padding: 2px 8px !important; }
+
+/* ---- Caliber nav ---- */
+.ammo-nav-title { font-size: 11px; font-weight: 700; letter-spacing: 1px; color: #ccc; text-transform: uppercase; margin-bottom: 8px; }
+.ammo-cal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.ammo-cal-chip {
+  background: #252525; border: 1px solid #383838; border-radius: 3px;
+  color: #999; font-size: 11px; font-family: inherit; padding: 4px 8px;
+  cursor: pointer; white-space: nowrap; line-height: 1.4; text-align: left;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.ammo-cal-chip:hover { background: #2e2e2e; border-color: #f5c542; color: #f5c542; }
+
+/* ---- Denotation notes ---- */
+.ammo-notes { font-size: 11px; color: #888; }
+
+/* ---- Controls ---- */
+.ammo-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ammo-search {
+  flex: 1; min-width: 160px;
+  background: #2a2a2a; border: 1px solid #444; border-radius: 3px;
+  color: #eee; font-size: 12px; padding: 6px 10px; outline: none;
+  font-family: inherit;
+}
+.ammo-search:focus { border-color: #f5c542; }
+
+/* ---- Main table ---- */
+/* No overflow-x here: the drawer is wide enough to avoid horizontal scroll,
+   and keeping overflow-x on this container would block position:sticky on th
+   (CSS forces overflow-y:auto too, making this a scroll ancestor). */
+.ammo-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ammo-th {
+  position: sticky; top: var(--ammo-hdr-h, 0); background: #1e1e1e; z-index: 2;
+  padding: 6px 8px; text-align: center; font-weight: 700; font-size: 11px;
+  letter-spacing: 0.5px; color: #bbb; border-bottom: 2px solid #333;
+  white-space: nowrap; text-transform: uppercase; user-select: none;
+}
+.ammo-th-sortable { cursor: pointer; }
+.ammo-th-sortable:hover { color: #f5c542; }
+.ammo-sort-asc::after  { content: ' ↑'; color: #f5c542; }
+.ammo-sort-desc::after { content: ' ↓'; color: #f5c542; }
+.ammo-th.ammo-col-name { text-align: left; }
+
+.ammo-caliber-row td {
+  background: #242424;
+  font-size: 11px; font-weight: 700; color: #f5c542;
+  letter-spacing: 0.8px; text-transform: uppercase;
+  padding: 6px 8px;
+  border-top: 1px solid #3a3a3a;
+}
+.ammo-data-row:hover { background: #252525; }
+.ammo-td { padding: 4px 6px; text-align: center; border-bottom: 1px solid #252525; color: #ddd; }
+.ammo-td.ammo-col-name { text-align: left; white-space: nowrap; color: #eee; }
+.ammo-col-num { min-width: 32px; }
+.ammo-col-delta { min-width: 38px; }
+.ammo-col-class { min-width: 24px; font-weight: 700; }
+/* Effectiveness columns carry text labels - keep them tight so all 6 fit */
+.ammo-th.ammo-col-class { padding: 6px 3px; }
+.ammo-td.ammo-col-class { padding: 4px 3px; }
+
+/* ---- Delta colors ---- */
+.delta-pos { color: #6dcf6d !important; }
+.delta-neg { color: #e06060 !important; }
+
+/* ---- Superscripts ---- */
+.ammo-sup { font-size: 9px; font-weight: 700; margin-left: 2px; vertical-align: super; }
+.ammo-sup-sub   { color: #7ecfed; }
+.ammo-sup-tracer { color: #f5a623; }
+
+/* ---- Effectiveness cell tiers (in-game scale) ---- */
+.ammo-eff { font-weight: 700; font-size: 10px; white-space: nowrap; text-align: center; }
+.eff-vhigh { background: #1a3d1a; color: #5de85d; }
+.eff-high  { background: #1c3020; color: #4caf6a; }
+.eff-med   { background: #332a08; color: #c9a720; }
+.eff-low   { background: #3a1f0a; color: #d4854a; }
+.eff-vlow  { background: #3d1515; color: #e06060; }
+
+/* ---- Legend eff cell colors match table ---- */
+.ammo-legend-eff.eff-vhigh { color: #5de85d; background: #1a3d1a; }
+.ammo-legend-eff.eff-high  { color: #4caf6a; background: #1c3020; }
+.ammo-legend-eff.eff-med   { color: #c9a720; background: #332a08; }
+.ammo-legend-eff.eff-low   { color: #d4854a; background: #3a1f0a; }
+.ammo-legend-eff.eff-vlow  { color: #e06060; background: #3d1515; }
+
+/* ---- States ---- */
+.ammo-loading, .ammo-error, .ammo-no-results {
+  padding: 40px; text-align: center; color: #666; font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  #ammo-overlay { width: 100%; min-width: unset; }
+  .ammo-cal-chip { font-size: 10px; padding: 3px 6px; }
+  .ammo-cal-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* =============================================
    MOBILE LAYOUT
    Uses body[data-mobile="true"] (set by JS via
    isMobileLayout()) so it applies on ALL touch
@@ -6829,6 +7010,10 @@ var _hmt = _hmt || [];
         <span class="header-nav-btn-icon"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="9" cy="9" r="7.5" stroke="currentColor" stroke-width="1.5"/><line x1="9" y1="8" x2="9" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="9" cy="5.5" r="0.85" fill="currentColor"/></svg></span>
         <span class="header-nav-btn-label">About</span>
       </button>
+      <button id="ammo-btn" class="header-nav-btn" onclick="EFTForge.ammoTable.showPanel()">
+        <span class="header-nav-btn-icon"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="7" y="1" width="4" height="7" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M9 8v9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M6 11h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+        <span class="header-nav-btn-label">Ammo</span>
+      </button>
       <button id="tracker-btn" class="header-nav-btn" data-badge="" data-badge-pulse="false" onclick="EFTForge.tracker.showPanel()">
         <span class="header-nav-btn-icon"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="9" cy="9" r="7.5" stroke="currentColor" stroke-width="1.5"/><circle cx="9" cy="9" r="3.5" stroke="currentColor" stroke-width="1.5"/><line x1="9" y1="1.5" x2="9" y2="5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="9" y1="13" x2="9" y2="16.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="1.5" y1="9" x2="5" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="13" y1="9" x2="16.5" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
         <span class="header-nav-btn-label">Tracker</span>
@@ -6996,6 +7181,38 @@ var _hmt = _hmt || [];
   <div class="leaderboard-body" id="leaderboard-body"></div>
 </div>
 
+<!-- AMMO TABLE BACKDROP + DRAWER -->
+<div id="ammo-backdrop"></div>
+<div id="ammo-overlay">
+  <div class="ammo-panel-header">
+    <span class="ammo-panel-title" id="ammo-panel-title">AMMO</span>
+    <button class="ammo-close-btn" id="ammo-close-btn">&#x2715;</button>
+  </div>
+  <div class="ammo-panel-body">
+    <!-- How to read legend -->
+    <div class="ammo-legend-section">
+      <div class="ammo-legend-header" id="ammo-legend-header">
+        <span class="ammo-legend-header-title" id="ammo-legend-title-text">HOW TO READ</span>
+        <button class="ammo-legend-toggle" id="ammo-legend-toggle">−</button>
+      </div>
+      <div class="ammo-legend-body" id="ammo-legend-body"></div>
+    </div>
+    <!-- Caliber quick selection -->
+    <div>
+      <div class="ammo-nav-title" id="ammo-nav-title">CALIBER QUICK SELECTION</div>
+      <div id="ammo-caliber-nav"></div>
+    </div>
+    <!-- Denotation notes -->
+    <div class="ammo-notes" id="ammo-notes"></div>
+    <!-- Search -->
+    <div class="ammo-controls">
+      <input type="text" id="ammo-search" class="ammo-search" placeholder="Filter ammo...">
+    </div>
+    <!-- Main table -->
+    <div id="ammo-table-container"></div>
+  </div>
+</div>
+
 <!-- TRACKER BACKDROP + DRAWER -->
 <div id="tracker-backdrop" onclick="EFTForge.tracker.hidePanel()"></div>
 <div id="tracker-overlay">
@@ -7009,6 +7226,7 @@ var _hmt = _hmt || [];
       <button class="tracker-filter-btn active" data-filter="all" id="tracker-filter-all">All</button>
       <button class="tracker-filter-btn" data-filter="weapons" id="tracker-filter-weapons">Weapons</button>
       <button class="tracker-filter-btn" data-filter="attachments" id="tracker-filter-attachments">Attachments</button>
+      <button class="tracker-filter-btn" data-filter="ammo" id="tracker-filter-ammo">Ammo</button>
     </div>
   </div>
   <div id="tracker-no-change-hint" class="tracker-no-change-hint" style="display:none;"></div>
@@ -7054,6 +7272,7 @@ var _hmt = _hmt || [];
 <script src="modules/news.js?v=14"></script>
 <script src="modules/leaderboard.js?v=15"></script>
 <script src="modules/tracker.js?v=14"></script>
+<script src="modules/ammo-table.js?v=1"></script>
 <script src="modules/tracker-devtool.js?v=12"></script><!-- dev only: self-exits on non-localhost -->
 <div class="beian-footer">
   <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer">粤ICP备2026028988号-1</a>

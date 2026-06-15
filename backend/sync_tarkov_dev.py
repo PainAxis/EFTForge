@@ -38,6 +38,13 @@ _ATTACHMENT_STATS = [
     "accuracy_modifier",
     "weight",
 ]
+_AMMO_STATS = [
+    "ammo_damage",
+    "penetration_power",
+    "armor_damage",
+    "velocity",
+    "fragmentation_chance",
+]
 # Tolerance for float comparisons (avoids noise from floating-point representation)
 _FLOAT_EPS = 1e-4
 
@@ -54,6 +61,8 @@ def _snapshot_items(db) -> dict:
             tracked = _WEAPON_STATS
         elif not item.is_ammo and item.id in attachment_ids:
             tracked = _ATTACHMENT_STATS
+        elif item.is_ammo:
+            tracked = _AMMO_STATS
         else:
             continue
         snapshot[item.id] = {
@@ -82,7 +91,12 @@ def _build_change_logs(db, snapshot: dict, sync_source: str, sync_time: datetime
 
     for item in items:
         prev = snapshot[item.id]
-        tracked = _WEAPON_STATS if item.is_weapon else _ATTACHMENT_STATS
+        if item.is_weapon:
+            tracked = _WEAPON_STATS
+        elif item.is_ammo:
+            tracked = _AMMO_STATS
+        else:
+            tracked = _ATTACHMENT_STATS
 
         for stat in tracked:
             old_val = prev["stats"].get(stat)
@@ -266,6 +280,23 @@ QUERY = """
 
       ... on ItemPropertiesAmmo {
         caliber
+        damage
+        penetrationPower
+        penetrationChance
+        penetrationPowerDeviation
+        armorDamage
+        initialSpeed
+        tracer
+        tracerColor
+        ammoType
+        projectileCount
+        fragmentationChance
+        ricochetChance
+        stackMaxSize
+        accuracyModifier
+        recoilModifier
+        lightBleedModifier
+        heavyBleedModifier
       }
 
       ... on ItemPropertiesScope {
@@ -486,6 +517,23 @@ def sync_items(sync_source: str = "scheduled"):
         camera_recoil = None
         convergence = None
         recoil_dispersion = None
+        ammo_damage = None
+        penetration_power = None
+        armor_damage = None
+        velocity = None
+        ammo_tracer = None
+        ammo_tracer_color = None
+        ammo_type = None
+        penetration_chance = None
+        penetration_power_deviation = None
+        projectile_count = None
+        fragmentation_chance = None
+        ricochet_chance = None
+        stack_max_size = None
+        ammo_accuracy_mod = None
+        ammo_recoil_mod = None
+        light_bleed_delta = None
+        heavy_bleed_delta = None
 
         item_weight = item.get("weight") or 0
         accuracy_modifier = item.get("accuracyModifier")
@@ -587,6 +635,23 @@ def sync_items(sync_source: str = "scheduled"):
             if typename == "ItemPropertiesAmmo":
                 caliber = properties.get("caliber")
                 is_ammo = True
+                ammo_damage           = properties.get("damage")
+                penetration_power     = properties.get("penetrationPower")
+                penetration_chance    = properties.get("penetrationChance")
+                penetration_power_deviation = properties.get("penetrationPowerDeviation")
+                armor_damage          = properties.get("armorDamage")
+                velocity              = properties.get("initialSpeed")
+                ammo_tracer           = properties.get("tracer")
+                ammo_tracer_color     = properties.get("tracerColor")
+                ammo_type             = properties.get("ammoType")
+                projectile_count      = properties.get("projectileCount")
+                fragmentation_chance  = properties.get("fragmentationChance")
+                ricochet_chance       = properties.get("ricochetChance")
+                stack_max_size        = properties.get("stackMaxSize")
+                ammo_accuracy_mod     = properties.get("accuracyModifier")
+                ammo_recoil_mod       = properties.get("recoilModifier")
+                light_bleed_delta     = properties.get("lightBleedModifier")
+                heavy_bleed_delta     = properties.get("heavyBleedModifier")
 
         # --------------------------
         # UBGL caliber overrides
@@ -634,6 +699,23 @@ def sync_items(sync_source: str = "scheduled"):
             caliber=caliber,
             magazine_capacity=magazine_capacity,
             is_ammo=is_ammo,
+            ammo_damage=ammo_damage,
+            penetration_power=penetration_power,
+            penetration_chance=penetration_chance,
+            penetration_power_deviation=penetration_power_deviation,
+            armor_damage=armor_damage,
+            velocity=velocity,
+            tracer=ammo_tracer,
+            tracer_color=ammo_tracer_color,
+            ammo_type=ammo_type,
+            projectile_count=projectile_count,
+            fragmentation_chance=fragmentation_chance,
+            ricochet_chance=ricochet_chance,
+            stack_max_size=stack_max_size,
+            ammo_accuracy_modifier=ammo_accuracy_mod,
+            ammo_recoil_modifier=ammo_recoil_mod,
+            light_bleed_delta=light_bleed_delta,
+            heavy_bleed_delta=heavy_bleed_delta,
             conflicting_item_ids=",".join(conflicting_item_ids) if conflicting_item_ids else None,
             conflicting_slot_ids=",".join(conflicting_slot_ids) if conflicting_slot_ids else None,
             recoil_vertical=recoil_vertical,
