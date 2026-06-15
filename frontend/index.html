@@ -6316,9 +6316,46 @@ button.build-tag-chip.active {
   padding: 6px 8px;
   border-top: 1px solid #3a3a3a;
 }
+.ammo-data-row { height: 56px; }
 .ammo-data-row:hover { background: #252525; }
 .ammo-td { padding: 4px 6px; text-align: center; border-bottom: 1px solid #252525; color: #ddd; }
 .ammo-td.ammo-col-name { text-align: left; white-space: nowrap; color: #eee; }
+.ammo-th.ammo-col-icon { width: 54px; padding: 0; }
+.ammo-td.ammo-col-icon { padding: 3px 3px; width: 54px; }
+.ammo-icon-wrapper {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    display: inline-block;
+    flex-shrink: 0;
+}
+.ammo-icon-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+/* In-game style shortname: top-right, light text with a hard black outline */
+.ammo-icon-wrapper .slot-shortname {
+    top: 1px;
+    right: 2px;
+    left: auto;
+    max-width: 46px;
+    text-align: right;
+    transform: none;
+    transform-origin: top right;
+    font-family: "Bender", sans-serif;
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 0.2px;
+    color: #d6d6d6;
+    text-shadow:
+        -1px -1px 0 #000,
+         1px -1px 0 #000,
+        -1px  1px 0 #000,
+         1px  1px 0 #000,
+         0    0   2px #000;
+}
 .ammo-col-num { min-width: 32px; }
 .ammo-col-delta { min-width: 38px; }
 .ammo-col-class { min-width: 24px; font-weight: 700; }
@@ -6359,6 +6396,20 @@ button.build-tag-chip.active {
   #ammo-overlay { width: 100%; min-width: unset; }
   .ammo-cal-chip { font-size: 10px; padding: 3px 6px; }
   .ammo-cal-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Mobile: the table is wider than the viewport. Let the whole drawer scroll
+   both ways - vertical swipe to read the list, horizontal swipe to reach the far
+   columns - by making the overlay itself the both-axis scroller (like the
+   attachment table's panel). The column header stays pinned vertically (sticky
+   top) while scrolling with its columns horizontally. The panel header is pinned
+   to the top-left so the title and close button never scroll off-screen.
+   Desktop keeps overflow-x hidden, so none of this affects it. */
+body[data-mobile="true"] #ammo-overlay { overflow: auto; }
+body[data-mobile="true"] .ammo-panel-header { left: 0; }
+body[data-mobile="true"] .ammo-table {
+  width: auto;
+  min-width: 100%;
 }
 
 /* =============================================

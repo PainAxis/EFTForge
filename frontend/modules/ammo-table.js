@@ -324,6 +324,8 @@ window.EFTForge.ammoTable = (function () {
 
             if (col.key === '_caliber') {
                 td.textContent = _calName(row.caliber) || row.caliber || '';
+            } else if (col.key === '_icon') {
+                _renderAmmoIconCell(td, row);
             } else if (col.key === 'name') {
                 _renderNameCell(td, row);
             } else if (col.key === 'damage') {
@@ -364,6 +366,26 @@ window.EFTForge.ammoTable = (function () {
         } else {
             td.textContent = dmg;
         }
+    }
+
+    function _renderAmmoIconCell(td, row) {
+        td.innerHTML = '';
+        if (!row.icon_link) return;
+        var wrapper = document.createElement('div');
+        wrapper.className = 'ammo-icon-wrapper';
+        var img = document.createElement('img');
+        img.className = 'ammo-icon-img';
+        img.src = row.icon_link;
+        img.alt = '';
+        img.loading = 'lazy';
+        wrapper.appendChild(img);
+        if (row.short_name) {
+            var sn = document.createElement('div');
+            sn.className = 'slot-shortname';
+            sn.textContent = row.short_name;
+            wrapper.appendChild(sn);
+        }
+        td.appendChild(wrapper);
     }
 
     function _renderNameCell(td, row) {
@@ -434,6 +456,7 @@ window.EFTForge.ammoTable = (function () {
         if (!grouped) {
             cols.push({ key: '_caliber', label: t('ammo.col.caliber'), class: 'ammo-col-caliber' });
         }
+        cols.push({ key: '_icon', label: '', class: 'ammo-col-icon' });
         cols.push({ key: 'name',                label: t('ammo.col.name'),       class: 'ammo-col-name' });
         cols.push({ key: 'damage',              label: t('ammo.col.dmg'),         class: 'ammo-col-num', tip: t('ammo.col.dmgTip') });
         cols.push({ key: 'penetration_power',   label: t('ammo.col.pen'),         class: 'ammo-col-num', tip: t('ammo.col.penTip') });
