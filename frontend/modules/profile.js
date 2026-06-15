@@ -618,9 +618,6 @@ function _updateProfileBtn() {
         const t = EFTForge.lang.t;
         const name = profile.username || t("modal.anonymousAuthor");
         label.innerHTML = `<span class="profile-nav-label-text">${escapeHtml(name)}</span>`;
-        if (!localStorage.getItem("eftforge_profile_seen")) {
-            btn.dataset.badge = t("ui.newBadge");
-        }
     }
 }
 
