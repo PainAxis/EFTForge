@@ -18,7 +18,7 @@
 
 ## 项目简介
 
-EFTForge 是一个逃离塔科夫武器配置模拟器与社区平台。它提供双视图可视化工作台、实时武器属性计算、实时合成配件预览图像、跳蚤市场/商人价格获取、组合计算器、配件图表视图、用户资料系统、配置评论、以及带有排行榜的社区方案发布系统。所有物品数据均通过 [tarkov.dev](https://tarkov.dev) GraphQL API 获取。
+EFTForge 是一个逃离塔科夫武器配置模拟器与社区平台。它提供双视图可视化工作台、实时武器属性计算、实时合成配件预览图像、跳蚤市场/商人价格获取、组合计算器、配件图表视图、用户资料系统、配置评论、以及带有排行榜的社区方案发布系统。所有物品数据均通过 [tarkov.dev](https://tarkov.dev) JSON API 获取。
 
 --- 
 
@@ -100,7 +100,7 @@ EFTForge 是一个逃离塔科夫武器配置模拟器与社区平台。它提�
 | 前端 | 原生 JavaScript（ES2022），模块化架构 |
 | 图像生成 | Playwright / Patchright（无头浏览器代理） |
 | 资源托管 | Gitee（社区方案卡片图像、用户头像） |
-| 数据来源 | tarkov.dev GraphQL API |
+| 数据来源 | tarkov.dev JSON API |
 | 压缩 | LZ-String |
 | Markdown | marked.js |
 

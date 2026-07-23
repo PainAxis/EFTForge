@@ -148,16 +148,40 @@ async function comboFull(payload, signal, onProgress) {
     throw new Error("combo-full stream ended without result");
 }
 
+// tarkov.dev's JSON API serves the full item list per game mode (avg24hPrice
+// included on each item) rather than a per-id GraphQL query. We memoize the
+// {id: avg24hPrice} map per game mode so the chunked callers don't re-download
+// the (large, CDN-cached) payload once per chunk. A failed fetch is not cached.
+// refetchFleaPrices() forces fresh data via EFTForge.api.clearFleaPriceCache().
+const _fleaMapPromises = {};
+
+function clearFleaPriceCache() {
+    for (const k of Object.keys(_fleaMapPromises)) delete _fleaMapPromises[k];
+}
+
+function _loadFleaMap(gameMode) {
+    if (!_fleaMapPromises[gameMode]) {
+        _fleaMapPromises[gameMode] = (async () => {
+            const res = await fetch(`https://json.tarkov.dev/${gameMode}/items`);
+            if (!res.ok) throw new Error(`tarkov.dev error: ${res.status}`);
+            const json = await res.json();
+            const items = json.data?.items || {};
+            const out = {};
+            for (const it of Object.values(items)) out[it.id] = it.avg24hPrice ?? null;
+            return out;
+        })().catch(err => {
+            delete _fleaMapPromises[gameMode]; // allow retry on the next call
+            throw err;
+        });
+    }
+    return _fleaMapPromises[gameMode];
+}
+
 async function fetchFleaPrices(itemIds, gameMode = "regular") {
-    const query = `{ items(ids: ${JSON.stringify(itemIds)}, gameMode: ${gameMode}) { id avg24hPrice } }`;
-    const res = await fetch("https://api.tarkov.dev/graphql", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
-    });
-    if (!res.ok) throw new Error(`tarkov.dev error: ${res.status}`);
-    const json = await res.json();
-    return Object.fromEntries((json.data?.items || []).map(i => [i.id, i.avg24hPrice]));
+    const map = await _loadFleaMap(gameMode);
+    const out = {};
+    for (const id of itemIds) out[id] = map[id] ?? null;
+    return out;
 }
 
 async function fetchBulkRatings(itemIds) {
@@ -427,4 +451,4 @@ async function fetchMyBuilds() {
     return res.json();
 }
 
-EFTForge.api = { fetchTraders, fetchGuns, fetchGunInit, fetchAmmo, fetchItemSlots, fetchSlotAllowedItems, fetchSlotAllowedItemsBatch, fetchItemSlotsBatch, calculateBuild, validateBuild, batchProcessCandidates, comboBatchProcess, comboFull, fetchFleaPrices, fetchBulkRatings, postVote, deleteVote, fetchBulkBuildRatings, postBuildVote, deleteBuildVote, publishBuild, fetchPublicBuilds, fetchMyBuilds, recordBuildLoad, unlistBuild, fetchBanStatus, fetchNotifications, fetchAnnouncements, fetchStaticAnnouncements, fetchLeaderboardBuilds, fetchLeaderboardAttachments, fetchStatChangelog, fetchBuildComments, postBuildComment, deleteOwnComment, adminDeleteComment, uploadAvatar, updateUserProfile, transferPreview, transferAccount };
+EFTForge.api = { fetchTraders, fetchGuns, fetchGunInit, fetchAmmo, fetchItemSlots, fetchSlotAllowedItems, fetchSlotAllowedItemsBatch, fetchItemSlotsBatch, calculateBuild, validateBuild, batchProcessCandidates, comboBatchProcess, comboFull, fetchFleaPrices, clearFleaPriceCache, fetchBulkRatings, postVote, deleteVote, fetchBulkBuildRatings, postBuildVote, deleteBuildVote, publishBuild, fetchPublicBuilds, fetchMyBuilds, recordBuildLoad, unlistBuild, fetchBanStatus, fetchNotifications, fetchAnnouncements, fetchStaticAnnouncements, fetchLeaderboardBuilds, fetchLeaderboardAttachments, fetchStatChangelog, fetchBuildComments, postBuildComment, deleteOwnComment, adminDeleteComment, uploadAvatar, updateUserProfile, transferPreview, transferAccount };

@@ -138,198 +138,66 @@ def _save_snapshot_to_file(db) -> None:
         logger.warning("Could not write snapshot file: %s", e)
 
 
-GRAPHQL_URL = "https://api.tarkov.dev/graphql"
-
-QUERY_TRADERS = """
-{
-  traders {
-    id
-    name
-    normalizedName
-    imageLink
-    image4xLink
-  }
-}
-"""
+# -----------------------------------------------------------------------------
+# tarkov.dev JSON API (https://json.tarkov.dev)
+# -----------------------------------------------------------------------------
+# The GraphQL endpoint (api.tarkov.dev/graphql) has been replaced by the
+# natively-supported static JSON API. Each endpoint returns a language-neutral
+# base payload whose translatable string fields hold placeholder tokens like
+# "<id> Name"; the real strings live in a per-language overlay fetched by
+# appending "_<lang>" to the path (e.g. /regular/items_en). The placeholder
+# token IS the lookup key into the overlay's flat {token: string} map.
+#
+# Notable shape differences vs. GraphQL that this module adapts to:
+#   - properties.__typename            -> properties.propertiesType
+#   - item.categories[].name           -> category id strings resolved via itemCategories
+#   - properties.defaultPreset object  -> preset id string resolved via items map
+#   - slot.filters.allowedItems[].id   -> plain id strings
+#   - item.conflictingItems[].id       -> plain id strings
+#   - item.buyFor[]                    -> item.buyFromTrader[] (trader id, not vendor object)
+#   - Item.accuracyModifier (percent)  -> properties.accuracyModifier (fraction; x100 here)
+#   - cameraRecoil / convergence       -> absent (backfilled from SPT game files)
+JSON_API_BASE = "https://json.tarkov.dev"
+GAME_MODE = "regular"
 
 EXCLUDED_VENDOR_NAMES = {"ragman", "ref", "fence", "flea-market"}
 
-QUERY_PRICES = """
-{
-  items {
-    id
-    buyFor {
-      vendor {
-        name
-        normalizedName
-        ... on TraderOffer {
-          minTraderLevel
-          taskUnlock {
-            id
-            name
-          }
-        }
-      }
-      price
-      currency
-      priceRUB
-    }
-  }
-}
-"""
 
-QUERY_ZH = """
-{
-  items(lang: zh) {
-    id
-    name
-    shortName
-  }
-}
-"""
+def _fetch_json(url, timeout, label):
+    """GET a JSON endpoint with retries. Raises on final failure."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            resp = requests.get(url, timeout=timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.exceptions.RequestException as e:
+            logger.warning("%s fetch attempt %d failed: %s", label, attempt + 1, e)
+            if attempt == MAX_RETRIES - 1:
+                raise
+            time.sleep(RETRY_DELAY_SECS)
 
-QUERY_TASKS_ZH = """
-{
-  tasks(lang: zh) {
-    id
-    name
-  }
-}
-"""
 
-QUERY = """
-{
-  items {
-    id
-    name
-    shortName
-    weight
-    ergonomicsModifier
-    accuracyModifier
-    gridImageLink
-    image512pxLink
-    baseImageLink
-    iconLink
+def _fetch_json_optional(url, timeout, label):
+    """GET a JSON endpoint with retries. Returns None on final failure (non-fatal)."""
+    try:
+        return _fetch_json(url, timeout, label)
+    except requests.exceptions.RequestException:
+        logger.warning("Could not fetch %s - continuing without it.", label)
+        return None
 
-    conflictingItems { id }
-    conflictingSlotIds
 
-    categories {
-      name
-    }
+def _overlay_map(payload):
+    """Extract the flat {token: translated_string} map from an overlay response."""
+    if not payload:
+        return {}
+    return payload.get("data") or {}
 
-    properties {
-      __typename
 
-      ... on ItemPropertiesWeapon {
-        ergonomics
-        caliber
-        sightingRange
-        recoilVertical
-        recoilHorizontal
-        centerOfImpact
-        cameraSnap
-        deviationCurve
-        deviationMax
-        recoilAngle
-        cameraRecoil
-        convergence
-        recoilDispersion
-
-        defaultPreset {
-          iconLink
-          image512pxLink
-          containsItems {
-            item { id }
-          }
-        }
-
-        slots {
-          id
-          name
-          nameId
-          filters {
-            allowedItems { id }
-          }
-        }
-      }
-
-      ... on ItemPropertiesWeaponMod {
-        recoilModifier
-        slots {
-          id
-          name
-          nameId
-          filters {
-            allowedItems { id }
-          }
-        }
-      }
-
-      ... on ItemPropertiesMagazine {
-        capacity
-        slots {
-          id
-          name
-          nameId
-          filters {
-            allowedItems { id }
-          }
-        }
-      }
-
-      ... on ItemPropertiesAmmo {
-        caliber
-        damage
-        penetrationPower
-        penetrationChance
-        penetrationPowerDeviation
-        armorDamage
-        initialSpeed
-        tracer
-        tracerColor
-        ammoType
-        projectileCount
-        fragmentationChance
-        ricochetChance
-        stackMaxSize
-        accuracyModifier
-        recoilModifier
-        lightBleedModifier
-        heavyBleedModifier
-      }
-
-      ... on ItemPropertiesScope {
-        recoilModifier
-        sightingRange
-        slots {
-          id
-          name
-          nameId
-          filters {
-            allowedItems { id }
-          }
-        }
-      }
-
-      ... on ItemPropertiesBarrel {
-        recoilModifier
-        centerOfImpact
-        deviationCurve
-        deviationMax
-        slots {
-          id
-          name
-          nameId
-          filters {
-            allowedItems { id }
-          }
-        }
-      }
-    }
-  }
-}
-"""
+def _localize(overlay, token, default=None):
+    """Resolve a placeholder token to its translated string via an overlay map."""
+    if token is None:
+        return default
+    return overlay.get(token, default)
 
 def _sync_spt_hidden_stats(db):
     """
@@ -428,43 +296,35 @@ def sync_items(sync_source: str = "scheduled"):
     db.query(Item).delete()
     db.commit()
 
-    logger.info("Fetching tarkov.dev graph...")
+    logger.info("Fetching tarkov.dev items...")
 
-    response = None
+    base = _fetch_json(f"{JSON_API_BASE}/{GAME_MODE}/items", 60, "items")
+    items_map = base["data"]["items"]                 # {id: item}
+    item_categories = base["data"]["itemCategories"]  # {id: {name(token), normalizedName, ...}}
+    logger.info("Total items fetched: %d", len(items_map))
 
-    for attempt in range(MAX_RETRIES):
-        try:
-            response = requests.post(
-                GRAPHQL_URL,
-                json={"query": QUERY},
-                timeout=60,
-            )
-            response.raise_for_status()
-            break
-        except requests.exceptions.RequestException as e:
-            logger.warning("Fetch attempt %d failed: %s", attempt + 1, e)
-            if attempt == MAX_RETRIES - 1:
-                raise
-            time.sleep(RETRY_DELAY_SECS)
+    # Localization overlays. English is required (item names must never be raw
+    # placeholder tokens); Chinese is optional and skipped gracefully if missing.
+    logger.info("Fetching localization overlays...")
+    en = _overlay_map(_fetch_json(f"{JSON_API_BASE}/{GAME_MODE}/items_en", 60, "items_en"))
+    zh = _overlay_map(_fetch_json_optional(f"{JSON_API_BASE}/{GAME_MODE}/items_zh", 60, "items_zh"))
 
-    json_data = response.json()
-
-    if "errors" in json_data:
-        logger.error("GraphQL errors: %s", json_data["errors"])
-        return
-
-    data = json_data["data"]["items"]
-    logger.info("Total items fetched: %d", len(data))
+    # Resolve category id strings to English display names so the weapon-class
+    # matching below keeps working against WEAPON_CLASS_PRIORITY.
+    cat_name_en = {
+        cid: _localize(en, c.get("name"), c.get("normalizedName"))
+        for cid, c in item_categories.items()
+    }
 
     items_to_add = []
 
     # Store preset attachments temporarily
     weapon_presets = {}
 
-    for item in data:
+    for item in items_map.values():
         properties = item.get("properties")
-        
-        categories = item.get("categories") or []
+
+        category_names = [cat_name_en.get(cid) for cid in (item.get("categories") or [])]
         weapon_category = None
 
         # Priority order: more specific classes before broader parents.
@@ -488,8 +348,7 @@ def sync_items(sync_source: str = "scheduled"):
             "Grenade Launcher",  # fallback
         ]
         best_priority = len(WEAPON_CLASS_PRIORITY)
-        for cat in categories:
-            name = cat.get("name")
+        for name in category_names:
             if name in WEAPON_CLASS_PRIORITY:
                 p = WEAPON_CLASS_PRIORITY.index(name)
                 if p < best_priority:
@@ -536,16 +395,25 @@ def sync_items(sync_source: str = "scheduled"):
         heavy_bleed_delta = None
 
         item_weight = item.get("weight") or 0
-        accuracy_modifier = item.get("accuracyModifier")
+        # tarkov.dev GraphQL exposed Item.accuracyModifier as a percentage; the JSON
+        # API only carries the raw fraction under properties, so scale by 100. Ammo and
+        # weapons never carried a top-level accuracy modifier, so they stay null.
+        accuracy_modifier = None
 
         icon_link = item.get("iconLink")
         base_image_link     = item.get("baseImageLink")
         image_512_link      = None
         bare_image_512_link = None
         preset_icon_link    = None
-        
+
         if properties:
-            typename = properties.get("__typename")
+            typename = properties.get("propertiesType")
+
+            if typename not in ("ItemPropertiesAmmo", "ItemPropertiesWeapon"):
+                acc = properties.get("accuracyModifier")
+                if acc is not None:
+                    # round() avoids float noise from the x100 scaling (e.g. 7.0000000001)
+                    accuracy_modifier = round(acc * 100, 4)
 
             # --------------------------
             # Weapon
@@ -562,8 +430,9 @@ def sync_items(sync_source: str = "scheduled"):
                 deviation_curve = properties.get("deviationCurve")
                 deviation_max = properties.get("deviationMax")
                 recoil_angle = properties.get("recoilAngle")
-                camera_recoil = properties.get("cameraRecoil")
-                convergence = properties.get("convergence")
+                # cameraRecoil / convergence are not exposed by the JSON API; they are
+                # left null here and backfilled from SPT game files by
+                # _sync_spt_hidden_stats() below.
                 recoil_dispersion = properties.get("recoilDispersion")
 
                 # Override weapons that tarkov.dev mis-categorizes or where the
@@ -587,27 +456,27 @@ def sync_items(sync_source: str = "scheduled"):
                 # Fallback if no class matched from the categories loop
                 if weapon_category is None:
                     weapon_category = "Primary"
-                    raw_names = [c.get("name") for c in categories]
-                    logger.warning("[UNMATCHED] %s - categories: %s", item['name'], raw_names)
+                    logger.warning("[UNMATCHED] %s - categories: %s",
+                                   _localize(en, item.get("name"), item["id"]), category_names)
 
                 bare_image_512_link = item.get("image512pxLink")
                 image_512_link      = bare_image_512_link
 
-                default_preset = properties.get("defaultPreset")
+                # --------------------------
+                # Default Preset Handling
+                # The JSON API returns defaultPreset as a preset item id; look it up in
+                # the items map for the composed images and the contained attachments.
+                # --------------------------
+                preset_id = properties.get("defaultPreset")
+                default_preset = items_map.get(preset_id) if preset_id else None
                 if default_preset:
                     preset_image = default_preset.get("image512pxLink")
                     if preset_image:
                         image_512_link = preset_image
                     preset_icon_link = default_preset.get("iconLink") or None
-
-                # --------------------------
-                # Default Preset Handling
-                # --------------------------
-                default_preset = properties.get("defaultPreset")
-                if default_preset:
                     for entry in default_preset.get("containsItems", []):
                         if entry.get("item"):
-                            preset_attachment_ids.append(entry["item"]["id"])
+                            preset_attachment_ids.append(entry["item"])
 
                 weapon_presets[item["id"]] = preset_attachment_ids
 
@@ -667,19 +536,20 @@ def sync_items(sync_source: str = "scheduled"):
 
         # --------------------------
         # Conflict Extraction
+        # The JSON API returns conflictingItems as plain id strings.
         # --------------------------
         if item.get("conflictingItems"):
-            conflicting_item_ids = [
-                c["id"] for c in item["conflictingItems"]
-            ]
+            conflicting_item_ids = list(item["conflictingItems"])
 
         if item.get("conflictingSlotIds"):
             conflicting_slot_ids = item["conflictingSlotIds"]
-                
+
         db_item = Item(
             id=item["id"],
-            name=item["name"],
-            short_name=item.get("shortName"),
+            name=_localize(en, item.get("name"), item.get("name")),
+            short_name=_localize(en, item.get("shortName")),
+            name_zh=_localize(zh, item.get("name")),
+            short_name_zh=_localize(zh, item.get("shortName")),
             weight=item_weight,
             ergonomics_modifier=item.get("ergonomicsModifier") or 0,
             recoil_modifier=recoilmodifier,
@@ -744,7 +614,7 @@ def sync_items(sync_source: str = "scheduled"):
     allowed_links_to_add = []
     seen_allowed_pairs = set()
 
-    for item in data:
+    for item in items_map.values():
         properties = item.get("properties")
         if not properties:
             continue
@@ -756,16 +626,17 @@ def sync_items(sync_source: str = "scheduled"):
                 Slot(
                     id=slot_id,
                     parent_item_id=item["id"],
-                    slot_name=slot["name"],
+                    slot_name=_localize(en, slot.get("name"), slot.get("name")),
                     slot_game_name=slot.get("nameId"),
                 )
             )
 
             filters = slot.get("filters") or {}
+            # allowedItems is a list of plain item id strings in the JSON API.
             allowed_items = filters.get("allowedItems") or []
 
             for allowed in allowed_items:
-                pair = (slot_id, allowed["id"])
+                pair = (slot_id, allowed)
 
                 if pair in seen_allowed_pairs:
                     continue
@@ -775,7 +646,7 @@ def sync_items(sync_source: str = "scheduled"):
                 allowed_links_to_add.append(
                     SlotAllowedItem(
                         slot_id=slot_id,
-                        allowed_item_id=allowed["id"],
+                        allowed_item_id=allowed,
                     )
                 )
 
@@ -842,168 +713,79 @@ def sync_items(sync_source: str = "scheduled"):
     db.commit()
 
     # ------------------------------------------
-    # Fetch Chinese (zh) names
+    # Fetch tasks (English + Chinese names) for trader task-unlock resolution.
+    # buyFromTrader.taskUnlock is a plain task id, so we build id -> name maps here.
     # ------------------------------------------
-    logger.info("Fetching Chinese (zh) names...")
-    zh_response = None
-    for attempt in range(MAX_RETRIES):
-        try:
-            zh_response = requests.post(
-                GRAPHQL_URL,
-                json={"query": QUERY_ZH},
-                timeout=60,
-            )
-            zh_response.raise_for_status()
-            break
-        except requests.exceptions.RequestException as e:
-            logger.warning("ZH fetch attempt %d failed: %s", attempt + 1, e)
-            if attempt == MAX_RETRIES - 1:
-                logger.warning("Could not fetch Chinese names - skipping.")
-                zh_response = None
-            else:
-                time.sleep(RETRY_DELAY_SECS)
-
-    if zh_response is not None:
-        zh_json = zh_response.json()
-        if "errors" not in zh_json:
-            zh_items = zh_json["data"]["items"]
-            for zh_item in zh_items:
-                db.query(Item).filter(Item.id == zh_item["id"]).update(
-                    {
-                        "name_zh": zh_item.get("name"),
-                        "short_name_zh": zh_item.get("shortName"),
-                    },
-                    synchronize_session=False,
-                )
-            db.commit()
-            logger.info("Chinese names applied (%d items).", len(zh_items))
-        else:
-            logger.error("GraphQL errors in ZH response - skipping Chinese names.")
+    logger.info("Fetching tasks and localizing task names...")
+    task_name_en = {}
+    task_name_zh = {}
+    tasks_base = _fetch_json_optional(f"{JSON_API_BASE}/{GAME_MODE}/tasks", 60, "tasks")
+    if tasks_base is not None:
+        tasks_data = (tasks_base.get("data") or {}).get("tasks") or {}
+        tasks_en = _overlay_map(_fetch_json_optional(f"{JSON_API_BASE}/{GAME_MODE}/tasks_en", 60, "tasks_en"))
+        tasks_zh = _overlay_map(_fetch_json_optional(f"{JSON_API_BASE}/{GAME_MODE}/tasks_zh", 60, "tasks_zh"))
+        for tid, task in tasks_data.items():
+            token = task.get("name")
+            task_name_en[tid] = _localize(tasks_en, token)
+            task_name_zh[tid] = _localize(tasks_zh, token)
+        logger.info("Task name maps built (%d tasks).", len(task_name_en))
 
     # ------------------------------------------
-    # Fetch Chinese (zh) task names (map built here, applied during price sync)
-    # ------------------------------------------
-    logger.info("Fetching Chinese (zh) task names...")
-    task_zh_map = {}
-    tasks_zh_response = None
-    for attempt in range(MAX_RETRIES):
-        try:
-            tasks_zh_response = requests.post(
-                GRAPHQL_URL,
-                json={"query": QUERY_TASKS_ZH},
-                timeout=60,
-            )
-            tasks_zh_response.raise_for_status()
-            break
-        except requests.exceptions.RequestException as e:
-            logger.warning("ZH tasks fetch attempt %d failed: %s", attempt + 1, e)
-            if attempt == MAX_RETRIES - 1:
-                logger.warning("Could not fetch Chinese task names - skipping.")
-                tasks_zh_response = None
-            else:
-                time.sleep(RETRY_DELAY_SECS)
-
-    if tasks_zh_response is not None:
-        tasks_zh_json = tasks_zh_response.json()
-        if "errors" not in tasks_zh_json:
-            task_zh_map = {task["id"]: task["name"] for task in tasks_zh_json["data"]["tasks"]}
-            logger.info("Chinese task name map built (%d tasks).", len(task_zh_map))
-        else:
-            logger.error("GraphQL errors in ZH tasks response - skipping.")
-
-    # ------------------------------------------
-    # Fetch traders
+    # Fetch traders. The trader id -> normalizedName map is also used to filter
+    # excluded vendors out of the buy-price computation below.
     # ------------------------------------------
     logger.info("Fetching traders...")
-    trader_response = None
-    for attempt in range(MAX_RETRIES):
-        try:
-            trader_response = requests.post(
-                GRAPHQL_URL,
-                json={"query": QUERY_TRADERS},
-                timeout=30,
-            )
-            trader_response.raise_for_status()
-            break
-        except requests.exceptions.RequestException as e:
-            logger.warning("Trader fetch attempt %d failed: %s", attempt + 1, e)
-            if attempt == MAX_RETRIES - 1:
-                logger.warning("Could not fetch traders - skipping.")
-                trader_response = None
-            else:
-                time.sleep(RETRY_DELAY_SECS)
-
-    if trader_response is not None:
-        trader_json = trader_response.json()
-        if "errors" not in trader_json:
-            db.query(Trader).delete()
-            db.commit()
-            traders_data = trader_json["data"]["traders"]
-            db.bulk_save_objects([
+    trader_norm_map = {}
+    traders_payload = _fetch_json_optional(f"{JSON_API_BASE}/{GAME_MODE}/traders", 30, "traders")
+    if traders_payload is not None:
+        traders_data = traders_payload.get("data") or {}
+        traders_en = _overlay_map(_fetch_json_optional(f"{JSON_API_BASE}/{GAME_MODE}/traders_en", 30, "traders_en"))
+        db.query(Trader).delete()
+        db.commit()
+        trader_rows = []
+        for tid, t in traders_data.items():
+            norm = t.get("normalizedName")
+            trader_norm_map[tid] = norm
+            trader_rows.append(
                 Trader(
-                    id=t["id"],
-                    name=t["name"],
-                    normalized_name=t.get("normalizedName"),
+                    id=tid,
+                    name=_localize(traders_en, t.get("name"), norm),
+                    normalized_name=norm,
                     image_link=t.get("imageLink"),
-                    image_4x_link=t.get("image4xLink"),
+                    image_4x_link=None,  # not provided by the JSON API
                 )
-                for t in traders_data
-            ])
-            db.commit()
-            logger.info("Traders inserted (%d).", len(traders_data))
-        else:
-            logger.error("GraphQL errors in traders response - skipping.")
-
-    # ------------------------------------------
-    # Fetch trader prices
-    # ------------------------------------------
-    logger.info("Fetching trader prices...")
-    price_response = None
-    for attempt in range(MAX_RETRIES):
-        try:
-            price_response = requests.post(
-                GRAPHQL_URL,
-                json={"query": QUERY_PRICES},
-                timeout=60,
             )
-            price_response.raise_for_status()
-            break
-        except requests.exceptions.RequestException as e:
-            logger.warning("Price fetch attempt %d failed: %s", attempt + 1, e)
-            if attempt == MAX_RETRIES - 1:
-                logger.warning("Could not fetch trader prices - skipping.")
-                price_response = None
-            else:
-                time.sleep(RETRY_DELAY_SECS)
+        db.bulk_save_objects(trader_rows)
+        db.commit()
+        logger.info("Traders inserted (%d).", len(trader_rows))
 
-    if price_response is not None:
-        price_json = price_response.json()
-        if "errors" not in price_json:
-            updates = []
-            for item in price_json["data"]["items"]:
-                buy_for = item.get("buyFor") or []
-                allowed = [
-                    b for b in buy_for
-                    if (b.get("vendor") or {}).get("normalizedName") not in EXCLUDED_VENDOR_NAMES
-                ]
-                cheapest = min(allowed, key=lambda b: b.get("priceRUB") or float("inf")) if allowed else None
-                task_unlock = cheapest["vendor"].get("taskUnlock") if cheapest else None
-                updates.append({
-                    "id":               item["id"],
-                    "trader_price":     cheapest["price"]    if cheapest else None,
-                    "trader_price_rub": cheapest["priceRUB"] if cheapest else None,
-                    "trader_currency":  cheapest["currency"] if cheapest else None,
-                    "trader_vendor":    cheapest["vendor"]["normalizedName"] if cheapest else None,
-                    "trader_min_level": cheapest["vendor"].get("minTraderLevel") if cheapest else None,
-                    "task_unlock_id":      task_unlock["id"]   if task_unlock else None,
-                    "task_unlock_name":    task_unlock["name"] if task_unlock else None,
-                    "task_unlock_name_zh": task_zh_map.get(task_unlock["id"]) if task_unlock else None,
-                })
-            db.bulk_update_mappings(Item, updates)
-            db.commit()
-            logger.info("Trader prices synced (%d items).", len(updates))
-        else:
-            logger.error("GraphQL errors in prices response - skipping.")
+    # ------------------------------------------
+    # Compute cheapest trader buy price per item from the already-fetched items.
+    # ------------------------------------------
+    logger.info("Computing trader prices from item buy offers...")
+    updates = []
+    for item in items_map.values():
+        buy_for = item.get("buyFromTrader") or []
+        allowed = [
+            b for b in buy_for
+            if trader_norm_map.get(b.get("trader")) not in EXCLUDED_VENDOR_NAMES
+        ]
+        cheapest = min(allowed, key=lambda b: b.get("priceRUB") or float("inf")) if allowed else None
+        task_unlock_id = cheapest.get("taskUnlock") if cheapest else None
+        updates.append({
+            "id":               item["id"],
+            "trader_price":     cheapest["price"]    if cheapest else None,
+            "trader_price_rub": cheapest["priceRUB"] if cheapest else None,
+            "trader_currency":  cheapest["currency"] if cheapest else None,
+            "trader_vendor":    trader_norm_map.get(cheapest["trader"]) if cheapest else None,
+            "trader_min_level": cheapest.get("minTraderLevel") if cheapest else None,
+            "task_unlock_id":      task_unlock_id,
+            "task_unlock_name":    task_name_en.get(task_unlock_id) if task_unlock_id else None,
+            "task_unlock_name_zh": task_name_zh.get(task_unlock_id) if task_unlock_id else None,
+        })
+    db.bulk_update_mappings(Item, updates)
+    db.commit()
+    logger.info("Trader prices synced (%d items).", len(updates))
 
     # Diff new stats against the pre-sync snapshot and persist any changes
     change_logs = _build_change_logs(db, pre_sync_snapshot, sync_source, sync_time)

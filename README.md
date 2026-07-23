@@ -18,7 +18,7 @@
 
 ## Overview
 
-EFTForge is a full-stack Escape from Tarkov weapon build simulator and community platform. It provides a dual-view visual workbench, real-time stat calculations, live composite build preview images, flea/trader price fetching, a combo calculator, attachment graphing, user profiles, build comments, and a community build publishing system with leaderboards. All item data is sourced from the [tarkov.dev](https://tarkov.dev) GraphQL API.
+EFTForge is a full-stack Escape from Tarkov weapon build simulator and community platform. It provides a dual-view visual workbench, real-time stat calculations, live composite build preview images, flea/trader price fetching, a combo calculator, attachment graphing, user profiles, build comments, and a community build publishing system with leaderboards. All item data is sourced from the [tarkov.dev](https://tarkov.dev) JSON API.
 
 ---
 
@@ -100,7 +100,7 @@ EFTForge is a full-stack Escape from Tarkov weapon build simulator and community
 | Frontend | Vanilla JavaScript (ES2022), modular architecture |
 | Image Generation | Playwright / Patchright (headless browser proxy) |
 | Asset Hosting | Gitee (community build card images, profile avatars) |
-| Data Source | tarkov.dev GraphQL API |
+| Data Source | tarkov.dev JSON API |
 | Compression | LZ-String |
 | Markdown | marked.js |
 

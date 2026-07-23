@@ -83,6 +83,8 @@ async function refetchFleaPrices() {
     EFTForge.state.fleaCachePvp  = {};
     EFTForge.state.fleaCachePve  = {};
     EFTForge.state.fleaLastFetched = null;
+    // Drop the memoized JSON-API price maps so this refetch pulls fresh data.
+    EFTForge.api.clearFleaPriceCache();
     sessionStorage.removeItem("eftforge_flea_pvp");
     sessionStorage.removeItem("eftforge_flea_pve");
     sessionStorage.removeItem("eftforge_flea_ts");
