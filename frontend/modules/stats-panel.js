@@ -44,7 +44,6 @@ function _saveTraderLevels() {
 }
 
 let _fleaFetching = false;
-let _armStamFlashDone = false;
 let _fleaDotsInterval = null;
 let _traderLevelsOpen = false;
 
@@ -834,7 +833,6 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
       <div class="stat-row" id="arm-stam-row">
         <span class="stat-label">${t("stats.armStamina")}<span class="stamina-info-btn" id="stamina-info-btn" data-tooltip="${t("stats.configStrengthTooltip")}">i</span>:</span>
         <span>${armStamina.toFixed(1)}s</span>
-        ${!localStorage.getItem("eftforge_armstam_v3_seen") ? `<span class="stam-updated-badge" id="stam-updated-badge">${t("stats.updatedBadge")}</span>` : ""}
       </div>
       ${sightingRange !== null ? `<div class="stat-row"><span class="stat-label">${t("stats.sightingRange")}</span><span>${sightingRange} m</span></div>` : ""}
       </div>
@@ -882,25 +880,8 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
     });
   }));
 
-  // First-time arm stamina formula update flash
-  if (!localStorage.getItem("eftforge_armstam_v3_seen") && !_armStamFlashDone) {
-    _armStamFlashDone = true;
-    const row = document.getElementById("arm-stam-row");
-    if (row) {
-      row.classList.add("stat-row-gold-flash");
-      row.addEventListener("animationend", () => row.classList.remove("stat-row-gold-flash"), { once: true });
-    }
-  }
-
   // Toggle panel on i button click
   document.getElementById("stamina-info-btn").addEventListener("click", () => {
-      const badge = document.getElementById("stam-updated-badge");
-      if (badge) {
-        badge.classList.add("fade-out");
-        setTimeout(() => badge.remove(), 300);
-        localStorage.setItem("eftforge_armstam_v3_seen", "1");
-      }
-
       const existing = document.getElementById("stamina-panel");
       if (existing) {
           existing.style.height = existing.scrollHeight + "px";

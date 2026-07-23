@@ -256,6 +256,7 @@ function _createModalOverlay(id, title, opts = {}) {
         titleExtra  = "",
         tabs        = null,
         onTabSwitch = null,
+        closeOnBackdrop = true,
     } = opts;
 
     const overlay = document.createElement("div");
@@ -295,9 +296,11 @@ function _createModalOverlay(id, title, opts = {}) {
 
     document.body.appendChild(overlay);
     document.getElementById(closeId).addEventListener("click", () => overlay.remove());
-    let _mdOnBackdrop = false;
-    overlay.addEventListener("mousedown", e => { _mdOnBackdrop = e.target === overlay; });
-    overlay.addEventListener("click", (e) => { if (e.target === overlay && _mdOnBackdrop) overlay.remove(); });
+    if (closeOnBackdrop) {
+        let _mdOnBackdrop = false;
+        overlay.addEventListener("mousedown", e => { _mdOnBackdrop = e.target === overlay; });
+        overlay.addEventListener("click", (e) => { if (e.target === overlay && _mdOnBackdrop) overlay.remove(); });
+    }
 
     if (tabs && tabs.length > 0) {
         overlay.querySelectorAll(".modal-tab").forEach(btn => {

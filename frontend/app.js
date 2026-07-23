@@ -41,6 +41,7 @@ mobileWarning();
 initTarkovClock();
 initHeaderExpand();
 initBpGlobalStatus();
+showMigrationNotice();
 
 async function init() {
   const loadingOverlay = startPanelLoading(document.querySelector(".left-panel"));
@@ -444,6 +445,53 @@ function startSyncStatusPolling() {
     if (_syncStatusInterval !== null) return;
     _checkSyncStatus();
     _syncStatusInterval = setInterval(_checkSyncStatus, 15000);
+}
+
+/* ===========================
+   FIRST-VISIT MIGRATION NOTICE
+=========================== */
+
+// One-time modal shown on a visitor's first ever load, warning that the data
+// source moved to the JSON API. Permanently dismissed once shown.
+function showMigrationNotice() {
+    const SEEN_KEY = "eftforge_migration_notice_seen";
+    if (localStorage.getItem(SEEN_KEY)) return;
+
+    const { t } = EFTForge.lang;
+
+    const overlay = _createModalOverlay("migration-notice-modal", t("migrate.title"), { maxWidth: "440px", closeOnBackdrop: false });
+    if (!overlay) return;
+
+    // Set the flag as soon as it is shown so it never surfaces again, no matter
+    // how the visitor closes it (X, backdrop, ESC, or the dismiss button).
+    localStorage.setItem(SEEN_KEY, "1");
+
+    // Warning-type toast triangle, enlarged and tinted red.
+    const warnTriangle =
+        '<svg width="76" height="76" viewBox="0 0 20 20" fill="none" style="color:#e74c3c;">' +
+        '<path d="M10 2L18 17H2L10 2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' +
+        '<line x1="10" y1="7.5" x2="10" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
+        '<circle cx="10" cy="14.5" r="1.2" fill="currentColor"/></svg>';
+
+    // Inline the two links straight into the report sentence.
+    const link = (href, label) =>
+        '<a href="' + href + '" target="_blank" rel="noopener noreferrer" style="color:#aad4f5;">' + label + '</a>';
+    const reportHtml = t("migrate.report")
+        .replace("{github}", link("https://github.com/SouthHorizons76/EFTForge/issues/new", t("migrate.github")))
+        .replace("{bilibili}", link("https://space.bilibili.com/650421245", t("migrate.bilibili")));
+
+    const body = document.getElementById("migration-notice-modal-body");
+    body.innerHTML =
+        '<div style="display:flex;justify-content:center;padding:4px 0 2px;">' + warnTriangle + '</div>' +
+        '<div style="font-size:15px;font-weight:700;color:#eee;text-align:center;">' + t("migrate.heading") + '</div>' +
+        '<div style="font-size:13px;color:#bbb;line-height:1.55;text-align:center;">' + t("migrate.body") + '</div>' +
+        '<div style="font-size:13px;color:#bbb;line-height:1.55;text-align:center;">' + reportHtml + '</div>';
+
+    const dismissBtn = document.createElement("button");
+    dismissBtn.className = "modal-btn primary full-width";
+    dismissBtn.textContent = t("migrate.dismiss");
+    dismissBtn.addEventListener("click", () => overlay.remove());
+    body.appendChild(dismissBtn);
 }
 
 /* ===========================

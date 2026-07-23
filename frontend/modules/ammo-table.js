@@ -77,12 +77,6 @@ window.EFTForge.ammoTable = (function () {
         var backdrop = document.getElementById('ammo-backdrop');
         if (!overlay) return;
 
-        if (!localStorage.getItem('eftforge_ammo_seen')) {
-            localStorage.setItem('eftforge_ammo_seen', '1');
-            var btn = document.getElementById('ammo-btn');
-            if (btn) btn.dataset.badge = '';
-        }
-
         overlay.classList.add('visible');
         if (backdrop) backdrop.classList.add('visible');
         document.getElementById('main-container')?.setAttribute('inert', '');
@@ -101,20 +95,10 @@ window.EFTForge.ammoTable = (function () {
     }
 
     function onLangChange() {
-        _updateAmmoBtn();
         var overlay = document.getElementById('ammo-overlay');
         if (!overlay || !overlay.classList.contains('visible')) return;
         _updateStaticText();
         _loadData();
-    }
-
-    function _updateAmmoBtn() {
-        var btn = document.getElementById('ammo-btn');
-        if (!btn) return;
-        var t = window.EFTForge && EFTForge.lang && EFTForge.lang.t;
-        if (!localStorage.getItem('eftforge_ammo_seen') && t) {
-            btn.dataset.badge = t('ui.newBadge');
-        }
     }
 
     function init() {
@@ -123,8 +107,6 @@ window.EFTForge.ammoTable = (function () {
 
         var backdrop = document.getElementById('ammo-backdrop');
         if (backdrop) backdrop.addEventListener('click', hidePanel);
-
-        _updateAmmoBtn();
 
         var searchEl = document.getElementById('ammo-search');
         if (searchEl) {
