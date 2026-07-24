@@ -46,6 +46,7 @@ window.EFTForge.tracker = (function () {
 
         _updateTitle();
         _updateControlLabels();
+        _updateLastSynced();
         _loadData();
     }
 
@@ -62,6 +63,7 @@ window.EFTForge.tracker = (function () {
         if (!overlay || !overlay.classList.contains('visible')) return;
         _updateTitle();
         _updateControlLabels();
+        _updateLastSynced();
         if (_cache) _renderEntries(_filter7d(_cache));
     }
 
@@ -108,6 +110,21 @@ window.EFTForge.tracker = (function () {
             console.error('[tracker] Load error:', err);
             _showError();
         }
+    }
+
+    async function _updateLastSynced() {
+        var el = document.getElementById('tracker-last-synced');
+        if (!el) return;
+        try {
+            var status = await EFTForge.api.fetchSyncStatus();
+            if (status && status.last_synced_at) {
+                el.textContent = EFTForge.lang.tFmt('tracker.lastSynced', { date: _formatSyncTime(status.last_synced_at) });
+                return;
+            }
+        } catch (_) {
+            // fail silently - not critical info
+        }
+        el.textContent = '';
     }
 
     async function _prefetch() {
@@ -433,6 +450,18 @@ window.EFTForge.tracker = (function () {
             });
         } catch (_) {
             return dateStr;
+        }
+    }
+
+    function _formatSyncTime(isoStr) {
+        try {
+            var d      = new Date(isoStr);
+            var locale = EFTForge.state.lang === 'zh' ? 'zh-CN' : 'en-US';
+            return d.toLocaleString(locale, {
+                year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+            });
+        } catch (_) {
+            return isoStr;
         }
     }
 

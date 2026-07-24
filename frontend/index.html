@@ -5938,6 +5938,12 @@ button.build-tag-chip.active {
   transition: color 0.15s;
 }
 .tracker-close-btn:hover { color: #eee; }
+.tracker-last-synced {
+  font-size: 11px;
+  color: #666;
+  white-space: nowrap;
+  user-select: none;
+}
 
 .tracker-controls {
   flex-shrink: 0;
@@ -7224,6 +7230,7 @@ var _hmt = _hmt || [];
 <div id="tracker-overlay">
   <div class="tracker-header">
     <span class="tracker-header-title" id="tracker-header-title">STAT TRACKER</span>
+    <span class="tracker-last-synced" id="tracker-last-synced"></span>
     <button class="tracker-close-btn" onclick="EFTForge.tracker.hidePanel()">&#x2715;</button>
   </div>
   <div class="tracker-controls">

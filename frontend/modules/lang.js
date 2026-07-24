@@ -431,6 +431,8 @@ const _TRANSLATIONS = {
         "toast.updateAvailableTitle": "Update Available",
         "toast.updateAvailableMsg":   "A newer version of EFTForge has been deployed.",
         "toast.updateNow":            "Update Now",
+        "toast.devDataUpdatedTitle":  "New Data Synced",
+        "toast.devDataUpdatedMsg":    "The background sync found new tarkov.dev data. Refresh to load it.",
         // Conflict reason prefixes
         "conflict.incompatibleWith":  "Is incompatible with: ",
         "conflict.slot":              "Conflicts with slot: ",
@@ -589,6 +591,7 @@ const _TRANSLATIONS = {
         // Stat tracker
         "btn.tracker":                  "Tracker",
         "tracker.title":                "STAT TRACKER",
+        "tracker.lastSynced":           "Data synced {date}",
         "tracker.loading":              "Loading...",
         "tracker.loadError":            "Could not load tracker data.",
         "tracker.empty":                "Heyo! No stat change has been detected in the last 7 days, but if any hidden changes were detected, we will show what changed in here!",
@@ -1123,6 +1126,8 @@ const _TRANSLATIONS = {
         "toast.mobileWarningMsg":     "本站针对桌面端优化。如需最佳体验，请使用电脑访问。",
         "toast.updateAvailableTitle": "有可用更新",
         "toast.updateAvailableMsg":   "EFTForge 已发布新版本。",
+        "toast.devDataUpdatedTitle":  "数据已同步",
+        "toast.devDataUpdatedMsg":    "后台同步发现了新的 tarkov.dev 数据，请刷新以加载。",
         "toast.updateNow":            "立即更新",
         // Conflict reason prefixes
         "conflict.incompatibleWith":  "与以下配件冲突：",   
@@ -1299,6 +1304,7 @@ const _TRANSLATIONS = {
         // Stat tracker
         "btn.tracker":                  "数据变动",
         "tracker.title":                "数据变动追踪",
+        "tracker.lastSynced":           "数据同步于 {date}",
         "tracker.loading":              "加载中...",
         "tracker.loadError":            "无法加载追踪数据。",
         "tracker.empty":                "过去7天暂无数据变动记录，如果网站检测到某枪械/配件属性被暗改，会把改动展示在这里哦！",

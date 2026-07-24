@@ -331,6 +331,12 @@ async function fetchStatChangelog() {
     return res.json();
 }
 
+async function fetchSyncStatus() {
+    const res = await fetch(`${_base()}/sync-status`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    return res.json();
+}
+
 async function fetchBuildComments(buildId) {
     const res = await fetch(`${_base()}/builds/${encodeURIComponent(buildId)}/comments`, {
         headers: { "X-Client-ID": _getClientId() },
@@ -451,4 +457,4 @@ async function fetchMyBuilds() {
     return res.json();
 }
 
-EFTForge.api = { fetchTraders, fetchGuns, fetchGunInit, fetchAmmo, fetchItemSlots, fetchSlotAllowedItems, fetchSlotAllowedItemsBatch, fetchItemSlotsBatch, calculateBuild, validateBuild, batchProcessCandidates, comboBatchProcess, comboFull, fetchFleaPrices, clearFleaPriceCache, fetchBulkRatings, postVote, deleteVote, fetchBulkBuildRatings, postBuildVote, deleteBuildVote, publishBuild, fetchPublicBuilds, fetchMyBuilds, recordBuildLoad, unlistBuild, fetchBanStatus, fetchNotifications, fetchAnnouncements, fetchStaticAnnouncements, fetchLeaderboardBuilds, fetchLeaderboardAttachments, fetchStatChangelog, fetchBuildComments, postBuildComment, deleteOwnComment, adminDeleteComment, uploadAvatar, updateUserProfile, transferPreview, transferAccount };
+EFTForge.api = { fetchTraders, fetchGuns, fetchGunInit, fetchAmmo, fetchItemSlots, fetchSlotAllowedItems, fetchSlotAllowedItemsBatch, fetchItemSlotsBatch, calculateBuild, validateBuild, batchProcessCandidates, comboBatchProcess, comboFull, fetchFleaPrices, clearFleaPriceCache, fetchBulkRatings, postVote, deleteVote, fetchBulkBuildRatings, postBuildVote, deleteBuildVote, publishBuild, fetchPublicBuilds, fetchMyBuilds, recordBuildLoad, unlistBuild, fetchBanStatus, fetchNotifications, fetchAnnouncements, fetchStaticAnnouncements, fetchLeaderboardBuilds, fetchLeaderboardAttachments, fetchStatChangelog, fetchSyncStatus, fetchBuildComments, postBuildComment, deleteOwnComment, adminDeleteComment, uploadAvatar, updateUserProfile, transferPreview, transferAccount };

@@ -594,11 +594,40 @@ def health_check(request: Request, db: Session = Depends(get_db)):
     return {"status": "ok", "started": SERVER_START_TIME}
 
 
+_LAST_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "last_sync.json")
+
+
 @app.get("/sync-status")
 def get_sync_status():
-    """Public endpoint - lets clients show a notice when a background sync is in progress."""
+    """Public endpoint - lets clients show a notice when a background sync is in progress,
+    and when the tarkov.dev data was last successfully synced (cron, hyperactive mode,
+    or a local dev background sync all write last_sync.json via sync_tarkov_dev.py)."""
     running = _sync_running or os.path.exists(_SYNC_IN_PROGRESS_FILE)
-    return {"sync_running": running}
+    last_synced_at = None
+    if os.path.exists(_LAST_SYNC_FILE):
+        try:
+            with open(_LAST_SYNC_FILE, "r", encoding="utf-8") as f:
+                last_synced_at = json.load(f).get("last_synced_at")
+        except (OSError, ValueError):
+            pass
+    return {"sync_running": running, "last_synced_at": last_synced_at}
+
+
+_DEV_SYNC_NOTICE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dev_sync_notice.json")
+
+
+@app.get("/dev/sync-notice")
+def get_dev_sync_notice():
+    """Local-dev only: reset.py's background sync writes this file when it finds
+    new data. Only reset.py's non-prod branch ever creates it, so in production
+    this file never exists and the endpoint is a permanent no-op."""
+    if not os.path.exists(_DEV_SYNC_NOTICE_FILE):
+        return {"changed": False}
+    try:
+        os.remove(_DEV_SYNC_NOTICE_FILE)
+    except OSError:
+        pass
+    return {"changed": True}
 
 
 # ---------------------------------------------------

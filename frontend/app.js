@@ -1,8 +1,9 @@
 
 // Guard variables - declared at top to avoid TDZ errors from hoisted function calls below.
-let _syncNoticeInterval = null;
-let _syncStatusInterval = null;
-let _syncStatusToast    = null;
+let _syncNoticeInterval     = null;
+let _syncStatusInterval     = null;
+let _syncStatusToast        = null;
+let _devSyncNoticeInterval  = null;
 let _clockInterval      = null;
 let _langSwitching      = false;
 let _headerLastScroll   = 0;
@@ -217,6 +218,7 @@ async function init() {
 
     scheduleSyncNotice();
     startSyncStatusPolling();
+    startDevSyncNoticePolling();
 
     initPanelResizer();
 }
@@ -445,6 +447,42 @@ function startSyncStatusPolling() {
     if (_syncStatusInterval !== null) return;
     _checkSyncStatus();
     _syncStatusInterval = setInterval(_checkSyncStatus, 15000);
+}
+
+/* ===========================
+   DEV-ONLY BACKGROUND SYNC NOTICE
+   reset.py starts the dev server instantly against the existing local DB and
+   resyncs in the background; this polls for its "data actually changed" flag.
+   Never runs outside localhost, so production is unaffected.
+=========================== */
+
+async function _checkDevSyncNotice() {
+    if (!EFTForge.config.IS_LOCAL_DEV) return;
+    try {
+        const res = await fetch(`${EFTForge.config.API_BASE}/dev/sync-notice`, { cache: "no-store" });
+        if (!res.ok) return;
+        const { changed } = await res.json();
+        if (!changed) return;
+
+        const { t } = EFTForge.lang;
+        showToast(
+            t("toast.devDataUpdatedTitle"),
+            t("toast.devDataUpdatedMsg"),
+            0,
+            "#4caf50",
+            [{ label: t("toast.updateNow"), onClick: () => window.location.reload() }],
+            false
+        );
+    } catch {
+        // ignore - dev-only convenience check
+    }
+}
+
+function startDevSyncNoticePolling() {
+    if (!EFTForge.config.IS_LOCAL_DEV) return;
+    if (_devSyncNoticeInterval !== null) return;
+    _checkDevSyncNotice();
+    _devSyncNoticeInterval = setInterval(_checkDevSyncNotice, 10000);
 }
 
 /* ===========================

@@ -24,6 +24,10 @@ RETRY_DELAY_SECS = 2
 # Written at the end of every sync; read at the start of the next one.
 SNAPSHOT_FILE = "stat_snapshot.json"
 
+# Records when a sync last completed, regardless of trigger (cron, hyperactive
+# mode, or a dev background sync) - read by GET /sync-status for display.
+LAST_SYNC_FILE = "last_sync.json"
+
 # Stats tracked per category. Changes to these fields are logged on every sync.
 _WEAPON_STATS = [
     "recoil_vertical",
@@ -136,6 +140,15 @@ def _save_snapshot_to_file(db) -> None:
         logger.info("Snapshot saved (%d items).", len(snapshot))
     except Exception as e:
         logger.warning("Could not write snapshot file: %s", e)
+
+
+def _save_last_sync_time(sync_time: datetime) -> None:
+    """Record when this sync completed, so the frontend can show data freshness."""
+    try:
+        with open(LAST_SYNC_FILE, "w", encoding="utf-8") as f:
+            json.dump({"last_synced_at": sync_time.isoformat()}, f)
+    except Exception as e:
+        logger.warning("Could not write last-sync file: %s", e)
 
 
 # -----------------------------------------------------------------------------
@@ -803,6 +816,7 @@ def sync_items(sync_source: str = "scheduled"):
 
     # Write fresh snapshot to disk for the next sync to diff against
     _save_snapshot_to_file(db)
+    _save_last_sync_time(sync_time)
 
     db.close()
     changelog_db.close()
