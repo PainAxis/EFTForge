@@ -444,7 +444,11 @@ function _insertHiddenStatsPanel() {
   if (!gun) return;
   const fmt = (v, decimals = 2, spt = false) => v != null ? parseFloat(v).toFixed(decimals) : (spt ? "?" : "-");
   const fmtInt = (v) => v != null ? v : "-";
+  const fmtFactor = (v) => v != null ? "×" + parseFloat(v).toFixed(2) : "-";
   const rows = [
+    [t("hidden.heatFactor"),    fmtFactor(EFTForge.state.lastHeatFactor),                                        t("hidden.tip.heatFactor")],
+    [t("hidden.coolingFactor"), fmtFactor(EFTForge.state.lastCoolingFactor),                                     t("hidden.tip.coolingFactor")],
+    [t("hidden.durabilityBurn"), fmtFactor(EFTForge.state.lastDurabilityBurnFactor),                             t("hidden.tip.durabilityBurn")],
     [t("hidden.aimSens"),       fmt(gun.aim_sensitivity, 2, true),                                                t("hidden.tip.aimSens")],
     [t("hidden.camAngleStep"),  fmt(gun.cam_angle_step, 2, true),                                                 t("hidden.tip.camAngleStep")],
     [t("hidden.camSnap"),       fmt(gun.camera_snap, 1),                                                          t("hidden.tip.camSnap")],
@@ -747,6 +751,9 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
   EFTForge.state.lastEED = parseFloat(data.evo_ergo_delta ?? 0);
   EFTForge.state.lastOverswing  = data.overswing ?? false;
   EFTForge.state.lastArmStamina = parseFloat(data.arm_stamina ?? 0);
+  EFTForge.state.lastHeatFactor           = data.heat_factor ?? null;
+  EFTForge.state.lastCoolingFactor        = data.cooling_factor ?? null;
+  EFTForge.state.lastDurabilityBurnFactor = data.durability_burn_factor ?? null;
 
   const eedClass = eed >= 0 ? "positive" : "negative";
   const overswingClass = data.overswing ? "negative" : "positive";

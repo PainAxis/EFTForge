@@ -40,6 +40,9 @@ window.EFTForge.state = {
     lastOverswing:  false,
     lastArmStamina: 0,
     lastBaseWeight:           0,
+    lastHeatFactor:           null,
+    lastCoolingFactor:        null,
+    lastDurabilityBurnFactor: null,
     currentEquipErgoModifier: 0,
 
     // Attachment table

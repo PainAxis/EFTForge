@@ -407,6 +407,9 @@ async function openSlotSelector(parentNode, slot) {
                     <th id="th-balance" onclick="changeSort('balance')" data-tooltip="${escapeHtml(t('th.balanceTooltip'))}">
                         ${t("th.balance")} <span class="sort-indicator"></span>
                     </th>
+                    <th id="th-heat" onclick="changeSort('heat')">
+                        ${t("th.heatCoolBurn")} <span class="sort-indicator"></span>
+                    </th>
                 </tr>
             </thead>
 
@@ -683,6 +686,10 @@ function applyAttachmentSort() {
             }
             break;
 
+        case "heat":
+            primary = (a.item.heat_factor ?? 1) - (b.item.heat_factor ?? 1);
+            break;
+
         default:
             primary = 0;
     }
@@ -719,6 +726,9 @@ function _updateColumnVisibility(items) {
     const hasErgo    = items.some(e => e.item.ergonomics_modifier != null && e.item.ergonomics_modifier !== 0);
     const hasEvo     = hasErgo && items.some(e => Math.abs(e.contribution) > 0.05);
     const hasPrice   = items.some(e => _getPriceRub(e.item) !== null);
+    const hasHeat    = items.some(e =>
+        e.item.heat_factor != null || e.item.cooling_factor != null || e.item.durability_burn_factor != null
+    );
 
     table.classList.toggle("hide-col-weight", !hasWeight);
     table.classList.toggle("hide-col-recoil", !hasRecoil);
@@ -726,6 +736,7 @@ function _updateColumnVisibility(items) {
     table.classList.toggle("hide-col-ergo",   !hasErgo);
     table.classList.toggle("hide-col-evo",    !hasEvo);
     table.classList.toggle("hide-col-price",  !hasPrice);
+    table.classList.toggle("hide-col-heat",   !hasHeat);
     // Combo-only columns - always hidden in list mode
     table.classList.add("hide-col-rub-recoil", "hide-col-balance");
 }
@@ -767,7 +778,7 @@ function updateSortIndicators() {
       ? EFTForge.state.comboSort
       : EFTForge.state.attachmentSort;
 
-  const headers = ["name", "weight", "recoil", "ergo", "acc", "evo", "rub-recoil", "price", "balance"];
+  const headers = ["name", "weight", "recoil", "ergo", "acc", "evo", "rub-recoil", "price", "balance", "heat"];
   headers.forEach(key => {
     const th = document.getElementById(`th-${key}`);
     if (!th) return;
@@ -870,6 +881,23 @@ function _animateDeltaBarOut(deltaEl) {
     if (deltaEl._showRaf != null) { cancelAnimationFrame(deltaEl._showRaf); deltaEl._showRaf = null; }
     deltaEl.style.transform = "scaleX(0)";
     deltaEl.style.opacity = "0";
+}
+
+function _hcbSegmentHtml(value, positiveIsGood) {
+    if (value == null) return `<span>-</span>`;
+    const pct = (value - 1) * 100;
+    if (Math.abs(pct) < 0.05) return `<span>0%</span>`;
+    const isGood = positiveIsGood ? pct > 0 : pct < 0;
+    const cls = isGood ? "positive" : "negative";
+    return `<span class="${cls}">${pct > 0 ? "+" : ""}${pct.toFixed(1)}%</span>`;
+}
+
+function _heatCoolBurnCellHtml(item) {
+    const h = item.heat_factor, c = item.cooling_factor, b = item.durability_burn_factor;
+    if (h == null && c == null && b == null) return `<td class="hcb-cell">-</td>`;
+    // Order matches the header: Heat / Cooling / Burn. Heat and Burn are bad when higher; Cooling is good when higher.
+    const html = `${_hcbSegmentHtml(h, false)}/${_hcbSegmentHtml(c, true)}/${_hcbSegmentHtml(b, false)}`;
+    return `<td class="hcb-cell">${html}</td>`;
 }
 
 function renderAttachmentRows(items) {
@@ -988,6 +1016,8 @@ function renderAttachmentRows(items) {
           })()}</td>
           <td class="${(ghostStats ? ghostStats.ergo : bl.ergoModifier) >= 0 ? "ergo-positive" : "ergo-negative"}">${(ghostStats ? ghostStats.ergo : bl.ergoModifier) >= 0 ? "+" : ""}${formatStat(ghostStats ? ghostStats.ergo : bl.ergoModifier)}</td>
           <td class="${(ghostStats ? ghostStats.contrib : bl.contribution) >= 0 ? "evo-positive" : "evo-negative"}">${(ghostStats ? ghostStats.contrib : bl.contribution) >= 0 ? "+" : ""}${(ghostStats ? ghostStats.contrib : bl.contribution).toFixed(1)}</td>
+          <td class="col-combo-only"></td>
+          ${_heatCoolBurnCellHtml(blItem)}
       `;
 
       ghostRow.addEventListener("mouseenter", () => {
@@ -1157,6 +1187,8 @@ function renderAttachmentRows(items) {
         ${accCell}
         ${ergoCell}
         ${evoCell}
+        <td class="col-combo-only"></td>
+        ${_heatCoolBurnCellHtml(item)}
     `;
 
     row.addEventListener("mouseenter", () => {
@@ -2001,6 +2033,8 @@ function _updateComboColumnVisibility(items) {
     table.classList.toggle("hide-col-price",       !hasPrice);
     table.classList.toggle("hide-col-rub-recoil",  !(hasRecoil && hasPrice));
     table.classList.toggle("hide-col-balance",     !(hasRecoil && hasErgo));
+    // Heat/cooling/durability-burn are per-item stats with no combo aggregation - always hidden here
+    table.classList.add("hide-col-heat");
 }
 
 function _isComboInstalled(entry) {

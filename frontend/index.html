@@ -1097,20 +1097,20 @@ header:not(.header-expanded) .header-nav-btn-icon {
 
 .attachment-table th,
 .attachment-table td {
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .attachment-table th {
   text-align: left;
   color: #aaa;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 12.5px;
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
   position: sticky;
   top: -40px;
-  padding-top: 30px;
+  padding-top: 29px;
   background: transparent;
   transition: background 0.25s ease, backdrop-filter 0.25s ease;
   z-index: 2;
@@ -1126,7 +1126,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .attachment-table td {
   border-bottom: 1px solid #1f1f1f;
   vertical-align: middle;
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
 /* Name column stretches to fill remaining space */
@@ -1161,8 +1161,15 @@ header:not(.header-expanded) .header-nav-btn-icon {
   font-family: "Bender", Arial, sans-serif;
 }
 
+/* Heat/Cool/Burn is a compact combined column - normal weight, same size as the other stat columns */
+.attachment-table .hcb-cell {
+  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: -0.2px;
+}
+
 /* Auto-hide empty columns */
-/* Column order: 1=name 2=price 3=₽/recoil 4=weight 5=recoil 6=acc 7=ergo 8=evo 9=R+E */
+/* Column order: 1=name 2=price 3=₽/recoil 4=weight 5=recoil 6=acc 7=ergo 8=evo 9=R+E 10=heat/cool/burn */
 .attachment-table.hide-col-price th:nth-child(2),
 .attachment-table.hide-col-price td:nth-child(2) { display: none; }
 .attachment-table.hide-col-rub-recoil th:nth-child(3),
@@ -1179,6 +1186,8 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .attachment-table.hide-col-evo td:nth-child(8) { display: none; }
 .attachment-table.hide-col-balance th:nth-child(9),
 .attachment-table.hide-col-balance td:nth-child(9) { display: none; }
+.attachment-table.hide-col-heat th:nth-child(10),
+.attachment-table.hide-col-heat td:nth-child(10) { display: none; }
 
 /* Balance controls: slider shown when R+E sort is active */
 .balance-controls {
@@ -1237,7 +1246,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .attachment-name-wrapper {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .attachment-name-text {
@@ -1248,8 +1257,8 @@ header:not(.header-expanded) .header-nav-btn-icon {
 }
 
 .attachment-icon {
-  width: 48px;
-  height: 48px;
+  width: 42px;
+  height: 42px;
   object-fit: contain;
   flex-shrink: 0;
   display: block;
@@ -1257,19 +1266,19 @@ header:not(.header-expanded) .header-nav-btn-icon {
 
 .attachment-icon-wrapper {
     position: relative;
-    width: 48px;
-    height: 48px;
+    width: 42px;
+    height: 42px;
     flex-shrink: 0;
 }
 
 /* Prevent tall rows */
 .attachment-table tbody tr {
-  height: 64px;
+  height: 56px;
   cursor: pointer;
 }
 
 .attachment-table tbody tr:has(.combo-name-cell) {
-  height: 65px;
+  height: 57px;
 }
 
 .attachment-table tbody tr:hover {
@@ -1297,7 +1306,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
 }
 
 .att-task-unlock {
-  font-size: 10px;
+  font-size: 9.5px;
   color: #f5c542;
   white-space: nowrap;
   overflow: hidden;
@@ -1315,11 +1324,11 @@ header:not(.header-expanded) .header-nav-btn-icon {
   border: 1px solid #333;
   border-radius: 4px;
   color: #666;
-  font-size: 11px;
+  font-size: 10.5px;
   padding: 1px 6px;
-  min-width: 44px;
+  min-width: 40px;
   cursor: pointer;
-  line-height: 1.6;
+  line-height: 1.55;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1334,8 +1343,8 @@ header:not(.header-expanded) .header-nav-btn-icon {
 }
 
 .att-vote-icon {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   object-fit: contain;
   flex-shrink: 0;
   opacity: 0.45;
@@ -1343,13 +1352,13 @@ header:not(.header-expanded) .header-nav-btn-icon {
 }
 
 .att-vote-like .att-vote-icon {
-  width: 17px;
-  height: 17px;
+  width: 15px;
+  height: 15px;
 }
 
 .att-vote-dislike .att-vote-icon {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 
 .att-vote-btn:hover .att-vote-icon {
@@ -1391,7 +1400,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
   border: none;
   padding: 0 2px;
   line-height: 1;
-  font-size: 17px;
+  font-size: 16px;
   color: #555;
   cursor: pointer;
   transition: color 0.1s;

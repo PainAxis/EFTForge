@@ -90,10 +90,13 @@ const _TRANSLATIONS = {
         "stats.yes":                "YES",
         "stats.no":                 "NO",
         "stats.overswingDeprecated": "Only Applicable in Arena",
-        // Hidden stats
-        "hidden.showBtn":           "Show hidden stats",
-        "hidden.hideBtn":           "Hide hidden stats",
-        "hidden.title":             "HIDDEN STATS",
+        // Advanced stats
+        "hidden.showBtn":           "Show advanced stats",
+        "hidden.hideBtn":           "Hide advanced stats",
+        "hidden.title":             "ADVANCED STATS",
+        "hidden.heatFactor":        "Heat Factor",
+        "hidden.coolingFactor":     "Cooling Factor",
+        "hidden.durabilityBurn":    "Durability Burn",
         "hidden.aimPlane":          "Aim Deviation",
         "hidden.aimSens":           "Aim Sensitivity",
         "hidden.camAngleStep":      "Camera Angle Step",
@@ -122,6 +125,9 @@ const _TRANSLATIONS = {
         "hidden.tip.recHandRot":    "Recoil hand rotation multiplier category",
         "hidden.tip.recDispersion": "Spread applied to successive shots in the recoil pattern",
 "hidden.tip.recReturnSpeed":"How quickly the weapon returns to its base position between shots",
+        "hidden.tip.heatFactor":    "Combined multiplier of every installed mod and the selected ammo's heat buildup per shot",
+        "hidden.tip.coolingFactor": "Combined multiplier of every installed mod's cooling rate between shots",
+        "hidden.tip.durabilityBurn": "Combined multiplier of every installed mod and the selected ammo's durability burn per shot",
         "hidden.tooltip":           "Stats marked ? are unavailable for weapons not yet in the game data source",
         // Price view
         "stats.buildCost":          "BUILD COST",
@@ -166,6 +172,7 @@ const _TRANSLATIONS = {
         "ui.balanceErgo":         "Ergo",
         "th.price":               "Price",
         "th.priceTooltip":        "To switch between PvP and PvE pricing, open the Price panel and toggle PvE mode",
+        "th.heatCoolBurn":        "Heat/Cool/Burn",
         // Build manager modals
         "modal.save":             "SAVE BUILD",
         "modal.share":            "SHARE BUILD",
@@ -786,10 +793,13 @@ const _TRANSLATIONS = {
         "stats.yes":                "是",
         "stats.no":                 "否",
         "stats.overswingDeprecated": "仅适用于竞技场",
-        // Hidden stats
-        "hidden.showBtn":           "显示隐藏属性",
-        "hidden.hideBtn":           "隐藏隐藏属性",
-        "hidden.title":             "隐藏属性",
+        // Advanced stats
+        "hidden.showBtn":           "显示高级属性",
+        "hidden.hideBtn":           "隐藏高级属性",
+        "hidden.title":             "高级属性",
+        "hidden.heatFactor":        "发热系数",
+        "hidden.coolingFactor":     "冷却系数",
+        "hidden.durabilityBurn":    "耐久损耗系数",
         "hidden.aimPlane":          "瞄准偏差",
         "hidden.aimSens":           "瞄准灵敏度",
         "hidden.camAngleStep":      "相机角度步长",
@@ -818,6 +828,9 @@ const _TRANSLATIONS = {
         "hidden.tip.recHandRot":    "后坐力手部旋转分类倍数",
         "hidden.tip.recDispersion": "连发射击时后坐力模板的散布范围",
 "hidden.tip.recReturnSpeed":"后坐力结束后武器回正到基准位置的速度",
+        "hidden.tip.heatFactor":    "当前已安装的全部配件与所选弹药的单发热量累积倍数总和",
+        "hidden.tip.coolingFactor": "当前已安装的全部配件的射击间冷却速度倍数总和",
+        "hidden.tip.durabilityBurn": "当前已安装的全部配件与所选弹药导致的耐久损耗倍数总和",
         "hidden.tooltip":           "标有 ? 的属性目前暂无数据（数据源尚未收录该武器）",
         // Price view
         "stats.buildCost":          "配置价格",
@@ -862,6 +875,7 @@ const _TRANSLATIONS = {
         "th.evoErgo":             "Evo人机",
         "th.price":               "价格",
         "th.priceTooltip":        "如需切换PvP舆PvE定价，请打开价格面板并切换PvE模式",
+        "th.heatCoolBurn":        "发热/冷却/耐久损耗",
         // Build manager modals
         "modal.save":             "保存配置",
         "modal.share":            "分享配置",

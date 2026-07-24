@@ -194,6 +194,15 @@ def _migrate_items_db():
         if "penetration_power_deviation" not in existing:
             conn.execute(text("ALTER TABLE items ADD COLUMN penetration_power_deviation REAL"))
             conn.commit()
+        if "heat_factor" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN heat_factor REAL"))
+            conn.commit()
+        if "cooling_factor" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN cooling_factor REAL"))
+            conn.commit()
+        if "durability_burn_factor" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN durability_burn_factor REAL"))
+            conn.commit()
 
 
 
@@ -457,6 +466,9 @@ def _compute_stats(base_item, current_ids: list, items_map: dict,
     total_recoil_modifier = 0.0
     total_accuracy_mod = 0.0
     barrel_coi = None  # installed barrel's centerOfImpact overrides the weapon base
+    heat_factor = 1.0
+    cooling_factor = 1.0
+    durability_burn_factor = 1.0
     for att_id in current_ids:
         att = items_map.get(att_id)
         if not att:
@@ -472,6 +484,13 @@ def _compute_stats(base_item, current_ids: list, items_map: dict,
             barrel_coi = att.center_of_impact
         else:
             total_accuracy_mod += att.accuracy_modifier or 0
+        # Heat/cooling/durability-burn are multipliers (not summed percentages) - default 1.0 for parts without the stat
+        if att.heat_factor is not None:
+            heat_factor *= att.heat_factor
+        if att.cooling_factor is not None:
+            cooling_factor *= att.cooling_factor
+        if att.durability_burn_factor is not None:
+            durability_burn_factor *= att.durability_burn_factor
 
     if not factory_intact:
         if total_recoil_v is not None:
@@ -514,6 +533,9 @@ def _compute_stats(base_item, current_ids: list, items_map: dict,
         "arm_stamina": round(arm_stamina, 1),
         "sighting_range": effective_sighting_range,
         "accuracy_moa": final_moa,
+        "heat_factor": round(heat_factor, 4),
+        "cooling_factor": round(cooling_factor, 4),
+        "durability_burn_factor": round(durability_burn_factor, 4),
     }
 
 
@@ -965,6 +987,9 @@ def get_allowed_items(slot_id: str, lang: str = "en", db: Session = Depends(get_
             "deviation_curve": item.deviation_curve,
             "deviation_max": item.deviation_max,
             "sighting_range": item.sighting_range,
+            "heat_factor": item.heat_factor,
+            "cooling_factor": item.cooling_factor,
+            "durability_burn_factor": item.durability_burn_factor,
             "icon_link": item.icon_link,
             "base_image_link": item.base_image_link,
             "conflicting_item_ids": item.conflicting_item_ids,
@@ -1020,6 +1045,9 @@ def get_allowed_items_batch(
                 "deviation_curve": item.deviation_curve,
                 "deviation_max": item.deviation_max,
                 "sighting_range": item.sighting_range,
+                "heat_factor": item.heat_factor,
+                "cooling_factor": item.cooling_factor,
+                "durability_burn_factor": item.durability_burn_factor,
                 "icon_link": item.icon_link,
                 "base_image_link": item.base_image_link,
                 "conflicting_item_ids": item.conflicting_item_ids,
@@ -1170,13 +1198,24 @@ def calculate_build(
     stats = _compute_stats(base_item, current_ids, items_map, strength_level, equip_ergo_modifier)
 
     # ------------------------------
-    # Ammo Weight Logic (not in batch endpoint - only used for the main stats panel)
+    # Ammo Weight + Heat/Durability-Burn Logic (not in batch endpoint - only used for the main stats panel)
     # ------------------------------
+    # BSG hides heat/cooling/durability-burn stats on ammo's own in-game inspect tooltip, but the
+    # selected round still measurably affects the weapon's heat/durability-burn in-game - so it's
+    # folded in here even though it's never shown on the ammo item itself.
+    # Gated on assume_full_mag (not on whether a magazine is actually installed): the toggle
+    # represents "assume this weapon is loaded and ready to fire this round," which is independent
+    # of whether the user has dropped a magazine model into the builder. Applied once regardless
+    # of magazine capacity - it's a per-shot multiplier, not a per-round total like weight.
     ammo_weight_added = False
 
-    if assume_full_mag and selected_ammo_id:
+    if selected_ammo_id and assume_full_mag:
         ammo = db.query(Item).filter(Item.id == selected_ammo_id).first()
         if ammo and ammo.is_ammo:
+            if ammo.heat_factor is not None:
+                stats["heat_factor"] = round(stats["heat_factor"] * ammo.heat_factor, 4)
+            if ammo.durability_burn_factor is not None:
+                stats["durability_burn_factor"] = round(stats["durability_burn_factor"] * ammo.durability_burn_factor, 4)
             for att in items_map.values():
                 if att.magazine_capacity:
                     stats["total_weight"] = round(
@@ -1593,6 +1632,9 @@ def combo_full(
             "deviation_curve":      item.deviation_curve,
             "deviation_max":        item.deviation_max,
             "sighting_range":       item.sighting_range,
+            "heat_factor":          item.heat_factor,
+            "cooling_factor":       item.cooling_factor,
+            "durability_burn_factor": item.durability_burn_factor,
             "icon_link":            item.icon_link,
             "base_image_link":      item.base_image_link,
             "conflicting_item_ids": item.conflicting_item_ids,
@@ -1868,6 +1910,9 @@ def get_gun_init(
             "deviation_curve": item.deviation_curve,
             "deviation_max": item.deviation_max,
             "sighting_range": item.sighting_range,
+            "heat_factor": item.heat_factor,
+            "cooling_factor": item.cooling_factor,
+            "durability_burn_factor": item.durability_burn_factor,
             "icon_link": item.icon_link,
             "base_image_link": item.base_image_link,
             "conflicting_item_ids": item.conflicting_item_ids,
@@ -1947,12 +1992,18 @@ def get_gun_init(
     # Compute build stats with factory attachments
     stats = _compute_stats(gun, factory_ids, factory_items_map, strength_level, equip_ergo_modifier)
 
-    # Apply ammo weight if a valid ammo ID was provided
+    # Apply ammo weight + heat/durability-burn if a valid ammo ID was provided.
+    # Mirrors /build/calculate's ammo logic - must stay in sync or the very first stats
+    # shown on gun load (from this endpoint) disagree with every subsequent recalculation.
     ammo_weight_added = False
 
     if assume_full_mag and selected_ammo_id:
         ammo = db.query(Item).filter(Item.id == selected_ammo_id).first()
         if ammo and ammo.is_ammo:
+            if ammo.heat_factor is not None:
+                stats["heat_factor"] = round(stats["heat_factor"] * ammo.heat_factor, 4)
+            if ammo.durability_burn_factor is not None:
+                stats["durability_burn_factor"] = round(stats["durability_burn_factor"] * ammo.durability_burn_factor, 4)
             for att in factory_items_map.values():
                 if att.magazine_capacity:
                     stats["total_weight"] = round(

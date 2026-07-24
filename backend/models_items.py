@@ -95,3 +95,14 @@ class Item(Base):
     task_unlock_id     = Column(String,  nullable=True)
     task_unlock_name   = Column(String,  nullable=True)
     task_unlock_name_zh = Column(String, nullable=True)
+
+    # Heat / cooling / durability-burn factors (barrels, muzzle devices/weapon mods, ammo)
+    # NOTE: must stay declared after every pre-existing column. reset.py's background
+    # dev-sync copies a freshly-created scratch DB into the live one via positional
+    # "INSERT INTO items SELECT * FROM scratch.items" - the live DB's columns are in
+    # ALTER-TABLE-append order (i.e. always growing at the end), so any new column
+    # declared earlier in this class silently shifts every later column's values by
+    # one position during that copy.
+    heat_factor = Column(Float, nullable=True)
+    cooling_factor = Column(Float, nullable=True)
+    durability_burn_factor = Column(Float, nullable=True)

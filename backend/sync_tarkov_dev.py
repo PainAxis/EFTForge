@@ -406,6 +406,9 @@ def sync_items(sync_source: str = "scheduled"):
         ammo_recoil_mod = None
         light_bleed_delta = None
         heavy_bleed_delta = None
+        heat_factor = None
+        cooling_factor = None
+        durability_burn_factor = None
 
         item_weight = item.get("weight") or 0
         # tarkov.dev GraphQL exposed Item.accuracyModifier as a percentage; the JSON
@@ -504,6 +507,10 @@ def sync_items(sync_source: str = "scheduled"):
                 center_of_impact = properties.get("centerOfImpact")
                 deviation_curve  = properties.get("deviationCurve")
                 deviation_max    = properties.get("deviationMax")
+            if typename in ["ItemPropertiesWeaponMod", "ItemPropertiesBarrel"]:
+                heat_factor      = properties.get("heatFactor")
+                cooling_factor   = properties.get("coolingFactor")
+                durability_burn_factor = properties.get("durabilityBurnFactor")
 
             # --------------------------
             # Magazine
@@ -534,6 +541,8 @@ def sync_items(sync_source: str = "scheduled"):
                 ammo_recoil_mod       = properties.get("recoilModifier")
                 light_bleed_delta     = properties.get("lightBleedModifier")
                 heavy_bleed_delta     = properties.get("heavyBleedModifier")
+                heat_factor           = properties.get("heatFactor")
+                durability_burn_factor = properties.get("durabilityBurnFactor")
 
         # --------------------------
         # UBGL caliber overrides
@@ -613,6 +622,9 @@ def sync_items(sync_source: str = "scheduled"):
             camera_recoil=camera_recoil,
             convergence=convergence,
             recoil_dispersion=recoil_dispersion,
+            heat_factor=heat_factor,
+            cooling_factor=cooling_factor,
+            durability_burn_factor=durability_burn_factor,
         )
 
         items_to_add.append(db_item)
