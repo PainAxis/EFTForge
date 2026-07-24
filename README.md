@@ -60,6 +60,7 @@ EFTForge is a full-stack Escape from Tarkov weapon build simulator and community
 - Surfaces item stat changes detected automatically during daily server data syncs
 - Each entry shows old/new values, percentage change, and the date detected
 - Covers a rolling 7-day window, grouped by date
+- Panel header shows when the data was last synced
 
 ### User Profiles
 - Quasi-local identity system: your profile token lives in localStorage with no registration, password, or email required
@@ -196,13 +197,13 @@ launch.bat
 ```
 
 This single .bat file will:
-- Wipe and rebuild the local database from scratch
-- Sync all item data from tarkov.dev automatically
+- **First run**: build the database and sync all item data from tarkov.dev before starting, since there's nothing to serve yet
+- **Subsequent runs**: start the FastAPI backend immediately against your existing local database, then re-sync tarkov.dev data in the background
 - Start the FastAPI backend at `http://127.0.0.1:8000`
 - Serve the frontend at `http://127.0.0.1:5500`
 - Open your browser to both
 
-Once the backend console shows **"Application startup complete"**, the site will auto-populate with guns. That's it!
+The site is usable as soon as the backend console shows **"Application startup complete"**. If the background sync finds new data, a toast prompts you to refresh; otherwise nothing changes and you keep working on the data you already had. That's it!
 
 > **Note:** `sync_tarkov_dev.py` is called automatically by launch.bat, which calls reset.py. Avoid running it directly during local development, it is only used on the live production server for manual out-of-cycle resyncs.
 
