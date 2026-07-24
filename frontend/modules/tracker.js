@@ -23,11 +23,14 @@ window.EFTForge.tracker = (function () {
     var _colState     = {};  // type -> { flat: [], cursor: 0, lang: '' }
 
     var _LOWER_IS_BETTER = {
-        weight:            true,
-        recoil_modifier:   true,
-        recoil_vertical:   true,
-        recoil_horizontal: true,
-        center_of_impact:  true,
+        weight:                  true,
+        recoil_modifier:         true,
+        recoil_vertical:         true,
+        recoil_horizontal:       true,
+        center_of_impact:        true,
+        heat_factor:             true,
+        durability_burn_factor:  true,
+        // cooling_factor is intentionally absent - higher is better there, same as the default.
     };
 
     /* ===========================
@@ -479,6 +482,11 @@ window.EFTForge.tracker = (function () {
             var pv   = v * 100;
             var sign = pv >= 0 ? '+' : '';
             return sign + parseFloat(pv.toFixed(1)) + '%';
+        }
+        if (statName === 'heat_factor' || statName === 'cooling_factor' || statName === 'durability_burn_factor') {
+            var fv    = (v - 1) * 100;
+            var fSign = fv >= 0 ? '+' : '';
+            return fSign + parseFloat(fv.toFixed(1)) + '%';
         }
         return _fmtVal(v);
     }

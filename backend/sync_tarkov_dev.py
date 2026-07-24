@@ -41,6 +41,9 @@ _ATTACHMENT_STATS = [
     "recoil_modifier",
     "accuracy_modifier",
     "weight",
+    "heat_factor",
+    "cooling_factor",
+    "durability_burn_factor",
 ]
 _AMMO_STATS = [
     "ammo_damage",
@@ -48,6 +51,8 @@ _AMMO_STATS = [
     "armor_damage",
     "velocity",
     "fragmentation_chance",
+    "heat_factor",
+    "durability_burn_factor",
 ]
 # Tolerance for float comparisons (avoids noise from floating-point representation)
 _FLOAT_EPS = 1e-4
@@ -85,6 +90,9 @@ def _floats_differ(a, b) -> bool:
     return abs(a - b) > _FLOAT_EPS
 
 
+_NOT_YET_TRACKED = object()  # sentinel: distinguishes "stat wasn't tracked in the old snapshot" from "stat was tracked and its value was null"
+
+
 def _build_change_logs(db, snapshot: dict, sync_source: str, sync_time: datetime) -> list:
     """Compare current DB state against pre-wipe snapshot, return change log rows."""
     if not snapshot:
@@ -103,7 +111,12 @@ def _build_change_logs(db, snapshot: dict, sync_source: str, sync_time: datetime
             tracked = _ATTACHMENT_STATS
 
         for stat in tracked:
-            old_val = prev["stats"].get(stat)
+            old_val = prev["stats"].get(stat, _NOT_YET_TRACKED)
+            if old_val is _NOT_YET_TRACKED:
+                # This stat wasn't part of the tracked list when the snapshot was taken (e.g. a
+                # newly-added stat like heat_factor) - not a real in-game change, skip it so the
+                # first sync after adding a new tracked stat doesn't flood the tracker.
+                continue
             new_val = getattr(item, stat)
             if _floats_differ(old_val, new_val):
                 logs.append(StatChangeLog(
