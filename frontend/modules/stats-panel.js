@@ -16,18 +16,18 @@ function _collectInstalledItemsFlat(node, result = []) {
 function _saveFleaCache() {
     try {
         const ts = new Date().toISOString();
-        sessionStorage.setItem("eftforge_flea_pvp", JSON.stringify(EFTForge.state.fleaCachePvp));
-        sessionStorage.setItem("eftforge_flea_pve", JSON.stringify(EFTForge.state.fleaCachePve));
-        sessionStorage.setItem("eftforge_flea_ts",  ts);
+        localStorage.setItem("eftforge_flea_pvp", JSON.stringify(EFTForge.state.fleaCachePvp));
+        localStorage.setItem("eftforge_flea_pve", JSON.stringify(EFTForge.state.fleaCachePve));
+        localStorage.setItem("eftforge_flea_ts",  ts);
         EFTForge.state.fleaLastFetched = ts;
     } catch (_) {}
 }
 
 function restoreFleaCache() {
     try {
-        const pvp = sessionStorage.getItem("eftforge_flea_pvp");
-        const pve = sessionStorage.getItem("eftforge_flea_pve");
-        const ts  = sessionStorage.getItem("eftforge_flea_ts");
+        const pvp = localStorage.getItem("eftforge_flea_pvp");
+        const pve = localStorage.getItem("eftforge_flea_pve");
+        const ts  = localStorage.getItem("eftforge_flea_ts");
         if (pvp) EFTForge.state.fleaCachePvp  = JSON.parse(pvp);
         if (pve) EFTForge.state.fleaCachePve  = JSON.parse(pve);
         if (ts)  EFTForge.state.fleaLastFetched = ts;
@@ -84,9 +84,9 @@ async function refetchFleaPrices() {
     EFTForge.state.fleaLastFetched = null;
     // Drop the memoized JSON-API price maps so this refetch pulls fresh data.
     EFTForge.api.clearFleaPriceCache();
-    sessionStorage.removeItem("eftforge_flea_pvp");
-    sessionStorage.removeItem("eftforge_flea_pve");
-    sessionStorage.removeItem("eftforge_flea_ts");
+    localStorage.removeItem("eftforge_flea_pvp");
+    localStorage.removeItem("eftforge_flea_pve");
+    localStorage.removeItem("eftforge_flea_ts");
 
     try {
         const { t: _t } = EFTForge.lang;

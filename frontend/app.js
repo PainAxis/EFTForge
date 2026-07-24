@@ -65,7 +65,7 @@ async function init() {
       _applyMidBuildIndicator();
       // Auto-load a build from the ?build= URL parameter (for external site integrations)
       _checkUrlBuildParam();
-      // Restore flea cache from sessionStorage before prefetching so F5 reloads skip the fetch.
+      // Restore flea cache from localStorage before prefetching so new tabs/reloads reuse it instead of refetching.
       restoreFleaCache();
       // Auto-refetch if cached data is older than 1 hour, otherwise only fetch missing items.
       const FLEA_TTL_MS = 60 * 60 * 1000;
