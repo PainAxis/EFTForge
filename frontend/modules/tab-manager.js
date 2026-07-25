@@ -311,6 +311,16 @@ async function _activateTab(tabId) {
     _serializeActiveTab();
     EFTForge.state.activeTabId = tabId;
 
+    // Snapshot the attribution BEFORE loading. loadBuildFromPayload ends with its
+    // own syncBuildDisplayName(), and at that point selectGun has already cleared
+    // EFTForge.state.communityBuild - so it takes the saved-builds branch and
+    // syncActiveTab() writes null into this very tab record's communityBuild/
+    // buildName. Reading target.communityBuild after the await therefore restored
+    // null onto itself, the second syncBuildDisplayName() below never entered the
+    // community branch, and re-entering a community-build tab silently reverted
+    // its chip label to the bare gun name (and persisted that loss).
+    const restoreCommunityBuild = target.communityBuild || null;
+
     // collapsedSlots goes in through loadBuildFromPayload so it lands in the same
     // render as the build. Reapplying it afterwards used to cost a whole extra
     // renderFullTree() on top of the one loadBuildFromPayload already does.
@@ -320,7 +330,7 @@ async function _activateTab(tabId) {
         true,
         { collapsedSlots: target.collapsedSlots || {} },
     );
-    EFTForge.state.communityBuild = target.communityBuild || null;
+    EFTForge.state.communityBuild = restoreCommunityBuild;
     syncBuildDisplayName();
 
     const hist = _tabHistory.get(tabId);
