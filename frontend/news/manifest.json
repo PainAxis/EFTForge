@@ -1,6 +1,15 @@
 {
   "posts": [
     {
+      "id": "2026-07-26-v147-release",
+      "title": "v1.4.7 - Build Tabs, and Moooooore Stats!",
+      "title_zh": "v1.4.7 - 配置标签，舆更多更多更多属性！",
+      "date": "2026-07-26",
+      "tags": ["patch-notes", "minor-update"],
+      "file": "2026-07-26-v147-release.md",
+      "file_zh": "2026-07-26-v147-release.zh.md"
+    },
+    {
       "id": "2026-06-15-v140-release",
       "title": "v1.4.0 - Ammo Ballistics Table & Optimizations",
       "title_zh": "v1.4.0 - 弹药数据表、舆网站优化",
