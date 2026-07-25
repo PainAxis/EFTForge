@@ -6742,6 +6742,10 @@ body[data-mobile="true"] .ammo-table {
 body[data-mobile="true"] .left-panel { width: 100% !important; overflow-y: auto; overflow-x: hidden; }
 body[data-mobile="true"] .panel-resizer { display: none !important; }
 
+/* Profile exists to attribute published builds/comments - neither is possible on mobile */
+body[data-mobile="true"] #profile-nav-btn { display: none; }
+body[data-mobile="true"] .header-nav-btn:nth-last-child(2) { border-right: none; }
+
 /* Portrait: single-column, full-panel scroll */
 body[data-mobile="true"] #left-build-area {
   flex: none;
@@ -7638,7 +7642,7 @@ var _hmt = _hmt || [];
 <script src="modules/build-preview.js?v=17"></script>
 <script src="modules/slot-selector.js?v=23"></script>
 <script src="modules/graph.js?v=9"></script>
-<script src="modules/build-manager.js?v=25"></script>
+<script src="modules/build-manager.js?v=26"></script>
 <script src="modules/tab-manager.js?v=2"></script>
 <script src="modules/profile.js?v=7"></script>
 <script src="app.js?v=38"></script>

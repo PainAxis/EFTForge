@@ -1743,8 +1743,8 @@ function _renderCommentsContent(section, buildId, comments) {
             </div>`;
         }).join("");
 
-    section.innerHTML = `
-        <div class="cb-comments-list">${commentsHtml}</div>
+    // Mobile is read-only for community builds - no publishing, no commenting
+    const formHtml = document.body.dataset.mobile === "true" ? "" : `
         <div class="cb-comment-form">
             <textarea class="cb-comment-textarea" placeholder="${escapeHtml(t("cb.commentPlaceholder"))}" maxlength="280" rows="2"></textarea>
             <div class="cb-comment-form-footer">
@@ -1753,6 +1753,13 @@ function _renderCommentsContent(section, buildId, comments) {
             </div>
         </div>
     `;
+
+    section.innerHTML = `
+        <div class="cb-comments-list">${commentsHtml}</div>
+        ${formHtml}
+    `;
+
+    if (!formHtml) return;
 
     const textarea = section.querySelector(".cb-comment-textarea");
     const charCount = section.querySelector(".cb-comment-charcount");
@@ -1916,14 +1923,16 @@ function _applyMyCommunityFilter() {
     const lang = EFTForge.state.lang;
 
     const query = (document.getElementById("my-community-search")?.value || "").trim().toLowerCase();
-    const gunLookup = new Map((EFTForge.state.allGuns || []).map(g => [g.id, g.name]));
 
     let builds = container._myBuilds;
     if (query) {
         builds = builds.filter(b => {
+            const gun       = gunById(b.gun_id);
             const buildName = (b.build_name || "").toLowerCase();
-            const gunName   = (gunLookup.get(b.gun_id) || b.gun_name || "").toLowerCase();
-            return buildName.includes(query) || gunName.includes(query);
+            // Cards show the short name, but keep the full name searchable too
+            const gunName   = ((gun && gun.name) || b.gun_name || "").toLowerCase();
+            const gunShort  = ((gun && gun.short_name) || "").toLowerCase();
+            return buildName.includes(query) || gunName.includes(query) || gunShort.includes(query);
         });
     }
 
@@ -1945,8 +1954,8 @@ function _applyMyCommunityFilter() {
     const _newCommentIds = _getNewCommentBuildIds();
 
     container.innerHTML = builds.map((b, idx) => {
-        const gunName    = gunLookup.get(b.gun_id) || b.gun_name || "";
-        const gunObj     = (EFTForge.state.allGuns || []).find(g => g.id === b.gun_id);
+        const gunObj     = gunById(b.gun_id);
+        const gunName    = (gunObj && (gunObj.short_name || gunObj.name)) || b.gun_name || "";
         const gunImgSrc  = gunObj ? (gunObj.image_512_link || gunObj.icon_link || "") : "";
         const cardImgSrc = b.card_image_url || gunImgSrc;
 
