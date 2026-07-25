@@ -1129,7 +1129,11 @@ async function _publishSavedBuildById(id) {
     document.getElementById("save-build-dialog")?.remove();
 
     // load the build silently (no "Build Loaded" toast)
-    await loadBuildFromPayload(payload, entry.name, true);
+    if (document.body.dataset.mobile !== "true") {
+        await EFTForge.tabs.createTabFromPayload(payload, entry.name, null, true);
+    } else {
+        await loadBuildFromPayload(payload, entry.name, true);
+    }
 
     // replace the placeholder with the publish confirm panel
     showPublishConfirmPanel(entry.name, entry.id);

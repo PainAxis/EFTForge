@@ -126,14 +126,21 @@ function syncActiveTab({ buildName = null, communityBuild = null } = {}) {
 // automatic tab creation (fresh gun pick, saved/community/URL build) into an
 // existing tab instead of opening a carbon copy; explicit right-click
 // Duplicate deliberately skips this check.
+//
+// A null incoming ammoId/ubglAmmoId (a saved/community/URL build whose code
+// never specified one) is a wildcard, not a "no ammo" requirement - loadAmmoForGun
+// (gun-list.js) always auto-selects a default the moment the gun/caliber loads, so
+// any already-open tab's ammoId is never actually null. Comparing null against that
+// live default would fail every time, so a build with no explicit ammo could never
+// be recognized as already open and would spawn a fresh tab on every Load/Publish.
 function _findDuplicateTab(gunId, pairs, ammoId, ubglAmmoId, excludeTabId = null) {
     const key = _pairsKey(pairs || []);
     return EFTForge.state.tabs.find(t =>
         t.id !== excludeTabId &&
         t.gunId === gunId &&
         _pairsKey(t.pairs) === key &&
-        (t.ammoId || null) === (ammoId || null) &&
-        (t.ubglAmmoId || null) === (ubglAmmoId || null)
+        (ammoId === null || (t.ammoId || null) === ammoId) &&
+        (ubglAmmoId === null || (t.ubglAmmoId || null) === ubglAmmoId)
     );
 }
 
@@ -166,11 +173,13 @@ async function createTabForGun(gun, card = null) {
             _tabHistory.delete(id);
             await _activateTab(dup.id);
             _persistTabs();
+            _scrollTabIntoView(dup.id);
             return;
         }
 
         _persistTabs();
         renderTabBar();
+        _scrollTabIntoView(id);
     } finally {
         _tabSwitchInFlight = false;
     }
@@ -192,6 +201,7 @@ async function createTabFromPayload(payload, buildName = null, communityBuild = 
     const dup = _findDuplicateTab(gun.id, payload.p || [], payload.a || null, payload.ua || null);
     if (dup) {
         if (dup.id !== EFTForge.state.activeTabId) await switchToTab(dup.id);
+        _scrollTabIntoView(dup.id);
         return;
     }
 
@@ -210,6 +220,7 @@ async function createTabFromPayload(payload, buildName = null, communityBuild = 
         tab.pairs = collectSlotPairs(EFTForge.state.buildTree);
         _persistTabs();
         renderTabBar();
+        _scrollTabIntoView(id);
     } finally {
         _tabSwitchInFlight = false;
     }
@@ -1036,6 +1047,12 @@ function renderTabBar() {
             if (e.target.closest(".tab-chip-close")) return;
             switchToTab(tab.id);
         });
+        chip.addEventListener("mousedown", (e) => {
+            // Middle-click's native pan/autoscroll gesture arms on mousedown, before
+            // auxclick ever fires (that only fires after mouseup) - preventing default
+            // there is too late, the browser has already entered autoscroll mode.
+            if (e.button === 1) e.preventDefault();
+        });
         chip.addEventListener("auxclick", (e) => {
             if (e.button === 1) { e.preventDefault(); closeTab(tab.id); }
         });
@@ -1137,14 +1154,14 @@ function _easeOutCubic(p) {
 
 function _stepTabBarScroll(scroll, ts) {
     if (!_tabBarAnim) { _tabBarScrollRAF = null; return; }
-    const { fromX, toX, startTs, duration } = _tabBarAnim;
+    const { fromX, toX, startTs, duration, resumeHover } = _tabBarAnim;
     const p = Math.min(1, (ts - startTs) / duration);
     scroll.scrollLeft = Math.round(fromX + (toX - fromX) * _easeOutCubic(p));
 
     if (p >= 1) {
         _tabBarAnim = null;
         _tabBarScrollRAF = null;
-        _tpResumeAfterScroll();
+        if (resumeHover) _tpResumeAfterScroll();
         return;
     }
     _tabBarScrollRAF = requestAnimationFrame((t) => _stepTabBarScroll(scroll, t));
@@ -1153,24 +1170,55 @@ function _stepTabBarScroll(scroll, ts) {
 // Chips slide under a stationary cursor during the scroll animation, so the
 // hover preview would otherwise point at a chip that's no longer underneath
 // it. Hide it for the duration and re-evaluate what's under the cursor once
-// the bar settles.
+// the bar settles. Only meaningful for scrolls the mouse is actually driving
+// (wheel) - _tpLastX/_tpLastY are last-known-good coordinates from a real
+// hover and go stale the moment the mouse leaves the bar, so a resume here
+// after a programmatic scroll (e.g. auto-scrolling a new tab into view from
+// a gunSelect click elsewhere on the page) would reopen the tooltip at that
+// stale point even though the cursor isn't anywhere near the bar.
 function _tpResumeAfterScroll() {
     const chip = document.elementFromPoint(_tpLastX, _tpLastY)?.closest(".tab-chip");
     const tab = chip && EFTForge.state.tabs.find(t => t.id === chip.dataset.tabId);
     if (tab) _tpScheduleShow(tab, _tpLastX, _tpLastY);
 }
 
-function _queueTabBarScroll(scroll, deltaY) {
+function _animateTabBarScrollTo(scroll, targetX, { resumeHover = false } = {}) {
     _tpHide();
     const max = scroll.scrollWidth - scroll.clientWidth;
-    const currentTarget = _tabBarAnim ? _tabBarAnim.toX : scroll.scrollLeft;
     _tabBarAnim = {
         fromX: scroll.scrollLeft,
-        toX: Math.max(0, Math.min(max, currentTarget + deltaY)),
+        toX: Math.max(0, Math.min(max, targetX)),
         startTs: performance.now(),
         duration: TAB_BAR_SCROLL_DURATION,
+        resumeHover,
     };
     if (!_tabBarScrollRAF) _tabBarScrollRAF = requestAnimationFrame((t) => _stepTabBarScroll(scroll, t));
+}
+
+function _queueTabBarScroll(scroll, deltaY) {
+    const currentTarget = _tabBarAnim ? _tabBarAnim.toX : scroll.scrollLeft;
+    _animateTabBarScrollTo(scroll, currentTarget + deltaY, { resumeHover: true });
+}
+
+// Bring a tab's chip fully into view when it isn't already - used when a new
+// tab is created past the visible edge of an overflowing bar, and when
+// clicking a gunSelect grid gun re-activates a tab that's scrolled out of
+// view. No-ops if the chip is already fully visible.
+function _scrollTabIntoView(tabId) {
+    const scroll = document.getElementById("tab-bar-scroll");
+    if (!scroll) return;
+    const chip = scroll.querySelector(`.tab-chip[data-tab-id="${tabId}"]`);
+    if (!chip) return;
+    if (scroll.scrollWidth <= scroll.clientWidth) return;
+
+    const chipLeft = chip.offsetLeft;
+    const chipRight = chipLeft + chip.offsetWidth;
+    const viewLeft = scroll.scrollLeft;
+    const viewRight = viewLeft + scroll.clientWidth;
+    if (chipLeft >= viewLeft && chipRight <= viewRight) return;
+
+    const targetX = chipRight > viewRight ? chipRight - scroll.clientWidth : chipLeft;
+    _animateTabBarScrollTo(scroll, targetX);
 }
 
 (function _initTabBarScrollUX() {
@@ -1187,6 +1235,28 @@ function _queueTabBarScroll(scroll, deltaY) {
         _queueTabBarScroll(scroll, e.deltaY);
     }, { passive: false });
 })();
+
+// Failsafe against a stuck-open tooltip. The chip-level mouseenter/mouseleave
+// pair (and renderTabBar()'s "keep it open across a re-render" reconnect) covers
+// the normal cases, but any path that swaps/removes the hovered chip's DOM
+// without a real mouse movement over it first (a re-render landing mid-grace-
+// period, a synthetic mouseenter firing for the wrong element, the cursor
+// leaving the viewport/window entirely without a trailing mouseleave) can
+// leave _tpActiveTabId pointing at a tab the cursor isn't actually over
+// anymore, with nothing left to correct it. A document-wide mousemove check
+// self-heals on the very next real pointer movement anywhere on the page;
+// document mouseleave/blur cover the cursor or focus leaving the window.
+document.addEventListener("mousemove", (e) => {
+    if (!_tpActiveTabId) return;
+    // #tab-bar-scroll itself (not just .tab-chip) is exempt too - small gaps between
+    // adjacent chips transiently target the scroll container, not a chip, and forcing
+    // a hide there would break the connected-swap bridging (_tpScheduleShow) that
+    // avoids a full tooltip redraw when moving directly between two chips.
+    if (e.target.closest(".tab-chip, #tab-preview-tooltip, #tab-bar-scroll")) return;
+    _tpHide();
+}, { passive: true });
+document.addEventListener("mouseleave", () => { if (_tpActiveTabId) _tpHide(); });
+window.addEventListener("blur", () => { if (_tpActiveTabId) _tpHide(); });
 
 window.EFTForge.tabs = {
     createTabForGun,
