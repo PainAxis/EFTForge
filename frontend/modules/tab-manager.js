@@ -437,12 +437,104 @@ function _tpPosition(cx, cy) {
 
 function _tpHide() {
     _tpGen++;
+    _tpMarqueeGen++;
     clearTimeout(_tpHoverTimer);
     clearTimeout(_tpHideTimer);
     _tpHideTimer = null;
     _tpActiveTabId = null;
     if (_tpImgAbort) { _tpImgAbort.abort(); _tpImgAbort = null; }
     if (_tpTooltipEl) _tpTooltipEl.classList.remove("visible");
+}
+
+// Ambient marquee for the tooltip's gun/build name line. Reuses the same
+// timing/phases as the site's shared _initMarqueeText (utils.js) for visual
+// consistency, but runs standalone rather than going through that utility:
+// _initMarqueeText detects overflow via a ResizeObserver on the box, which
+// only fires on box resize - it never fires just because the text inside
+// changed (e.g. swapping directly between two tab chips whose build names
+// differ, see the "connected" in-place-update path in _tpShow), so a
+// text-driven restart needs its own explicit trigger. Its global generation
+// counter is also unsuitable here since it's shared with the tab chips'
+// own hover marquees (_initMarqueeText(..., { hoverTarget: ".tab-chip" })
+// below) - clearing it on every tooltip show would freeze whichever chip
+// label happens to be mid-scroll at that moment.
+let _tpMarqueeGen = 0;
+
+function _tpSetMarqueeName(nameEl, text) {
+    // Skip restarting an already-running cycle for unchanged text - renderTabBar()
+    // re-connects the tooltip to a freshly rebuilt chip strip on every rename/pin/
+    // activate/reorder while the same tab stays hovered (see keepTooltipOpen), and
+    // snapping a mid-scroll marquee back to start on each of those would be a
+    // needless flicker for text that hasn't actually changed.
+    if (nameEl.dataset.tpName === text) return;
+    nameEl.dataset.tpName = text;
+
+    let span = nameEl.querySelector(".marquee-text");
+    if (!span) {
+        nameEl.textContent = "";
+        span = document.createElement("span");
+        span.className = "marquee-text";
+        nameEl.appendChild(span);
+    }
+    span.textContent = text;
+
+    const myGen = ++_tpMarqueeGen;
+    span.style.transition = "none";
+    span.style.transform  = "translateX(0)";
+    span.style.opacity    = "1";
+
+    requestAnimationFrame(() => {
+        if (myGen !== _tpMarqueeGen) return;
+        const overflow = span.offsetWidth - nameEl.clientWidth;
+        if (overflow <= 2) return;
+
+        const scrollDuration = Math.max(1200, (overflow / 45) * 1000);
+
+        async function runCycle() {
+            if (myGen !== _tpMarqueeGen) return;
+
+            if (document.hidden) {
+                await _sleep(1000);
+                runCycle();
+                return;
+            }
+
+            span.style.transition = "none";
+            span.style.transform  = "translateX(0)";
+            span.style.opacity    = "1";
+
+            await _sleep(800);
+            if (myGen !== _tpMarqueeGen) return;
+
+            span.style.transition = `transform ${scrollDuration}ms linear`;
+            span.style.transform  = `translateX(-${overflow}px)`;
+            await _sleep(scrollDuration);
+            if (myGen !== _tpMarqueeGen) return;
+
+            await _sleep(700);
+            if (myGen !== _tpMarqueeGen) return;
+
+            span.style.transition = "opacity 0.35s ease";
+            span.style.opacity    = "0";
+            await _sleep(400);
+            if (myGen !== _tpMarqueeGen) return;
+
+            span.style.transition = "none";
+            span.style.transform  = "translateX(0)";
+            await new Promise(resolve =>
+                requestAnimationFrame(() => requestAnimationFrame(resolve))
+            );
+            if (myGen !== _tpMarqueeGen) return;
+
+            span.style.transition = "opacity 0.35s ease";
+            span.style.opacity    = "1";
+
+            await _sleep(1500);
+            runCycle();
+        }
+
+        runCycle();
+    });
 }
 
 // Used on chip mouseleave instead of hiding instantly - the small gap between
@@ -806,13 +898,14 @@ async function _tpShow(tab, cx, cy, connected = false) {
         // after activation - see _tpLoadImage's active-tab branch below),
         // nothing corrects it back until the next real hover.
         if (imgEl && !isSameTab) _tpSetImg(imgEl, staticImg);
-        if (nameEl) nameEl.textContent = gun.name;
+        if (nameEl) _tpSetMarqueeName(nameEl, tab.buildName || gun.name);
     } else {
         el.innerHTML = `
             <div class="tab-preview-img-wrap"><img class="tab-preview-img" src="${escapeHtml(staticImg)}" alt="" /></div>
-            <div class="tab-preview-gunname">${escapeHtml(gun.name)}</div>
+            <div class="tab-preview-gunname"></div>
             <div class="tab-preview-stats">${_tpStatsSkeletonHtml()}</div>
         `;
+        _tpSetMarqueeName(el.querySelector(".tab-preview-gunname"), tab.buildName || gun.name);
     }
     el.classList.add("visible");
     _tpPosition(cx, cy);

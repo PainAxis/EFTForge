@@ -112,7 +112,6 @@ header.header-expanded {
   z-index: 99;
   height: 34px;
   background: linear-gradient(to left, rgba(245, 197, 66, 0.07), transparent 50%), #1a1a1a;
-  border-bottom: 1px solid #333;
   transition: top 0.3s ease;
 }
 
@@ -127,6 +126,7 @@ header.header-expanded ~ #tab-bar {
 #tab-bar-scroll {
   display: flex;
   align-items: stretch;
+  position: relative;
   height: 100%;
   padding: 0 8px;
   gap: 4px;
@@ -138,6 +138,17 @@ header.header-expanded ~ #tab-bar {
 
 #tab-bar-scroll::-webkit-scrollbar {
   display: none;
+}
+
+#tab-bar-scroll::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: #333;
+  pointer-events: none;
 }
 
 .tab-bar-fade {
@@ -179,6 +190,7 @@ header.header-expanded ~ #tab-bar {
   letter-spacing: 0.2px;
   cursor: pointer;
   user-select: none;
+  position: relative;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
@@ -191,6 +203,18 @@ header.header-expanded ~ #tab-bar {
   background: #1a1a1a;
   border-color: #f5c542;
   color: #f5c542;
+}
+
+.tab-chip.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 2px;
+  background: #1a1a1a;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .tab-chip-pin-icon {
@@ -316,7 +340,6 @@ header.header-expanded ~ #tab-bar {
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   margin-bottom: 8px;
 }
 
