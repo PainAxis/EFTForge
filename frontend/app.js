@@ -40,7 +40,6 @@ function renderFilteredGunList(forceReset = false) {
 =========================== */
 
 init();
-devVersionCheck();
 mobileWarning();
 initTarkovClock();
 initHeaderExpand();
@@ -573,69 +572,6 @@ function showMigrationNotice() {
 }
 
 /* ===========================
-   DEV VERSION CHECK
-=========================== */
-
-async function devVersionCheck() {
-    if (!["localhost", "127.0.0.1"].includes(location.hostname)) return;
-
-    const files = ["app.js", "modules/build-manager.js", "index.html"];
-    const buildDate = new Date(EFTForge.config.APP_BUILD_DATE);
-
-    let latestModified = null;
-    let latestFile = null;
-
-    await Promise.all(files.map(async file => {
-        try {
-            const res = await fetch(`./${file}`, { method: "HEAD", cache: "no-store" });
-            const lm = res.headers.get("Last-Modified");
-            if (!lm) return;
-            const d = new Date(lm);
-            if (!latestModified || d > latestModified) {
-                latestModified = d;
-                latestFile = file;
-            }
-        } catch { /* ignore */ }
-    }));
-
-    if (!latestModified) return;
-
-    if (latestModified <= buildDate) return;
-
-    const banner = document.createElement("div");
-    banner.id = "dev-version-warning";
-    banner.style.cssText = `
-        position: fixed;
-        bottom: 20px;
-        left: 20px;
-        background: #1c1500;
-        border-left: 4px solid #f5c542;
-        color: #eee;
-        padding: 12px 16px;
-        border-radius: 6px;
-        font-family: "Bender", Arial, sans-serif;
-        font-size: 13px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-        z-index: 9998;
-        cursor: pointer;
-        max-width: 300px;
-        line-height: 1.5;
-    `;
-    banner.innerHTML = `
-        <div style="font-weight:700; color:#f5c542; margin-bottom:5px;">&#9888; Dev: Update Version Info</div>
-        <div style="color:#aaa; font-weight:500;">
-            <strong style="color:#ccc;">${escapeHtml(latestFile)}</strong> was modified after
-            <strong style="color:#ccc;">${escapeHtml(EFTForge.config.APP_BUILD_DATE)}</strong> (UTC).<br>
-            Bump <strong style="color:#eee;">EFTForge.config.APP_VERSION</strong> and
-            <strong style="color:#eee;">EFTForge.config.APP_BUILD_DATE</strong> in modules/config.js.
-        </div>
-        <div style="font-size:11px; color:#555; margin-top:8px;">Click to dismiss</div>
-    `;
-    banner.addEventListener("click", () => banner.remove());
-    document.body.appendChild(banner);
-}
-
-/* ===========================
    UPDATE CHECKER
 =========================== */
 
@@ -653,7 +589,7 @@ async function _fetchRemoteBuildDate() {
 }
 
 async function checkForUpdate() {
-    // Skip on localhost - devVersionCheck handles dev warnings.
+    // Skip on localhost - update checks are for deployed environments only.
     if (["localhost", "127.0.0.1"].includes(location.hostname)) return;
 
     const UPDATE_CHECK_KEY  = "eftforge_update_check_ts";
