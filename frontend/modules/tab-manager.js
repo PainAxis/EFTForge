@@ -44,6 +44,23 @@ function _newTabId() {
     return "tab_" + Date.now().toString(36) + "_" + (_tabIdCounter++);
 }
 
+// _pairsKey() is a map + sort + join over every attachment, and the duplicate
+// scan below runs it against every open tab. Tab records only ever get a fresh
+// pairs ARRAY assigned (never mutated in place), so memoizing on array identity
+// is exact and self-invalidating. The memo fields are deliberately not part of
+// the persisted shape in _persistTabs().
+function _tabPairsKey(tab) {
+    if (tab._pairsKeySrc !== tab.pairs) {
+        tab._pairsKeySrc = tab.pairs;
+        tab._pairsKey = _pairsKey(tab.pairs || []);
+    }
+    return tab._pairsKey;
+}
+
+function _tabById(tabId) {
+    return EFTForge.state.tabs.find(t => t.id === tabId) || null;
+}
+
 /* ===========================
    PERSISTENCE
 =========================== */
@@ -81,7 +98,7 @@ async function restoreTabsFromStorage() {
     } catch (_) { return; }
     if (!data || data.version !== 1 || !Array.isArray(data.tabs) || data.tabs.length === 0) return;
 
-    const restored = data.tabs.filter(t => EFTForge.state.allGuns.some(g => g.id === t.gunId));
+    const restored = data.tabs.filter(t => gunById(t.gunId));
     if (restored.length === 0) return;
 
     EFTForge.state.tabs = restored.map(t => ({
@@ -108,7 +125,7 @@ async function restoreTabsFromStorage() {
 function _serializeActiveTab() {
     const activeId = EFTForge.state.activeTabId;
     if (!activeId) return;
-    const tab = EFTForge.state.tabs.find(t => t.id === activeId);
+    const tab = _tabById(activeId);
     if (!tab || !EFTForge.state.currentGun) return;
     tab.pairs = collectSlotPairs(EFTForge.state.buildTree);
     tab.ammoId = document.getElementById("ammo-select")?.value || null;
@@ -126,8 +143,17 @@ function syncActiveTab({ buildName = null, communityBuild = null } = {}) {
     if (!_isDesktopTabs()) return;
     const activeId = EFTForge.state.activeTabId;
     if (!activeId) return;
-    const tab = EFTForge.state.tabs.find(t => t.id === activeId);
+    const tab = _tabById(activeId);
     if (!tab) return;
+
+    // buildName is the ONLY field here that renderTabBar() reads (the chip label
+    // is `shortName - buildName`) - pairs/ammo/collapsedSlots/communityBuild just
+    // update the record. This runs from refreshBuildStats(), i.e. after every
+    // attachment install, removal, and ammo change, so rebuilding the entire chip
+    // strip unconditionally meant tearing down and re-creating every chip plus its
+    // listeners and ResizeObservers for a label that hadn't changed.
+    const labelChanged = tab.buildName !== buildName;
+
     tab.buildName = buildName;
     tab.communityBuild = communityBuild;
     tab.pairs = collectSlotPairs(EFTForge.state.buildTree);
@@ -135,7 +161,7 @@ function syncActiveTab({ buildName = null, communityBuild = null } = {}) {
     tab.ubglAmmoId = document.getElementById("ubgl-ammo-select")?.value || null;
     tab.collapsedSlots = { ...EFTForge.state.collapsedSlots };
     _persistTabsDebounced();
-    renderTabBar();
+    if (labelChanged) renderTabBar();
 }
 
 /* ===========================
@@ -160,7 +186,7 @@ function _findDuplicateTab(gunId, pairs, ammoId, ubglAmmoId, excludeTabId = null
     return EFTForge.state.tabs.find(t =>
         t.id !== excludeTabId &&
         t.gunId === gunId &&
-        _pairsKey(t.pairs) === key &&
+        _tabPairsKey(t) === key &&
         (ammoId === null || (t.ammoId || null) === ammoId) &&
         (ubglAmmoId === null || (t.ubglAmmoId || null) === ubglAmmoId)
     );
@@ -174,6 +200,24 @@ async function createTabForGun(gun, card = null) {
     _tabSwitchInFlight = true;
     try {
         _serializeActiveTab();
+
+        // Resolve this gun's factory build from its (cached) init payload BEFORE
+        // rendering anything, so re-picking a gun that's already open as its
+        // factory config collapses straight into that tab. The old order ran a
+        // full selectGun render first and only then noticed the duplicate, which
+        // meant paying for a render it immediately discarded and then a second
+        // full load through _activateTab. Re-picking the gun of the already-active
+        // tab is now a true no-op (_activateTab early-returns on the same id).
+        const initData = await _ensureGunInitCached(gun);
+        if (initData?.factory_tree) {
+            const savedAmmoId = (JSON.parse(localStorage.getItem("eftforge_ammo_prefs") || "{}") || {})[gun.caliber] || null;
+            const preDup = _findDuplicateTab(gun.id, collectSlotPairs({ children: initData.factory_tree }), savedAmmoId, null);
+            if (preDup) {
+                await _activateTab(preDup.id);
+                _scrollTabIntoView(preDup.id);
+                return;
+            }
+        }
 
         const id = _newTabId();
         const tab = { id, gunId: gun.id, pinned: false, buildName: null, communityBuild: null, pairs: [], ammoId: null, ubglAmmoId: null, collapsedSlots: {} };
@@ -213,7 +257,7 @@ async function createTabForGun(gun, card = null) {
 // that exact build is already open in another tab.
 async function createTabFromPayload(payload, buildName = null, communityBuild = null, silent = true) {
     if (_tabSwitchInFlight) return;
-    const gun = EFTForge.state.allGuns.find(g => g.id === payload.g);
+    const gun = gunById(payload.g);
     if (!gun) {
         showToast(t("toast.loadFailed"), t("toast.unknownWeapon"), 3500);
         return;
@@ -255,10 +299,10 @@ async function createTabFromPayload(payload, buildName = null, communityBuild = 
 // section and so can't go through the guarded switchToTab()).
 async function _activateTab(tabId) {
     if (tabId === EFTForge.state.activeTabId) return;
-    const target = EFTForge.state.tabs.find(t => t.id === tabId);
+    const target = _tabById(tabId);
     if (!target) return;
 
-    const gun = EFTForge.state.allGuns.find(g => g.id === target.gunId);
+    const gun = gunById(target.gunId);
     if (!gun) {
         showToast(t("toast.loadFailed"), t("toast.unknownWeapon"), 3500);
         return;
@@ -267,13 +311,17 @@ async function _activateTab(tabId) {
     _serializeActiveTab();
     EFTForge.state.activeTabId = tabId;
 
-    await loadBuildFromPayload({ g: target.gunId, p: target.pairs, a: target.ammoId, ua: target.ubglAmmoId }, target.buildName, true);
+    // collapsedSlots goes in through loadBuildFromPayload so it lands in the same
+    // render as the build. Reapplying it afterwards used to cost a whole extra
+    // renderFullTree() on top of the one loadBuildFromPayload already does.
+    await loadBuildFromPayload(
+        { g: target.gunId, p: target.pairs, a: target.ammoId, ua: target.ubglAmmoId },
+        target.buildName,
+        true,
+        { collapsedSlots: target.collapsedSlots || {} },
+    );
     EFTForge.state.communityBuild = target.communityBuild || null;
     syncBuildDisplayName();
-
-    // loadBuildFromPayload always resets collapsedSlots - reapply this tab's own state
-    EFTForge.state.collapsedSlots = target.collapsedSlots || {};
-    await renderFullTree(false);
 
     const hist = _tabHistory.get(tabId);
     EFTForge.state.buildHistory = hist ? [...hist.buildHistory] : [];
@@ -378,6 +426,10 @@ async function duplicateTab(tabId) {
         pairs: [...source.pairs],
         collapsedSlots: { ...source.collapsedSlots },
     };
+    // The spread copied the source's memoized pairs key, which now points at a
+    // different array - drop it so _tabPairsKey recomputes against the clone's.
+    delete clone._pairsKey;
+    delete clone._pairsKeySrc;
     if (source.pinned) {
         let insertAt = 0;
         while (insertAt < EFTForge.state.tabs.length && EFTForge.state.tabs[insertAt].pinned) insertAt++;
@@ -474,6 +526,14 @@ function _showTabContextMenu(e, tab) {
 const TAB_PREVIEW_HOVER_DELAY = 150; // ms - lets the cursor pass over several chips without firing requests for each
 const TAB_PREVIEW_HIDE_GRACE  = 100; // ms - bridges the gap between adjacent chips so grazing it doesn't hide+reopen the tooltip
 
+// Extra dwell required before a background tab's preview image is GENERATED
+// (server-side render), on top of the delay that already gates showing the
+// tooltip at all. Everything cheap - static asset, factory image, cache hit -
+// still appears at TAB_PREVIEW_HOVER_DELAY; only the expensive path waits.
+// Without this, deliberately sweeping the cursor across a full strip queued one
+// image generation per chip on the backend.
+const TAB_PREVIEW_IMAGE_GEN_DELAY = 400;
+
 let _tpTooltipEl   = null;
 let _tpGen         = 0;     // bumped on every hide/hover-away - invalidates in-flight async work
 let _tpHoverTimer  = null;
@@ -482,7 +542,77 @@ let _tpActiveTabId = null;
 let _tpImgAbort    = null;  // AbortController for the in-flight tooltip image-gen fetch
 let _tpLastX       = 0;     // last known cursor position, used to resume the tooltip once a scroll animation settles
 let _tpLastY       = 0;
-const _tpImageCache = new Map(); // `${tabId}:${pairsKey}` -> generated image URL, avoids re-generating on repeat hovers
+/* Tooltip result caches.
+
+   Both are keyed by what actually determines the result (gun + build, plus the
+   stat inputs for stats) rather than by tab id, so duplicated tabs and two tabs
+   holding the same build share entries instead of each paying for their own
+   round trip. Both are LRU-capped rather than pruned per tab close: a gun+build
+   key outlives any particular tab, and stats keys multiply by ammo/strength
+   settings, so neither has a natural per-tab owner to prune against.
+
+   The in-flight maps matter more than the caches. renderTabBar() re-renders the
+   chip strip underneath a stationary cursor, and the replacement chip fires a
+   fresh mouseenter while renderTabBar separately re-connects the tooltip - so
+   _tpShow can run twice for one hover. The generation counter discards the
+   loser's DOM update, but without these both calls would still have hit the
+   network, and for the image path that means two server-side generations. */
+const TP_CACHE_MAX = 60;
+
+const _tpImageCache    = new Map(); // `${gunId}:${pairsKey}` -> generated image URL
+const _tpImageInflight = new Map(); // same key -> Promise<url|null> currently generating
+const _tpStatsCache    = new Map(); // stats key (see _tpStatsKey) -> calculateBuild() response
+const _tpStatsInflight = new Map(); // same key -> Promise<data|null> currently calculating
+
+function _tpCachePut(cache, key, value) {
+    cache.delete(key);
+    cache.set(key, value);
+    while (cache.size > TP_CACHE_MAX) cache.delete(cache.keys().next().value);
+}
+
+function _tpCacheGet(cache, key) {
+    if (!cache.has(key)) return undefined;
+    const value = cache.get(key); // re-insert as newest for LRU ordering
+    cache.delete(key);
+    cache.set(key, value);
+    return value;
+}
+
+// Every input calculateBuild() is sensitive to, so a settings change (ammo,
+// strength, equipment ergo, full-mag assumption) lands on a different key
+// instead of needing the cache invalidated.
+function _tpStatsKey(tab) {
+    return [
+        tab.gunId,
+        _tabPairsKey(tab),
+        tab.ammoId || "",
+        tab.ubglAmmoId || "",
+        EFTForge.state.assumeFullMag ?? true,
+        EFTForge.state.currentStrengthLevel,
+        EFTForge.state.currentEquipErgoModifier,
+    ].join("|");
+}
+
+// Shared by the stats and image paths: return the cached value, join an
+// identical request already in flight, or start one and register it.
+function _tpDedupe(cache, inflight, key, run) {
+    const cached = _tpCacheGet(cache, key);
+    if (cached !== undefined) return Promise.resolve(cached);
+
+    const pending = inflight.get(key);
+    if (pending) return pending;
+
+    const promise = run()
+        .then(value => {
+            if (value !== null && value !== undefined) _tpCachePut(cache, key, value);
+            return value;
+        })
+        .catch(() => null)
+        .finally(() => inflight.delete(key));
+
+    inflight.set(key, promise);
+    return promise;
+}
 
 function _tpEnsureTooltipEl() {
     if (_tpTooltipEl) return _tpTooltipEl;
@@ -836,16 +966,15 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
         return;
     }
 
-    const key = _pairsKey(tab.pairs || []);
+    const key = _tabPairsKey(tab);
 
     if (tab.id === EFTForge.state.activeTabId) {
         // Active tab's image is already being managed by build-preview.js - just mirror it.
-        // selectGun() always renders the gun's factory tree first and reapplies the tab's
-        // real pairs a moment later, so build-preview.js's own generation pipeline briefly
-        // settles on the factory image mid-switch before catching up to the real one - only
-        // trust its cached URL when it's actually for this tab's current build, not that
-        // transient intermediate state (which would otherwise flash the tooltip back to the
-        // factory gun right after activating a tab with real attachments).
+        // Its cached URL lags a tab switch: the generation for the newly activated build
+        // is still in flight for a moment, during which _bpLastKey/_bpLastImageUrl still
+        // describe the build we just switched AWAY from. Only trust them when the key
+        // actually matches this tab's current build, otherwise the tooltip would show the
+        // previous tab's gun right after activating this one.
         if (window._bpGetLastKey?.() === key) {
             const liveUrl = window._bpGetLastImageUrl?.();
             if (liveUrl) _tpSetImg(imgEl, liveUrl);
@@ -858,8 +987,10 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
         return;
     }
 
-    const cacheKey = tab.id + ":" + key;
-    const cachedUrl = _tpImageCache.get(cacheKey);
+    // Keyed on gun+build, not tab id: two tabs holding the same build (a
+    // Duplicate, or the same community build opened twice) share one generation.
+    const cacheKey = gun.id + ":" + key;
+    const cachedUrl = _tpCacheGet(_tpImageCache, cacheKey);
     if (cachedUrl) { _tpSetImg(imgEl, cachedUrl); return; }
 
     if (key === "") {
@@ -878,23 +1009,10 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
         return;
     }
 
-    // Warm slotCache for any pairs items the gun's own factory data didn't cover.
-    const uncachedItemIds = [...new Set(
-        (tab.pairs || []).map(([, iid]) => iid).filter(iid => !EFTForge.state.slotCache[iid])
-    )];
-    if (uncachedItemIds.length) {
-        try {
-            const batch = await fetchItemSlotsBatch(uncachedItemIds);
-            for (const [iid, slots] of Object.entries(batch)) cacheSet(EFTForge.state.slotCache, iid, slots);
-        } catch (_) { /* image gen below will just skip unresolved slots */ }
-    }
+    // Everything above resolves without a render request. Past this point we're
+    // committing to a server-side generation, so require the extra dwell first.
+    await _sleep(TAB_PREVIEW_IMAGE_GEN_DELAY);
     if (_tpGen !== gen) return;
-
-    const sptData = _bpBuildSptItemsForPairs(gun, tab.pairs || []);
-    if (!sptData) return;
-
-    const abort = new AbortController();
-    _tpImgAbort = abort;
 
     // Invalidate any earlier _tpSetImg() call's pending "load" listener (e.g. from
     // the static fallback image swapped in at the top of _tpShow) so it can't fire
@@ -904,43 +1022,63 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
     imgEl.style.filter  = "brightness(0.85)";
 
     try {
-        try {
-            const busyResp = await fetch(`${EFTForge.config.API_BASE}/build-image/busy`, { signal: abort.signal });
-            if (busyResp.ok) {
-                const busyData = await busyResp.json();
-                if (_tpGen === gen && busyData.busy) _tpSetQueued(imgWrap, true);
+        const url = await _tpDedupe(_tpImageCache, _tpImageInflight, cacheKey, async () => {
+            // Warm slotCache for any pairs items the gun's own factory data didn't cover.
+            const uncachedItemIds = [...new Set(
+                (tab.pairs || []).map(([, iid]) => iid).filter(iid => !EFTForge.state.slotCache[iid])
+            )];
+            if (uncachedItemIds.length) {
+                try {
+                    const batch = await fetchItemSlotsBatch(uncachedItemIds);
+                    for (const [iid, slots] of Object.entries(batch)) cacheSet(EFTForge.state.slotCache, iid, slots);
+                } catch (_) { /* image gen below will just skip unresolved slots */ }
             }
-        } catch (_) { /* best-effort queue indicator only */ }
 
-        if (_tpGen !== gen) return;
+            const sptData = _bpBuildSptItemsForPairs(gun, tab.pairs || []);
+            if (!sptData) return null;
 
-        const resp = await fetch(`${EFTForge.config.API_BASE}/build-image`, {
-            method:  "POST",
-            headers: { "Content-Type": "application/json" },
-            body:    JSON.stringify(sptData),
-            signal:  abort.signal,
+            // The abort controller is deliberately NOT shared with the dedupe
+            // entry: hovering away aborts this hover's view of the request, but a
+            // second hover that joined the same in-flight generation still wants
+            // the result. Only the /build-image POST itself is left to finish.
+            const abort = new AbortController();
+            _tpImgAbort = abort;
+            try {
+                try {
+                    const busyResp = await fetch(`${EFTForge.config.API_BASE}/build-image/busy`, { signal: abort.signal });
+                    if (busyResp.ok) {
+                        const busyData = await busyResp.json();
+                        if (_tpGen === gen && busyData.busy) _tpSetQueued(imgWrap, true);
+                    }
+                } catch (_) { /* best-effort queue indicator only */ }
+
+                const resp = await fetch(`${EFTForge.config.API_BASE}/build-image`, {
+                    method:  "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body:    JSON.stringify(sptData),
+                });
+                if (!resp.ok) return null;
+                const data = await resp.json();
+                return data.image_url || null;
+            } finally {
+                if (_tpImgAbort === abort) _tpImgAbort = null;
+            }
         });
-        if (resp.ok) {
-            const data = await resp.json();
-            if (data.image_url) {
-                _tpImageCache.set(cacheKey, data.image_url);
-                if (_tpGen === gen) imgEl.src = data.image_url;
-            }
-        }
+
+        if (url && _tpGen === gen) imgEl.src = url;
     } catch (_) {
-        // Aborted (hovered away) or network failure - leave the static fallback showing.
+        // Network failure - leave the static fallback showing.
     } finally {
         if (_tpGen === gen) {
             imgEl.style.opacity = "";
             imgEl.style.filter  = "";
             _tpSetQueued(imgWrap, false);
         }
-        if (_tpImgAbort === abort) _tpImgAbort = null;
     }
 }
 
 async function _tpShow(tab, cx, cy, connected = false) {
-    const gun = EFTForge.state.allGuns.find(g => g.id === tab.gunId);
+    const gun = gunById(tab.gunId);
     if (!gun) return;
 
     const gen = ++_tpGen;
@@ -996,19 +1134,18 @@ async function _tpShow(tab, cx, cy, connected = false) {
             arm_stamina:       EFTForge.state.lastArmStamina,
         };
     } else {
-        try {
-            data = await calculateBuild({
-                base_item_id:          tab.gunId,
-                attachment_ids:        (tab.pairs || []).map(p => p[1]),
-                assume_full_mag:       EFTForge.state.assumeFullMag ?? true,
-                selected_ammo_id:      tab.ammoId,
-                selected_ubgl_ammo_id: tab.ubglAmmoId,
-                strength_level:        EFTForge.state.currentStrengthLevel,
-                equip_ergo_modifier:   EFTForge.state.currentEquipErgoModifier,
-            });
-        } catch (_) {
-            data = null;
-        }
+        // Background tab builds don't change while they're in the background, so
+        // this is a near-100% hit rate on re-hover, and the in-flight join covers
+        // the double _tpShow that a re-render under a stationary cursor produces.
+        data = await _tpDedupe(_tpStatsCache, _tpStatsInflight, _tpStatsKey(tab), () => calculateBuild({
+            base_item_id:          tab.gunId,
+            attachment_ids:        (tab.pairs || []).map(p => p[1]),
+            assume_full_mag:       EFTForge.state.assumeFullMag ?? true,
+            selected_ammo_id:      tab.ammoId,
+            selected_ubgl_ammo_id: tab.ubglAmmoId,
+            strength_level:        EFTForge.state.currentStrengthLevel,
+            equip_ergo_modifier:   EFTForge.state.currentEquipErgoModifier,
+        }));
     }
 
     if (_tpGen !== gen) return; // hovered away while calculating
@@ -1042,13 +1179,27 @@ function _syncTabBarSpacer() {
 // instead of snapping straight to fully visible.
 const TAB_BAR_FADE_DISTANCE = 40;
 
+// scrollWidth/clientWidth are layout reads, and _updateTabBarFades runs on every
+// scroll event - including the ~16 per second the rAF scroll animation and the
+// drag auto-scroll generate by writing scrollLeft. Reading geometry right after
+// writing it forces a synchronous reflow each frame, so the extent is measured
+// only when it can actually change (chips added/removed, viewport resized) and
+// the per-event path reads nothing but scrollLeft.
+let _tabBarMaxScroll = 0;
+
+function _measureTabBarScroll(scroll) {
+    const el = scroll || document.getElementById("tab-bar-scroll");
+    _tabBarMaxScroll = el ? Math.max(0, el.scrollWidth - el.clientWidth) : 0;
+    return _tabBarMaxScroll;
+}
+
 function _updateTabBarFades() {
     const scroll = document.getElementById("tab-bar-scroll");
     const fadeLeft = document.querySelector(".tab-bar-fade-left");
     const fadeRight = document.querySelector(".tab-bar-fade-right");
     if (!scroll || !fadeLeft || !fadeRight) return;
 
-    const maxScroll = scroll.scrollWidth - scroll.clientWidth;
+    const maxScroll = _tabBarMaxScroll;
     if (maxScroll <= 1) {
         fadeLeft.style.opacity = 0;
         fadeRight.style.opacity = 0;
@@ -1061,6 +1212,30 @@ function _updateTabBarFades() {
     fadeRight.style.opacity = Math.max(0, Math.min(1, right / TAB_BAR_FADE_DISTANCE));
 }
 
+let _disposeTabBarMarquee = null;
+
+// Chip focus has to survive the strip being rebuilt (closing a tab re-renders
+// everything, so the element that had focus is gone by the time the new one
+// exists) - stash the id and let the next render hand focus to it.
+let _pendingChipFocus = null;
+
+function _focusChipByOffset(tabId, delta) {
+    const idx = EFTForge.state.tabs.findIndex(t => t.id === tabId);
+    if (idx === -1) return;
+    const next = EFTForge.state.tabs[idx + delta];
+    if (!next) return;
+    document.querySelector(`.tab-chip[data-tab-id="${CSS.escape(next.id)}"]`)?.focus();
+}
+
+// Mirrors closeTab()'s own "which tab takes over" rule so keyboard focus lands
+// where the selection does.
+function _focusAdjacentChip(tabId) {
+    const idx = EFTForge.state.tabs.findIndex(t => t.id === tabId);
+    if (idx === -1) return;
+    const next = EFTForge.state.tabs[idx + 1] || EFTForge.state.tabs[idx - 1];
+    _pendingChipFocus = next ? next.id : null;
+}
+
 function renderTabBar() {
     if (!_isDesktopTabs()) return;
     const bar = document.getElementById("tab-bar");
@@ -1069,7 +1244,15 @@ function renderTabBar() {
 
     bar.classList.toggle("has-tabs", EFTForge.state.tabs.length > 0);
     _syncTabBarSpacer();
-    _clearMarqueeTimers();
+
+    // Tear down only OUR marquees. _clearMarqueeTimers() is a page-wide reset:
+    // it bumps the shared generation counter, which permanently freezes every
+    // other module's marquees (attachment table rows, stats panel, community
+    // cards) until they happen to re-render. Since this function runs on every
+    // build mutation via syncActiveTab(), calling it here killed the attachment
+    // table's hover marquees the moment the user installed anything.
+    _disposeTabBarMarquee?.();
+    _disposeTabBarMarquee = null;
 
     // Chips get torn down and rebuilt below (innerHTML reset), which would
     // otherwise force the tooltip closed even when the hovered tab isn't going
@@ -1092,15 +1275,20 @@ function renderTabBar() {
             scroll.appendChild(divider);
         }
 
-        const gun = EFTForge.state.allGuns.find(g => g.id === tab.gunId);
+        const gun = gunById(tab.gunId);
         const shortName = gun ? gun.short_name : "?";
         const label = tab.buildName ? `${shortName} - ${tab.buildName}` : shortName;
 
+        const isActive = tab.id === EFTForge.state.activeTabId;
         const chip = document.createElement("div");
         chip.className = "tab-chip"
-            + (tab.id === EFTForge.state.activeTabId ? " active" : "")
+            + (isActive ? " active" : "")
             + (tab.pinned ? " pinned" : "");
         chip.dataset.tabId = tab.id;
+        chip.tabIndex = 0;
+        chip.setAttribute("role", "tab");
+        chip.setAttribute("aria-selected", isActive ? "true" : "false");
+        chip.setAttribute("aria-label", label);
         chip.innerHTML = `
             ${tab.pinned ? `<img class="tab-chip-pin-icon" src="./assets/images/pin.png" alt="" />` : ""}
             <span class="tab-chip-label"><span class="marquee-text">${escapeHtml(label)}</span></span>
@@ -1144,6 +1332,28 @@ function renderTabBar() {
         });
         chip.addEventListener("mouseleave", _tpScheduleHide);
 
+        // Keyboard parity for the mouse gestures above: the chips are plain divs,
+        // so without this the whole strip is unreachable without a pointer.
+        chip.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                switchToTab(tab.id);
+            } else if (e.key === "Delete" || e.key === "Backspace") {
+                e.preventDefault();
+                _focusAdjacentChip(tab.id);
+                closeTab(tab.id);
+            } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                e.preventDefault();
+                _focusChipByOffset(tab.id, e.key === "ArrowRight" ? 1 : -1);
+            }
+        });
+        // Follow keyboard focus only. A click already put the chip under the
+        // cursor, and kicking off a scroll animation on mousedown would fight the
+        // drag that press may be about to become.
+        chip.addEventListener("focus", () => {
+            if (chip.matches(":focus-visible")) _scrollTabIntoView(tab.id);
+        });
+
         scroll.appendChild(chip);
     });
 
@@ -1152,8 +1362,15 @@ function renderTabBar() {
     countEl.textContent = EFTForge.state.tabs.length;
     scroll.appendChild(countEl);
 
-    _initMarqueeText(scroll, { hoverOnly: true, hoverTarget: ".tab-chip" });
+    _disposeTabBarMarquee = _initMarqueeText(scroll, { hoverOnly: true, hoverTarget: ".tab-chip" });
+    _measureTabBarScroll(scroll);
     _updateTabBarFades();
+
+    if (_pendingChipFocus) {
+        const target = scroll.querySelector(`.tab-chip[data-tab-id="${CSS.escape(_pendingChipFocus)}"]`);
+        _pendingChipFocus = null;
+        target?.focus();
+    }
 
     // Chips were just rebuilt from scratch, so the old element the tooltip's
     // hover listeners were attached to is gone - patch it onto the new one in
@@ -1217,7 +1434,8 @@ function _tpResumeAfterScroll() {
 
 function _animateTabBarScrollTo(scroll, targetX, { resumeHover = false } = {}) {
     _tpHide();
-    const max = scroll.scrollWidth - scroll.clientWidth;
+    // Once per gesture, not per frame - _stepTabBarScroll only writes scrollLeft.
+    const max = _measureTabBarScroll(scroll);
     _tabBarAnim = {
         fromX: scroll.scrollLeft,
         toX: Math.max(0, Math.min(max, targetX)),
@@ -1240,9 +1458,9 @@ function _queueTabBarScroll(scroll, deltaY) {
 function _scrollTabIntoView(tabId) {
     const scroll = document.getElementById("tab-bar-scroll");
     if (!scroll) return;
-    const chip = scroll.querySelector(`.tab-chip[data-tab-id="${tabId}"]`);
+    const chip = scroll.querySelector(`.tab-chip[data-tab-id="${CSS.escape(tabId)}"]`);
     if (!chip) return;
-    if (scroll.scrollWidth <= scroll.clientWidth) return;
+    if (_measureTabBarScroll(scroll) <= 0) return;
 
     const chipLeft = chip.offsetLeft;
     const chipRight = chipLeft + chip.offsetWidth;
@@ -1258,11 +1476,31 @@ function _scrollTabIntoView(tabId) {
     const scroll = document.getElementById("tab-bar-scroll");
     if (!scroll) return;
 
-    scroll.addEventListener("scroll", _updateTabBarFades, { passive: true });
-    window.addEventListener("resize", _updateTabBarFades);
+    scroll.addEventListener("scroll", () => {
+        // A scroll event at all proves there's overflow, so a cached extent of 0
+        // means the chips grew after the render that measured them (web font
+        // swap, a marquee label settling) - re-measure instead of leaving the
+        // fades stuck hidden.
+        if (_tabBarMaxScroll <= 1) _measureTabBarScroll(scroll);
+        _updateTabBarFades();
+    }, { passive: true });
+
+    // Coalesce resize bursts into one measure+paint per frame - both halves read
+    // layout, and resize fires far faster than it can be usefully acted on.
+    let resizeRAF = null;
+    window.addEventListener("resize", () => {
+        if (resizeRAF) return;
+        resizeRAF = requestAnimationFrame(() => {
+            resizeRAF = null;
+            _measureTabBarScroll();
+            _updateTabBarFades();
+            // A live drag cached the container's viewport rect at mousedown.
+            if (_td && _td.phase === "active") _td.scrollRect = _td.scroll.getBoundingClientRect();
+        });
+    });
 
     scroll.addEventListener("wheel", (e) => {
-        if (scroll.scrollWidth <= scroll.clientWidth) return;
+        if (_measureTabBarScroll(scroll) <= 0) return;
         if (e.deltaY === 0) return;
         e.preventDefault();
         _queueTabBarScroll(scroll, e.deltaY);
@@ -1355,6 +1593,13 @@ function _tdBeginDrag(pending, e) {
         idx: startIdx,
         lastClientX: e.clientX,
         autoScrollRAF: null,
+        // Measured once here rather than every mousemove and every auto-scroll
+        // frame. Neither can change during a drag: the bar is position:fixed so
+        // its viewport rect is stable, and dragging only applies transforms,
+        // which don't affect scrollWidth. The resize handler in
+        // _initTabBarScrollUX refreshes the rect if the window does change.
+        scrollRect: scroll.getBoundingClientRect(),
+        maxScroll: Math.max(0, scroll.scrollWidth - scroll.clientWidth),
     };
 
     chip.classList.add("dragging");
@@ -1371,7 +1616,7 @@ function _tdBeginDrag(pending, e) {
 function _tdUpdatePosition() {
     const d = _td;
     if (!d || d.phase !== "active") return;
-    const scrollRect = d.scroll.getBoundingClientRect();
+    const scrollRect = d.scrollRect;
     // The cursor itself is never clamped - it can wander outside the bar
     // entirely (horizontally past the last tab, or off its vertical bounds)
     // while the drag stays live. Only the dragged chip's drawn position
@@ -1406,8 +1651,8 @@ function _tdAutoScrollStep() {
     const d = _td;
     if (!d || d.phase !== "active") return;
 
-    const scrollRect = d.scroll.getBoundingClientRect();
-    const maxScroll = d.scroll.scrollWidth - d.scroll.clientWidth;
+    const scrollRect = d.scrollRect;
+    const maxScroll = d.maxScroll;
     const leftDist = d.lastClientX - scrollRect.left;
     const rightDist = scrollRect.right - d.lastClientX;
 
@@ -1442,8 +1687,13 @@ function _tdEndDrag() {
         const tabs = EFTForge.state.tabs;
         const groupStart = tabs.findIndex(t => t.id === d.groupIds[0]);
         const byId = new Map(tabs.map(t => [t.id, t]));
-        tabs.splice(groupStart, finalOrder.length, ...finalOrder.map(id => byId.get(id)));
-        _persistTabs();
+        // Bail rather than splice on a stale layout: a -1 groupStart (the group's
+        // first tab disappeared mid-drag) would splice from the END of the array,
+        // silently scrambling the order instead of just dropping the reorder.
+        if (groupStart !== -1 && finalOrder.every(id => byId.has(id))) {
+            tabs.splice(groupStart, finalOrder.length, ...finalOrder.map(id => byId.get(id)));
+            _persistTabs();
+        }
     }
     renderTabBar();
 }
@@ -1457,7 +1707,7 @@ document.addEventListener("mousemove", (e) => {
     }
     _td.lastClientX = e.clientX;
     _tdUpdatePosition();
-});
+}, { passive: true });
 document.addEventListener("mouseup", () => {
     if (!_td) return;
     if (_td.phase === "active") { _tdSwallowNextClick(); _tdEndDrag(); }

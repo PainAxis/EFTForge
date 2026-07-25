@@ -201,16 +201,24 @@ function _bpBuildSptItems() {
 // them), matching every place pairs are produced in this codebase.
 function _bpTreeFromPairs(gun, pairs) {
     const root = { item: { id: gun.id }, children: {} };
+
+    // slotId -> the node that owns that slot. Built once from the root and
+    // extended as each node is attached: a newly attached node can only ever
+    // contribute its own slots, so re-walking the whole tree per pair (which is
+    // what this used to do, quadratic in attachment count) buys nothing.
+    const slotToParent = {};
+    function addSlots(node) {
+        const slots = EFTForge.state.slotCache[node.item.id] || [];
+        for (const slot of slots) slotToParent[slot.id] = node;
+    }
+    addSlots(root);
+
     for (const [slotId, itemId] of pairs) {
-        const slotToParent = {};
-        (function findParents(node) {
-            const slots = EFTForge.state.slotCache[node.item.id] || [];
-            for (const slot of slots) slotToParent[slot.id] = node;
-            for (const childSlotId in node.children) findParents(node.children[childSlotId]);
-        })(root);
         const parent = slotToParent[slotId];
         if (!parent) continue; // slot not in cache - skip
-        parent.children[slotId] = { item: { id: itemId }, children: {} };
+        const node = { item: { id: itemId }, children: {} };
+        parent.children[slotId] = node;
+        addSlots(node);
     }
     return root;
 }

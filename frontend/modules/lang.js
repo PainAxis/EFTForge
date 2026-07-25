@@ -160,7 +160,7 @@ const _TRANSLATIONS = {
         "th.name":                "Name",
         "th.weight":              "Weight (kg)",
         "th.recoil":              "Recoil",
-        "th.recoilList":          "Recoil Modifier",
+        "th.recoilList":          "Recoil Mod.",
         "th.recoilCombo":         "Recoil %Change",
         "th.recoilTooltipList":   "The item's in-game recoil modifier, the same value the attachment's in-game inspect menu shows.",
         "th.recoilTooltipCombo":  "Actual % recoil change on your current build.\nDiffers from the item's raw recoilModifier stat because other installed mods already reduced the base recoil, making each additional reduction a larger share of what remains.",
@@ -176,7 +176,7 @@ const _TRANSLATIONS = {
         "th.price":               "Price",
         "th.priceTooltip":        "To switch between PvP and PvE pricing, open the Price panel and toggle PvE mode",
         "th.heatCoolBurn":        "Heat/Cool/Burn",
-        "th.muzzleVelocity":      "Muzzle Velocity",
+        "th.muzzleVelocity":      "Velocity",
         // Build manager modals
         "modal.save":             "SAVE BUILD",
         "modal.share":            "SHARE BUILD",

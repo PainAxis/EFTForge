@@ -2290,8 +2290,12 @@ function buildSlotParentMap(node, map) {
 }
 
 // Load a build from a decoded payload { g: gunId, p: [[slotId, itemId], ...] }
-async function loadBuildFromPayload({ g: gunId, p: pairs, a: ammoId = null, ua: ubglAmmoId = null }, buildName = null, silent = false) {
-    const gun = EFTForge.state.allGuns.find(g => g.id === gunId);
+// collapsedSlots: the tree-collapse state to install alongside the build. Tabs
+// pass their own so switching to one restores it in the SAME render as the build
+// itself - without it the caller has to reapply the state and pay a second full
+// renderFullTree() just to reflect it.
+async function loadBuildFromPayload({ g: gunId, p: pairs, a: ammoId = null, ua: ubglAmmoId = null }, buildName = null, silent = false, { collapsedSlots = null } = {}) {
+    const gun = gunById(gunId);
     if (!gun) {
         showToast(t("toast.loadFailed"), t("toast.unknownWeapon"), 3500);
         return;
@@ -2300,7 +2304,8 @@ async function loadBuildFromPayload({ g: gunId, p: pairs, a: ammoId = null, ua: 
     // Clear EFTForge.state.currentGun so selectGun's early-return guard never fires
     EFTForge.state.currentGun = null;
     const dummyEl = { classList: { add() {}, remove() {} } };
-    await selectGun(gun, dummyEl);
+    // Its factory tree render would be discarded three lines down - skip it.
+    await selectGun(gun, dummyEl, { skipTreeRender: true });
     // selectGun populates EFTForge.state.slotCache for the gun and all factory items - but we
     // don't want factory attachments in the tree; pairs represent the complete build.
     EFTForge.state.buildTree.children = {};
@@ -2320,6 +2325,7 @@ async function loadBuildFromPayload({ g: gunId, p: pairs, a: ammoId = null, ua: 
     }
 
     if (!pairs || pairs.length === 0) {
+        EFTForge.state.collapsedSlots = collapsedSlots || {};
         await renderFullTree(false);
         stopPanelLoading(buildLoadOverlay);
         _applyPayloadAmmo(ammoId);
@@ -2371,7 +2377,7 @@ async function loadBuildFromPayload({ g: gunId, p: pairs, a: ammoId = null, ua: 
     }
 
     EFTForge.state.processedCache = {};
-    EFTForge.state.collapsedSlots = {};
+    EFTForge.state.collapsedSlots = collapsedSlots || {};
     EFTForge.state.lastParentNode = null;
     EFTForge.state.lastSlot = null;
     await renderFullTree(false);

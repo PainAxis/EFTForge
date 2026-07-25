@@ -69,45 +69,100 @@ async function _selectGunOrRestoreSnapshot(gun, card) {
 
 let _initialRender = true;
 let _cachedGunCards = []; // [{card, rect}, ...]
-let _gunInitCache = {}; // gunId -> fetchGunInit() response, reused for instant tab switches
+// gunId -> fetchGunInit() response, reused for instant tab switches. A Map so
+// insertion order gives us a free LRU for the cap below; each entry holds a full
+// slots_by_item + factory_tree + ammo list payload, so an unbounded one grows
+// into several MB once a session has visited a few dozen guns.
+const _gunInitCache = new Map();
+const GUN_INIT_CACHE_MAX = 24;
 
 // Item/gun names are baked into cached init data - drop it on language switch (mirrors
 // the slotCache/allowedCache/processedCache resets in switchLang()).
 function _clearGunInitCache() {
-    _gunInitCache = {};
+    _gunInitCache.clear();
+}
+
+function _gunInitCacheGet(gunId) {
+    if (!_gunInitCache.has(gunId)) return null;
+    const data = _gunInitCache.get(gunId);
+    _gunInitCache.delete(gunId);
+    _gunInitCache.set(gunId, data); // re-insert as newest
+    return data;
+}
+
+// Evicts least-recently-used first, but never a gun an open tab still points at -
+// those are the entries the whole cache exists to serve.
+function _gunInitCacheSet(gunId, data) {
+    _gunInitCache.delete(gunId);
+    _gunInitCache.set(gunId, data);
+    if (_gunInitCache.size <= GUN_INIT_CACHE_MAX) return;
+    const openGunIds = new Set((EFTForge.state.tabs || []).map(t => t.gunId));
+    for (const id of _gunInitCache.keys()) {
+        if (_gunInitCache.size <= GUN_INIT_CACHE_MAX) break;
+        if (id === gunId || openGunIds.has(id)) continue;
+        _gunInitCache.delete(id);
+    }
+}
+
+// O(1) gun lookup by id. EFTForge.state.allGuns is reassigned wholesale by
+// fetchGuns() (including on language switch), so keying the memo on the array
+// identity self-invalidates without any explicit cache-busting call.
+let _gunByIdMap = null;
+let _gunByIdSrc = null;
+function gunById(id) {
+    if (_gunByIdSrc !== EFTForge.state.allGuns) {
+        _gunByIdSrc = EFTForge.state.allGuns;
+        _gunByIdMap = new Map((_gunByIdSrc || []).map(g => [g.id, g]));
+    }
+    return _gunByIdMap.get(id) || null;
 }
 
 // Drop a gun's cached /guns/{id}/init payload once no open tab references it
 // anymore - otherwise every gun visited in the session (not just currently
 // open ones) stays cached for the rest of the page's life.
 function _evictUnusedGunInitCache(gunId) {
-    if (!_gunInitCache[gunId]) return;
+    if (!_gunInitCache.has(gunId)) return;
     const stillOpen = (EFTForge.state.tabs || []).some(t => t.gunId === gunId);
-    if (!stillOpen) delete _gunInitCache[gunId];
+    if (!stillOpen) _gunInitCache.delete(gunId);
 }
+
+// In-flight fetches, so two tooltip hovers racing on the same uncached gun
+// (or a hover racing the tab activation for that gun) share one request.
+const _gunInitInflight = new Map();
 
 // Warm _gunInitCache (and slotCache) for a gun that may never have been activated
 // this session - e.g. a tab restored from localStorage that hasn't been clicked yet.
 // Used by the tab hover preview so it can resolve a gun's factory config without
 // going through the full selectGun render path.
 async function _ensureGunInitCached(gun) {
-    let initData = _gunInitCache[gun.id];
-    if (initData) return initData;
-    try {
-        const savedAmmoId = (JSON.parse(localStorage.getItem("eftforge_ammo_prefs") || "{}") || {})[gun.caliber] || null;
-        initData = await fetchGunInit(gun.id, {
-            selectedAmmoId: savedAmmoId,
-            assumeFullMag: EFTForge.state.assumeFullMag ?? true,
-        });
-        initData._statsAmmoId = savedAmmoId;
-        _gunInitCache[gun.id] = initData;
-        for (const [itemId, slots] of Object.entries(initData.slots_by_item)) {
-            cacheSet(EFTForge.state.slotCache, itemId, slots);
+    const cached = _gunInitCacheGet(gun.id);
+    if (cached) return cached;
+
+    const inflight = _gunInitInflight.get(gun.id);
+    if (inflight) return inflight;
+
+    const promise = (async () => {
+        try {
+            const savedAmmoId = (JSON.parse(localStorage.getItem("eftforge_ammo_prefs") || "{}") || {})[gun.caliber] || null;
+            const initData = await fetchGunInit(gun.id, {
+                selectedAmmoId: savedAmmoId,
+                assumeFullMag: EFTForge.state.assumeFullMag ?? true,
+            });
+            initData._statsAmmoId = savedAmmoId;
+            _gunInitCacheSet(gun.id, initData);
+            for (const [itemId, slots] of Object.entries(initData.slots_by_item)) {
+                cacheSet(EFTForge.state.slotCache, itemId, slots);
+            }
+            return initData;
+        } catch (_) {
+            return null;
+        } finally {
+            _gunInitInflight.delete(gun.id);
         }
-    } catch (_) {
-        return null;
-    }
-    return initData;
+    })();
+
+    _gunInitInflight.set(gun.id, promise);
+    return promise;
 }
 let _gunProximityHandler = null;
 let _gunProximityLeaveHandler = null;
@@ -491,7 +546,12 @@ function renderGunList(guns, forceStagger = false) {
   }
 }
 
-async function selectGun(gun, liElement) {
+// skipTreeRender: the caller is going to replace the factory tree wholesale
+// immediately after this returns (loadBuildFromPayload does exactly that), so
+// rendering it here is pure waste - a full renderNode pass over the factory
+// build plus, via build-preview.js's renderFullTree hook, a discarded
+// scheduleBuildPreview() image generation for a build nobody will ever see.
+async function selectGun(gun, liElement, { skipTreeRender = false } = {}) {
     // If clicking same gun, do nothing
     if (EFTForge.state.currentGun && EFTForge.state.currentGun.id === gun.id) {
         return;
@@ -576,7 +636,7 @@ async function selectGun(gun, liElement) {
   // Fetch all init data in a single request: slots, factory tree, ammo, stats.
   // Cached per gun for the rest of the session so re-visiting a gun (e.g. switching
   // back to an already-open tab) never re-hits the network.
-  let initData = _gunInitCache[gun.id] || null;
+  let initData = _gunInitCacheGet(gun.id);
   if (!initData) {
     try {
       initData = await fetchGunInit(gun.id, {
@@ -584,7 +644,7 @@ async function selectGun(gun, liElement) {
         assumeFullMag: EFTForge.state.assumeFullMag ?? true,
       });
       initData._statsAmmoId = targetAmmoId;
-      _gunInitCache[gun.id] = initData;
+      _gunInitCacheSet(gun.id, initData);
     } catch (err) {
       console.error("Failed to load gun init data:", err);
       showToast(t("toast.connectionError"), t("toast.serverUnreachable") + " " + (EFTForge.config.IS_LOCAL_DEV ? t("toast.networkHintDev") : t("toast.networkHintProd")), 5000);
@@ -622,7 +682,7 @@ async function selectGun(gun, liElement) {
   // every stats calculation for the new gun.
   await loadAmmoForGun(gun, initData.ammo);
 
-  await renderFullTree();
+  if (!skipTreeRender) await renderFullTree();
 
   // Pass preloaded ammo + stats through to avoid redundant API calls
   await updateStatsPanel(initData.stats, { preloadedAmmo: initData.ammo, preloadedUbglAmmo: initData.ubgl_ammo || [], _fromInit: true });

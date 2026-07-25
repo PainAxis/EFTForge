@@ -11,6 +11,7 @@ let _headerAnimating    = false;
 // Fade opacity ramps smoothly over this many px of scroll near each edge,
 // instead of snapping straight to fully visible.
 const HEADER_FADE_DISTANCE = 40;
+let _headerMaxScroll = 0;
 
 // Strip the cache-busting _v param added by the update checker so it doesn't
 // linger in the address bar after a forced reload.
@@ -318,13 +319,24 @@ function initHeaderExpand() {
    to hint that there's more to scroll to.
 =========================== */
 
+// scrollWidth/clientWidth are layout reads and the scroll handler below fires
+// continuously during a swipe, so the extent is measured only when it can
+// actually change (resize) and the per-event path reads only scrollLeft.
+// _headerMaxScroll itself lives with the other guard variables at the top of
+// this file - initHeaderFades() is called from the hoisted init block above
+// this section, so a `let` declared here would still be in its TDZ by then.
+function _measureHeaderScroll() {
+    const scroll = document.querySelector(".header-scroll");
+    _headerMaxScroll = scroll ? Math.max(0, scroll.scrollWidth - scroll.clientWidth) : 0;
+}
+
 function _updateHeaderFades() {
     const scroll = document.querySelector(".header-scroll");
     const fadeLeft = document.querySelector(".header-fade-left");
     const fadeRight = document.querySelector(".header-fade-right");
     if (!scroll || !fadeLeft || !fadeRight) return;
 
-    const maxScroll = scroll.scrollWidth - scroll.clientWidth;
+    const maxScroll = _headerMaxScroll;
     if (maxScroll <= 1) {
         fadeLeft.style.opacity = 0;
         fadeRight.style.opacity = 0;
@@ -340,8 +352,26 @@ function _updateHeaderFades() {
 function initHeaderFades() {
     const scroll = document.querySelector(".header-scroll");
     if (!scroll) return;
-    scroll.addEventListener("scroll", _updateHeaderFades, { passive: true });
-    window.addEventListener("resize", _updateHeaderFades);
+    scroll.addEventListener("scroll", () => {
+        // A scroll event at all proves there's overflow, so a cached extent of 0
+        // means header content grew since the last measure (badges, a longer
+        // nav label) - re-measure rather than leave the fades stuck hidden.
+        if (_headerMaxScroll <= 1) _measureHeaderScroll();
+        _updateHeaderFades();
+    }, { passive: true });
+
+    // Coalesce resize bursts into one measure+paint per frame.
+    let resizeRAF = null;
+    window.addEventListener("resize", () => {
+        if (resizeRAF) return;
+        resizeRAF = requestAnimationFrame(() => {
+            resizeRAF = null;
+            _measureHeaderScroll();
+            _updateHeaderFades();
+        });
+    });
+
+    _measureHeaderScroll();
     _updateHeaderFades();
 }
 

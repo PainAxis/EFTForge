@@ -22,15 +22,33 @@ function isMobileLayout() {
 
 /* --- Cache --- */
 
-const CACHE_MAX = 300;
+// Sized for the build-tabs era: 20 open tabs x ~30 attachments each is already
+// ~600 distinct item ids in slotCache, and the drop-oldest-half eviction below
+// is blind to what the active build still needs (renderNode reads slotCache
+// directly rather than through cacheGet, so live entries never get their LRU
+// position refreshed). 300 thrashed constantly once a handful of tabs were open.
+const CACHE_MAX = 1200;
+
+// Entry counts, so a set doesn't have to materialize every key just to check
+// the size - at CACHE_MAX entries that allocation dominated the cost of warming
+// a cache from a batch response.
+const _cacheSizes = new WeakMap();
 
 function cacheSet(cache, key, value) {
-    if (Object.keys(cache).length >= CACHE_MAX) {
+    let size = _cacheSizes.get(cache);
+    if (size === undefined) size = Object.keys(cache).length;
+    if (!(key in cache)) size++;
+
+    if (size > CACHE_MAX) {
         // Drop the oldest ~half to avoid thrashing on a full cache
         const keys = Object.keys(cache);
-        for (let i = 0; i < Math.floor(CACHE_MAX / 2); i++) delete cache[keys[i]];
+        const drop = Math.floor(CACHE_MAX / 2);
+        for (let i = 0; i < drop; i++) delete cache[keys[i]];
+        size -= drop;
     }
+
     cache[key] = value;
+    _cacheSizes.set(cache, size);
 }
 
 function cacheGet(cache, key) {
@@ -352,13 +370,22 @@ function _sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Returns a disposer that tears down ONLY the marquees this call created.
+// Callers that re-render frequently (e.g. the build tab strip) must use it
+// instead of _clearMarqueeTimers(), which is a page-wide reset: that bumps the
+// shared generation counter and so permanently freezes every other module's
+// marquees (attachment table rows, stats panel, community cards) until they
+// happen to re-render.
 function _initMarqueeText(container, { hoverOnly = false, hoverTarget = "tr" } = {}) {
+    const scope = { alive: true, observers: [], listeners: [] };
+
     container.querySelectorAll(".marquee-text").forEach(el => {
         const parent = el.parentElement;
         if (!parent) return;
 
         let elGen = 0;
         const globalGen = _marqueeGeneration;
+        const isStale = () => _marqueeGeneration !== globalGen || !scope.alive;
 
         function resetEl() {
             elGen++;
@@ -372,7 +399,7 @@ function _initMarqueeText(container, { hoverOnly = false, hoverTarget = "tr" } =
             const myElGen = elGen;
 
             requestAnimationFrame(async () => {
-                if (_marqueeGeneration !== globalGen) return;
+                if (isStale()) return;
 
                 const overflow = el.offsetWidth - parent.clientWidth;
 
@@ -387,7 +414,7 @@ function _initMarqueeText(container, { hoverOnly = false, hoverTarget = "tr" } =
                 const scrollDuration = Math.max(1200, (overflow / 45) * 1000);
 
                 async function runCycle() {
-                    if (_marqueeGeneration !== globalGen || elGen !== myElGen) return;
+                    if (isStale() || elGen !== myElGen) return;
 
                     // Pause while document is not visible to save CPU
                     if (document.hidden) {
@@ -403,23 +430,23 @@ function _initMarqueeText(container, { hoverOnly = false, hoverTarget = "tr" } =
 
                     // Phase 1 - pause at start (skipped on hover-triggered cycles)
                     if (!hoverOnly) await _sleep(800);
-                    if (_marqueeGeneration !== globalGen || elGen !== myElGen) return;
+                    if (isStale() || elGen !== myElGen) return;
 
                     // Phase 2 - scroll to end
                     el.style.transition = `transform ${scrollDuration}ms linear`;
                     el.style.transform = `translateX(-${overflow}px)`;
                     await _sleep(scrollDuration);
-                    if (_marqueeGeneration !== globalGen || elGen !== myElGen) return;
+                    if (isStale() || elGen !== myElGen) return;
 
                     // Phase 3 - pause at end
                     await _sleep(700);
-                    if (_marqueeGeneration !== globalGen || elGen !== myElGen) return;
+                    if (isStale() || elGen !== myElGen) return;
 
                     // Phase 4 - fade out
                     el.style.transition = "opacity 0.35s ease";
                     el.style.opacity = "0";
                     await _sleep(400);
-                    if (_marqueeGeneration !== globalGen || elGen !== myElGen) return;
+                    if (isStale() || elGen !== myElGen) return;
 
                     // Phase 5 - snap back while invisible
                     el.style.transition = "none";
@@ -430,7 +457,7 @@ function _initMarqueeText(container, { hoverOnly = false, hoverTarget = "tr" } =
                     await new Promise(resolve =>
                         requestAnimationFrame(() => requestAnimationFrame(resolve))
                     );
-                    if (_marqueeGeneration !== globalGen || elGen !== myElGen) return;
+                    if (isStale() || elGen !== myElGen) return;
 
                     el.style.transition = "opacity 0.35s ease";
                     el.style.opacity = "1";
@@ -449,17 +476,33 @@ function _initMarqueeText(container, { hoverOnly = false, hoverTarget = "tr" } =
             if (row) {
                 row.addEventListener("mouseenter", startMarquee);
                 row.addEventListener("mouseleave", resetEl);
+                scope.listeners.push([row, "mouseenter", startMarquee], [row, "mouseleave", resetEl]);
             }
             // ResizeObserver only resets position - no ambient animation
             const ro = new ResizeObserver(resetEl);
             ro.observe(parent);
             _marqueeObservers.push(ro);
+            scope.observers.push(ro);
         } else {
             const ro = new ResizeObserver(startMarquee);
             ro.observe(parent);
             _marqueeObservers.push(ro);
+            scope.observers.push(ro);
         }
     });
+
+    return function disposeMarquee() {
+        if (!scope.alive) return;
+        scope.alive = false;
+        for (const ro of scope.observers) {
+            ro.disconnect();
+            const i = _marqueeObservers.indexOf(ro);
+            if (i !== -1) _marqueeObservers.splice(i, 1);
+        }
+        for (const [el, type, fn] of scope.listeners) el.removeEventListener(type, fn);
+        scope.observers = [];
+        scope.listeners = [];
+    };
 }
 
 /* --- Exports --- */

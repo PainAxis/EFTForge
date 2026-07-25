@@ -235,6 +235,18 @@ header.header-expanded ~ #tab-bar {
   color: #ccc;
 }
 
+/* Keyboard-only ring - a click focuses the chip too, and an outline on every
+   click would read as a rendering glitch. */
+.tab-chip:focus {
+  outline: none;
+}
+
+.tab-chip:focus-visible {
+  outline: 1px solid #f5c542;
+  outline-offset: -1px;
+  color: #f5c542;
+}
+
 .tab-chip.active {
   background: #0e0e0e;
   border-color: #f5c542;
@@ -1410,6 +1422,8 @@ header:not(.header-expanded) .header-nav-btn-icon {
 }
 
 .attachment-table {
+  /* Cap on the name cell content (fav star + icon + name text). Tune here. */
+  --att-name-max: 420px;
   width: 100%;
   border-collapse: collapse;
   table-layout: auto;
@@ -1450,31 +1464,22 @@ header:not(.header-expanded) .header-nav-btn-icon {
   font-size: 12.5px;
 }
 
-/* Name column stretches to fill remaining space */
+/* Name column absorbs the leftover width so the stat columns are never squeezed,
+   but the name CONTENT is capped at --att-name-max. Names that don't fit
+   marquee-scroll on hover; stat values can't scroll, so they get space first. */
 .attachment-table th:nth-child(1),
 .attachment-table td:nth-child(1) {
   width: 100%;
 }
 
-/* Stat columns: fixed width, right-aligned, no wrapping */
-.attachment-table th:nth-child(2),
-.attachment-table th:nth-child(3),
-.attachment-table th:nth-child(4),
-.attachment-table th:nth-child(5),
-.attachment-table th:nth-child(6),
-.attachment-table th:nth-child(7),
-.attachment-table th:nth-child(8),
-.attachment-table th:nth-child(9),
-.attachment-table th:nth-child(10),
-.attachment-table td:nth-child(2),
-.attachment-table td:nth-child(3),
-.attachment-table td:nth-child(4),
-.attachment-table td:nth-child(5),
-.attachment-table td:nth-child(6),
-.attachment-table td:nth-child(7),
-.attachment-table td:nth-child(8),
-.attachment-table td:nth-child(9),
-.attachment-table td:nth-child(10) {
+/* max-width is ignored on table cells in auto layout, so cap the inner block */
+.attachment-table .attachment-name-wrapper {
+  max-width: var(--att-name-max);
+}
+
+/* Stat columns: shrink to content, right-aligned, no wrapping */
+.attachment-table th:not(:first-child),
+.attachment-table td:not(:first-child) {
   width: 1px;
   white-space: nowrap;
   text-align: right;
@@ -1596,12 +1601,13 @@ header:not(.header-expanded) .header-nav-btn-icon {
 
 /* Prevent tall rows */
 .attachment-table tbody tr {
-  height: 56px;
+  height: 58px;
   cursor: pointer;
 }
 
 .attachment-table tbody tr:has(.combo-name-cell) {
-  height: 57px;
+    /* im too fucked up to figure why this is but combo rows have to be slightly taller than normal rows or otherwise iconLinks' bottoms get cut-off */
+  height: 60px;
 }
 
 .attachment-table tbody tr:hover {
@@ -7409,7 +7415,7 @@ var _hmt = _hmt || [];
   <div class="header-fade header-fade-right"></div>
 </header>
 <div id="tab-bar">
-  <div id="tab-bar-scroll"></div>
+  <div id="tab-bar-scroll" role="tablist" aria-label="Open builds"></div>
   <div class="tab-bar-fade tab-bar-fade-left"></div>
   <div class="tab-bar-fade tab-bar-fade-right"></div>
 </div>
@@ -7619,23 +7625,23 @@ var _hmt = _hmt || [];
 <script src="modules/config.js?v=28"></script>
 <script src="modules/state.js?v=18"></script>
 <script src="modules/lang.js?v=25"></script>
-<script src="modules/utils.js?v=19"></script>
+<script src="modules/utils.js?v=20"></script>
 <script src="modules/media-viewer.js?v=7"></script>
 <script src="modules/calculations.js?v=16"></script>
 <div id="eft-tooltip"></div>
 <script src="modules/api.js?v=19"></script>
-<script src="modules/gun-list.js?v=20"></script>
+<script src="modules/gun-list.js?v=21"></script>
 <script src="modules/stats-panel.js?v=21"></script>
 <script src="modules/tree.js?v=19"></script>
 <script src="modules/attachment-grid.js?v=19"></script>
 <script src="modules/attachment-grid-devtool.js?v=15"></script><!-- dev only: self-exits on non-localhost -->
-<script src="modules/build-preview.js?v=16"></script>
+<script src="modules/build-preview.js?v=17"></script>
 <script src="modules/slot-selector.js?v=23"></script>
 <script src="modules/graph.js?v=9"></script>
-<script src="modules/build-manager.js?v=24"></script>
-<script src="modules/tab-manager.js?v=1"></script>
+<script src="modules/build-manager.js?v=25"></script>
+<script src="modules/tab-manager.js?v=2"></script>
 <script src="modules/profile.js?v=7"></script>
-<script src="app.js?v=36"></script>
+<script src="app.js?v=38"></script>
 <script src="lzstring.min.js?v=15"></script>
 <script src="marked.min.js?v=15"></script>
 <script src="modules/news.js?v=16"></script>
