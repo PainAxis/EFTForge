@@ -20,6 +20,7 @@ let _bpPendingKey       = null;   // key waiting to be generated
 let _bpLastKey          = null;   // key of the image currently displayed
 let _bpLastImageUrl     = null;   // URL currently displayed in the gun cell
 let _bpPlaceholderUrl   = null;   // URL shown on the placeholder (persists across attachment changes)
+let _bpLastIsCommunityCard = false; // true when the above URLs are a Gitee-hosted community build card - needs referrerPolicy="no-referrer"
 
 // --- Img gen enabled toggle ----------------------------------
 
@@ -89,6 +90,7 @@ function toggleImgGen() {
         _bpLastKey        = null;
         _bpLastImageUrl   = null;
         _bpPlaceholderUrl = null;
+        _bpLastIsCommunityCard = false;
         const gun = EFTForge.state.currentGun;
         if (gun) {
             const staticSrc  = gun.image_512_link || gun.icon_link || "";
@@ -141,14 +143,10 @@ function _bpHex24(str) {
     return [h1, h2, h3].map(v => ('00000000' + v.toString(16)).slice(-8)).join('');
 }
 
-// Walk buildTree and build the SPT-format items array.
-// Each item needs: _id, _tpl, slotId (game name like mod_barrel), parentId.
-// We resolve slot names from EFTForge.state.slotCache.
-function _bpBuildSptItems() {
-    const gun  = EFTForge.state.currentGun;
-    const tree = EFTForge.state.buildTree;
-    if (!gun || !tree) return null;
-
+// Walk an install tree ({children: {slotId: {item, children}}}) and build the
+// SPT-format items array. Each item needs: _id, _tpl, slotId (game name like
+// mod_barrel), parentId. We resolve slot names from EFTForge.state.slotCache.
+function _bpWalkTreeToSptItems(gun, tree) {
     // Use a 24-char hex key for the gun instance so the API sees a valid ObjectId.
     // The merge script replaces items[0] with the site's natural gun item anyway,
     // but we still need a stable key to track parentId references in our attachments.
@@ -188,37 +186,78 @@ function _bpBuildSptItems() {
     return { id: gun.id, items };
 }
 
+function _bpBuildSptItems() {
+    const gun  = EFTForge.state.currentGun;
+    const tree = EFTForge.state.buildTree;
+    if (!gun || !tree) return null;
+    return _bpWalkTreeToSptItems(gun, tree);
+}
+
+// Reconstruct a minimal install tree from flat [slotId, itemId] pairs (the
+// shape a tab record stores its build in) using the global slotCache to
+// resolve each pair's parent node - same linkage logic as build-manager.js's
+// buildSlotParentMap, just re-run per pair since we don't have a live tree.
+// Pairs are expected in parent-before-child order (how collectSlotPairs emits
+// them), matching every place pairs are produced in this codebase.
+function _bpTreeFromPairs(gun, pairs) {
+    const root = { item: { id: gun.id }, children: {} };
+    for (const [slotId, itemId] of pairs) {
+        const slotToParent = {};
+        (function findParents(node) {
+            const slots = EFTForge.state.slotCache[node.item.id] || [];
+            for (const slot of slots) slotToParent[slot.id] = node;
+            for (const childSlotId in node.children) findParents(node.children[childSlotId]);
+        })(root);
+        const parent = slotToParent[slotId];
+        if (!parent) continue; // slot not in cache - skip
+        parent.children[slotId] = { item: { id: itemId }, children: {} };
+    }
+    return root;
+}
+
+// Same as _bpBuildSptItems but for an arbitrary (gun, pairs) instead of the
+// live currentGun/buildTree - used by the tab hover preview to generate an
+// image for a background tab without disturbing the active build's state.
+function _bpBuildSptItemsForPairs(gun, pairs) {
+    if (!gun) return null;
+    return _bpWalkTreeToSptItems(gun, _bpTreeFromPairs(gun, pairs || []));
+}
+
 // Apply url to the placeholder element. Called on success and after every
 // renderFullTree to re-stamp the image over whatever the render put there.
 function _bpSetPlaceholder(url) {
     const img = document.getElementById("gun-display-image");
     if (!img) return;
-    img.src           = url;
-    img.style.display = "";
-    img.style.opacity = "1";
+    img.src            = url;
+    img.style.display  = "";
+    img.style.opacity  = "1";
+    img.referrerPolicy = _bpLastIsCommunityCard ? "no-referrer" : "";
 }
 
 // Update every image element that should show the build preview.
 // Passing null resets the target image to the factory image but leaves
 // the placeholder showing the last generated image.
 function _bpApplyImageUrl(url) {
-    _bpLastImageUrl = url;
+    _bpLastImageUrl        = url;
+    _bpLastIsCommunityCard = false;
     const fallback  = EFTForge.state.currentGun?.image_512_link || EFTForge.state.currentGun?.icon_link || "";
 
     if (EFTForge.state.gridView) {
         // Grid view: target the gun cell (recreated each render)
         const gunCellImg = document.querySelector(".ag-gun-cell img");
         if (gunCellImg) {
-            gunCellImg.src           = url || fallback;
-            gunCellImg.style.opacity = "";
-            gunCellImg.style.filter  = "";
+            gunCellImg.src            = url || fallback;
+            gunCellImg.style.opacity  = "";
+            gunCellImg.style.filter   = "";
+            gunCellImg.referrerPolicy = "";
         }
     } else {
         // List view: target the gun img in the attachment table header
         const tableImg = _bpGetListViewImg();
         if (tableImg) {
-            tableImg.src           = url || fallback;
-            tableImg.style.opacity = "1";
+            tableImg.src            = url || fallback;
+            tableImg.style.opacity  = "1";
+            tableImg.referrerPolicy = "";
         }
     }
 
@@ -230,25 +269,31 @@ function _bpApplyImageUrl(url) {
     }
 }
 
-// Apply a static tarkov.dev image to the target image and the placeholder
-// without firing an image-gen request. Stores the url in _bpPlaceholderUrl
-// so it is re-stamped correctly after every renderFullTree cycle.
-function _bpApplyStatic(staticUrl) {
-    _bpLastImageUrl   = staticUrl || null;
-    _bpPlaceholderUrl = staticUrl || null;
+// Apply a static image (tarkov.dev asset, or - when isCommunityCard is set - a
+// Gitee-hosted community build card) to the target image and the placeholder
+// without firing an image-gen request. Stores the url in _bpPlaceholderUrl so
+// it is re-stamped correctly after every renderFullTree cycle.
+function _bpApplyStatic(staticUrl, isCommunityCard = false) {
+    _bpLastImageUrl        = staticUrl || null;
+    _bpPlaceholderUrl      = staticUrl || null;
+    _bpLastIsCommunityCard = isCommunityCard;
+
+    const referrerPolicy = isCommunityCard ? "no-referrer" : "";
 
     if (EFTForge.state.gridView) {
         const gunCellImg = document.querySelector(".ag-gun-cell img");
         if (gunCellImg) {
-            gunCellImg.src           = staticUrl || "";
-            gunCellImg.style.opacity = "";
-            gunCellImg.style.filter  = "";
+            gunCellImg.src            = staticUrl || "";
+            gunCellImg.style.opacity  = "";
+            gunCellImg.style.filter   = "";
+            gunCellImg.referrerPolicy = referrerPolicy;
         }
     } else {
         const tableImg = _bpGetListViewImg();
         if (tableImg) {
-            tableImg.src           = staticUrl || "";
-            tableImg.style.opacity = "1";
+            tableImg.src            = staticUrl || "";
+            tableImg.style.opacity  = "1";
+            tableImg.referrerPolicy = referrerPolicy;
         }
     }
 
@@ -453,6 +498,26 @@ function scheduleBuildPreview() {
 
     const key = _bpPairsKey();
 
+    // Community build with a pre-rendered card image (hosted on Gitee) - reuse it
+    // instead of paying for a fresh generation of an image that already exists.
+    // communityBuild is cleared the moment the build diverges from what was loaded
+    // (see syncBuildDisplayName in build-manager.js), so this stays trustworthy.
+    const cb = EFTForge.state.communityBuild;
+    if (cb && cb.cardImageUrl && cb.pairsKey === key) {
+        clearTimeout(_bpDebounceTimer);
+        _bpPendingKey = null;
+        // Cancel/override anything already scheduled or in flight for this key -
+        // syncBuildDisplayName() re-invokes this once communityBuild is authoritatively
+        // set, which can land after an earlier call already kicked off a generation.
+        if (_bpAbortController) { _bpAbortController.abort(); _bpAbortController = null; }
+        _bpInflight = false;
+        _bpSetQueued(false);
+        _bpSetLoading(false);
+        _bpLastKey = key;
+        _bpApplyStatic(cb.cardImageUrl, true);
+        return;
+    }
+
     // Already showing this key - nothing to do
     if (key === _bpLastKey && _bpLastImageUrl) return;
 
@@ -515,6 +580,7 @@ function resetBuildPreview() {
     _bpLastImageUrl   = null;
     _bpPlaceholderUrl = null;
     _bpPendingKey     = null;
+    _bpLastIsCommunityCard = false;
 }
 
 // --- Hook into renderFullTree --------------------------------
@@ -533,17 +599,19 @@ function resetBuildPreview() {
                         // element from scratch with the factory image src every render.
                         const gunCellImg = document.querySelector(".ag-gun-cell img");
                         if (gunCellImg) {
-                            gunCellImg.src           = _bpLastImageUrl;
-                            gunCellImg.style.opacity = _bpInflight ? "0.35" : "";
-                            gunCellImg.style.filter  = _bpInflight ? "brightness(0.85)" : "";
+                            gunCellImg.src            = _bpLastImageUrl;
+                            gunCellImg.style.opacity  = _bpInflight ? "0.35" : "";
+                            gunCellImg.style.filter   = _bpInflight ? "brightness(0.85)" : "";
+                            gunCellImg.referrerPolicy = _bpLastIsCommunityCard ? "no-referrer" : "";
                         }
                     } else {
                         // Re-stamp the table header gun img - updateAttTableHeaderImg()
                         // resets it to the factory image src every render.
                         const tableImg = _bpGetListViewImg();
                         if (tableImg) {
-                            tableImg.src           = _bpLastImageUrl;
-                            tableImg.style.opacity = _bpInflight ? "0.35" : "1";
+                            tableImg.src            = _bpLastImageUrl;
+                            tableImg.style.opacity  = _bpInflight ? "0.35" : "1";
+                            tableImg.referrerPolicy = _bpLastIsCommunityCard ? "no-referrer" : "";
                         }
                     }
                 }
@@ -568,6 +636,7 @@ function resetBuildPreview() {
 window._bpGetLastImageUrl     = () => _bpLastImageUrl;
 window._bpGetPlaceholderUrl   = () => _bpPlaceholderUrl;
 window._bpIsInflight          = () => _bpInflight;
+window._bpIsQueued            = () => _bpQueued;
 window._bpIsEnabled           = () => _bpEnabled;
 
 window.scheduleBuildPreview = scheduleBuildPreview;

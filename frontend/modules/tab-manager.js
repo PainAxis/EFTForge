@@ -341,18 +341,9 @@ function togglePin(tabId) {
 =========================== */
 
 let _ctxMenuEl = null;
-let _ctxMenuChip = null;
-let _ctxMenuChipTooltip = null;
 
 function _closeTabContextMenu() {
     if (_ctxMenuEl) { _ctxMenuEl.remove(); _ctxMenuEl = null; }
-    // Re-arm the chip's custom tooltip now that the menu is gone - it was
-    // suppressed while open so the two didn't overlap.
-    if (_ctxMenuChip) {
-        if (_ctxMenuChipTooltip !== null) _ctxMenuChip.dataset.tooltip = _ctxMenuChipTooltip;
-        _ctxMenuChip = null;
-        _ctxMenuChipTooltip = null;
-    }
     document.removeEventListener("mousedown", _onCtxMenuOutside, true);
     document.removeEventListener("keydown", _onCtxMenuKey, true);
 }
@@ -365,14 +356,9 @@ function _onCtxMenuKey(e) {
     if (e.key === "Escape") _closeTabContextMenu();
 }
 
-function _showTabContextMenu(e, tab, chip) {
+function _showTabContextMenu(e, tab) {
     _closeTabContextMenu();
-    if (chip) {
-        _ctxMenuChip = chip;
-        _ctxMenuChipTooltip = chip.dataset.tooltip ?? null;
-        delete chip.dataset.tooltip;
-        EFTForge.tooltip?.hide();
-    }
+    _tpHide();
     const menu = document.createElement("div");
     menu.className = "tab-context-menu";
     menu.innerHTML = `
@@ -403,6 +389,317 @@ function _showTabContextMenu(e, tab, chip) {
         document.addEventListener("mousedown", _onCtxMenuOutside, true);
         document.addEventListener("keydown", _onCtxMenuKey, true);
     }, 0);
+}
+
+/* ===========================
+   HOVER PREVIEW TOOLTIP
+
+   Rich tooltip shown on tab-chip hover: gun image (static tarkov.dev asset,
+   or a live build-preview render if the user has that toggle on) plus a
+   minified version of the stats panel. Everything is computed lazily on
+   hover, per tab - never eagerly for the whole bar - so opening many tabs
+   never fires a burst of build-image generations.
+=========================== */
+
+const TAB_PREVIEW_HOVER_DELAY = 150; // ms - lets the cursor pass over several chips without firing requests for each
+
+let _tpTooltipEl   = null;
+let _tpGen         = 0;     // bumped on every hide/hover-away - invalidates in-flight async work
+let _tpHoverTimer  = null;
+let _tpActiveTabId = null;
+let _tpImgAbort    = null;  // AbortController for the in-flight tooltip image-gen fetch
+const _tpImageCache = new Map(); // `${tabId}:${pairsKey}` -> generated image URL, avoids re-generating on repeat hovers
+
+function _tpEnsureTooltipEl() {
+    if (_tpTooltipEl) return _tpTooltipEl;
+    _tpTooltipEl = document.createElement("div");
+    _tpTooltipEl.id = "tab-preview-tooltip";
+    document.body.appendChild(_tpTooltipEl);
+    return _tpTooltipEl;
+}
+
+function _tpPosition(cx, cy) {
+    if (!_tpTooltipEl) return;
+    const margin = 8, offX = 14, offY = 18;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const w = _tpTooltipEl.offsetWidth, h = _tpTooltipEl.offsetHeight;
+    let left = cx + offX;
+    if (left + w > vw - margin) left = cx - w - offX;
+    let top = cy + offY;
+    if (top + h > vh - margin) top = cy - h - offY;
+    _tpTooltipEl.style.left = Math.max(margin, left) + "px";
+    _tpTooltipEl.style.top  = Math.max(margin, top) + "px";
+}
+
+function _tpHide() {
+    _tpGen++;
+    clearTimeout(_tpHoverTimer);
+    _tpActiveTabId = null;
+    if (_tpImgAbort) { _tpImgAbort.abort(); _tpImgAbort = null; }
+    if (_tpTooltipEl) _tpTooltipEl.classList.remove("visible");
+}
+
+function _tpScheduleShow(tab, cx, cy) {
+    clearTimeout(_tpHoverTimer);
+    _tpHoverTimer = setTimeout(() => _tpShow(tab, cx, cy), TAB_PREVIEW_HOVER_DELAY);
+}
+
+function _tpStatBarRow(labelKey, fillClass, target, valueText) {
+    return `
+      <div class="stat-bar-row">
+        <div class="stat-bar-label">${t(labelKey)}</div>
+        <div class="stat-bar-track">
+          <div class="stat-bar-fill ${fillClass}" style="width:0%"${target !== null ? ` data-target="${target}"` : ""}></div>
+          <div class="stat-bar-value">${valueText}</div>
+        </div>
+      </div>`;
+}
+
+function _tpStatsSkeletonHtml() {
+    return _tpStatBarRow("stats.ergo", "ergo-bar", null, "-")
+         + _tpStatBarRow("stats.verRecoil", "recoil-bar", null, "-")
+         + _tpStatBarRow("stats.horRecoil", "recoil-bar", null, "-")
+         + _tpStatBarRow("stats.accuracy", "accuracy-bar", null, "-");
+}
+
+// Minified version of updateStatsPanel()'s content.innerHTML (stats-panel.js) -
+// same bars/rows, minus the title, the advanced-stats button, the EED/arm-stamina
+// config ("i") buttons and their popups, and the "Only Applicable in Arena" note.
+function _tpStatsHtml(data) {
+    const totalErgo   = parseFloat(data.total_ergo ?? 0);
+    const totalWeight = parseFloat(data.total_weight ?? 0);
+    const eed         = parseFloat(data.evo_ergo_delta ?? 0);
+    const armStamina  = parseFloat(data.arm_stamina ?? 0);
+    const eedClass        = eed >= 0 ? "positive" : "negative";
+    const overswingClass  = data.overswing ? "negative" : "positive";
+
+    const accuracyMoa    = data.accuracy_moa ?? null;
+    const accuracyBarPct = accuracyMoa !== null ? Math.min(accuracyMoa / 10, 1) * 100 : 0;
+    const accuracyDisplay = accuracyMoa !== null ? accuracyMoa.toFixed(2) + " MOA" : "-";
+
+    const sightingRange  = data.sighting_range ?? null;
+    const muzzleVelocity = data.muzzle_velocity ?? null;
+
+    const bars =
+        _tpStatBarRow("stats.ergo", "ergo-bar", Math.max(0, Math.min(totalErgo, 100)),
+            Math.abs(totalErgo - Math.round(totalErgo)) < 0.001 ? Math.round(totalErgo) : totalErgo.toFixed(1)) +
+        _tpStatBarRow("stats.verRecoil", "recoil-bar",
+            data.recoil_vertical !== null && data.recoil_vertical !== undefined ? Math.min(Math.round(data.recoil_vertical), 500) / 5 : 0,
+            data.recoil_vertical !== null && data.recoil_vertical !== undefined ? Math.round(data.recoil_vertical) : "-") +
+        _tpStatBarRow("stats.horRecoil", "recoil-bar",
+            data.recoil_horizontal !== null && data.recoil_horizontal !== undefined ? Math.min(Math.round(data.recoil_horizontal), 500) / 5 : 0,
+            data.recoil_horizontal !== null && data.recoil_horizontal !== undefined ? Math.round(data.recoil_horizontal) : "-") +
+        _tpStatBarRow("stats.accuracy", "accuracy-bar", accuracyBarPct, accuracyDisplay);
+
+    return `
+      ${bars}
+      <div class="stats-divider"></div>
+      <div class="stat-subsection">
+      <div class="stat-subsection-cols">
+      <div class="stat-col">
+        <div class="stat-row stat-row-weight"><span class="stat-label">${t("stats.weight")}</span><span>${totalWeight.toFixed(3)} kg</span></div>
+        <div class="stat-row"><span class="stat-label">${t("stats.eedLabel")}</span><span class="${eedClass}">${eed > 0 ? "+" : ""}${eed.toFixed(1)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t("stats.overswing")}</span><span class="${overswingClass}">${data.overswing ? t("stats.yes") : t("stats.no")}</span></div>
+      </div>
+      <div class="stat-col">
+        <div class="stat-row"><span class="stat-label">${t("stats.armStamina")}</span><span>${armStamina.toFixed(1)}s</span></div>
+        ${sightingRange !== null ? `<div class="stat-row"><span class="stat-label">${t("stats.sightingRange")}</span><span>${sightingRange} m</span></div>` : ""}
+        <div class="stat-row"><span class="stat-label">${t("stats.muzzleVelocity")}</span><span>${muzzleVelocity !== null ? muzzleVelocity + " m/s" : t("stats.noAmmo")}</span></div>
+      </div>
+      </div>
+      </div>`;
+}
+
+function _tpAnimateBars(statsEl, gen) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (_tpGen !== gen) return;
+        statsEl.querySelectorAll(".stat-bar-fill[data-target]").forEach(fillEl => {
+            fillEl.style.width = fillEl.dataset.target + "%";
+        });
+    }));
+}
+
+function _tpSetQueued(wrap, isQueued) {
+    let ov = wrap.querySelector(".bp-queue-overlay");
+    if (isQueued && !ov) {
+        ov = document.createElement("img");
+        ov.className = "bp-queue-overlay";
+        ov.src = "./assets/images/queue.png";
+        ov.alt = "";
+        wrap.appendChild(ov);
+    } else if (!isQueued && ov) {
+        ov.remove();
+    }
+}
+
+// Resolve (and, for background tabs, lazily generate) the preview image for a
+// tab's chip tooltip. Mirrors build-preview.js's _bpGenerate state machine
+// (dimming + queue overlay) but scoped to the tooltip's own <img>, and never
+// touches the shared _bp* state that drives the main gun image elsewhere.
+async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
+    if (!window._bpIsEnabled?.()) return; // static asset already showing
+
+    // Community build with a pre-rendered card image (hosted on Gitee) - use it directly
+    // rather than paying for a fresh generation of an image that already exists. tab.communityBuild
+    // is kept in sync with tab.pairs by syncActiveTab/loadBuildFromPayload (cleared the moment the
+    // build diverges from the loaded community build), so this is safe to trust as-is.
+    if (tab.communityBuild?.cardImageUrl) {
+        imgEl.referrerPolicy = "no-referrer"; // Gitee-hosted - needs no-referrer or the load can fail
+        imgEl.src = tab.communityBuild.cardImageUrl;
+        return;
+    }
+
+    if (tab.id === EFTForge.state.activeTabId) {
+        // Active tab's image is already being managed by build-preview.js - just mirror it.
+        const liveUrl = window._bpGetLastImageUrl?.();
+        if (liveUrl) imgEl.src = liveUrl;
+        if (window._bpIsInflight?.()) {
+            imgEl.style.opacity = "0.35";
+            imgEl.style.filter  = "brightness(0.85)";
+        }
+        if (window._bpIsQueued?.()) _tpSetQueued(imgWrap, true);
+        return;
+    }
+
+    const key = _pairsKey(tab.pairs || []);
+    const cacheKey = tab.id + ":" + key;
+    const cachedUrl = _tpImageCache.get(cacheKey);
+    if (cachedUrl) { imgEl.src = cachedUrl; return; }
+
+    if (key === "") {
+        imgEl.src = gun.bare_image_512_link || gun.image_512_link || gun.icon_link || "";
+        return;
+    }
+
+    const initData = await _ensureGunInitCached(gun);
+    if (_tpGen !== gen) return;
+
+    const factoryKey = initData?.factory_tree
+        ? _pairsKey(collectSlotPairs({ children: initData.factory_tree }))
+        : null;
+    if (key === factoryKey) {
+        imgEl.src = gun.image_512_link || gun.icon_link || "";
+        return;
+    }
+
+    // Warm slotCache for any pairs items the gun's own factory data didn't cover.
+    const uncachedItemIds = [...new Set(
+        (tab.pairs || []).map(([, iid]) => iid).filter(iid => !EFTForge.state.slotCache[iid])
+    )];
+    if (uncachedItemIds.length) {
+        try {
+            const batch = await fetchItemSlotsBatch(uncachedItemIds);
+            for (const [iid, slots] of Object.entries(batch)) cacheSet(EFTForge.state.slotCache, iid, slots);
+        } catch (_) { /* image gen below will just skip unresolved slots */ }
+    }
+    if (_tpGen !== gen) return;
+
+    const sptData = _bpBuildSptItemsForPairs(gun, tab.pairs || []);
+    if (!sptData) return;
+
+    const abort = new AbortController();
+    _tpImgAbort = abort;
+
+    imgEl.style.opacity = "0.35";
+    imgEl.style.filter  = "brightness(0.85)";
+
+    try {
+        try {
+            const busyResp = await fetch(`${EFTForge.config.API_BASE}/build-image/busy`, { signal: abort.signal });
+            if (busyResp.ok) {
+                const busyData = await busyResp.json();
+                if (_tpGen === gen && busyData.busy) _tpSetQueued(imgWrap, true);
+            }
+        } catch (_) { /* best-effort queue indicator only */ }
+
+        if (_tpGen !== gen) return;
+
+        const resp = await fetch(`${EFTForge.config.API_BASE}/build-image`, {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify(sptData),
+            signal:  abort.signal,
+        });
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.image_url) {
+                _tpImageCache.set(cacheKey, data.image_url);
+                if (_tpGen === gen) imgEl.src = data.image_url;
+            }
+        }
+    } catch (_) {
+        // Aborted (hovered away) or network failure - leave the static fallback showing.
+    } finally {
+        if (_tpGen === gen) {
+            imgEl.style.opacity = "";
+            imgEl.style.filter  = "";
+            _tpSetQueued(imgWrap, false);
+        }
+        if (_tpImgAbort === abort) _tpImgAbort = null;
+    }
+}
+
+async function _tpShow(tab, cx, cy) {
+    const gun = EFTForge.state.allGuns.find(g => g.id === tab.gunId);
+    if (!gun) return;
+
+    const gen = ++_tpGen;
+    _tpActiveTabId = tab.id;
+
+    const el = _tpEnsureTooltipEl();
+    const staticImg = gun.image_512_link || gun.icon_link || "";
+
+    el.innerHTML = `
+        <div class="tab-preview-img-wrap"><img class="tab-preview-img" src="${escapeHtml(staticImg)}" alt="" /></div>
+        <div class="tab-preview-gunname">${escapeHtml(gun.name)}</div>
+        <div class="tab-preview-stats">${_tpStatsSkeletonHtml()}</div>
+    `;
+    el.classList.add("visible");
+    _tpPosition(cx, cy);
+
+    const isActive = tab.id === EFTForge.state.activeTabId;
+    let data = null;
+    if (isActive) {
+        data = {
+            total_ergo:        EFTForge.state.lastTotalErgo,
+            total_weight:      EFTForge.state.lastTotalWeight,
+            recoil_vertical:   EFTForge.state.lastRecoilV,
+            recoil_horizontal: EFTForge.state.lastRecoilH,
+            accuracy_moa:      EFTForge.state.lastAccuracyMoa,
+            sighting_range:    EFTForge.state.lastSightingRange,
+            muzzle_velocity:   EFTForge.state.lastMuzzleVelocity,
+            evo_ergo_delta:    EFTForge.state.lastEED,
+            overswing:         EFTForge.state.lastOverswing,
+            arm_stamina:       EFTForge.state.lastArmStamina,
+        };
+    } else {
+        try {
+            data = await calculateBuild({
+                base_item_id:          tab.gunId,
+                attachment_ids:        (tab.pairs || []).map(p => p[1]),
+                assume_full_mag:       EFTForge.state.assumeFullMag ?? true,
+                selected_ammo_id:      tab.ammoId,
+                selected_ubgl_ammo_id: tab.ubglAmmoId,
+                strength_level:        EFTForge.state.currentStrengthLevel,
+                equip_ergo_modifier:   EFTForge.state.currentEquipErgoModifier,
+            });
+        } catch (_) {
+            data = null;
+        }
+    }
+
+    if (_tpGen !== gen) return; // hovered away while calculating
+
+    const statsEl = el.querySelector(".tab-preview-stats");
+    if (statsEl && data) {
+        statsEl.innerHTML = _tpStatsHtml(data);
+        _tpAnimateBars(statsEl, gen);
+    }
+    _tpPosition(cx, cy);
+
+    const imgWrap = el.querySelector(".tab-preview-img-wrap");
+    const imgEl   = el.querySelector(".tab-preview-img");
+    if (imgWrap && imgEl) await _tpLoadImage(tab, gun, imgWrap, imgEl, gen);
 }
 
 /* ===========================
@@ -447,6 +744,8 @@ function renderTabBar() {
 
     bar.classList.toggle("has-tabs", EFTForge.state.tabs.length > 0);
     _syncTabBarSpacer();
+    _clearMarqueeTimers();
+    _tpHide();
     scroll.innerHTML = "";
 
     EFTForge.state.tabs.forEach(tab => {
@@ -460,10 +759,9 @@ function renderTabBar() {
             + (tab.pinned ? " pinned" : "");
         chip.draggable = true;
         chip.dataset.tabId = tab.id;
-        chip.dataset.tooltip = label;
         chip.innerHTML = `
             ${tab.pinned ? `<img class="tab-chip-pin-icon" src="./assets/images/pin.png" alt="" />` : ""}
-            <span class="tab-chip-label">${escapeHtml(label)}</span>
+            <span class="tab-chip-label"><span class="marquee-text">${escapeHtml(label)}</span></span>
             ${tab.pinned ? "" : `<button class="tab-chip-close" type="button" aria-label="${escapeHtml(t("tab.close"))}">&times;</button>`}
         `;
 
@@ -476,14 +774,21 @@ function renderTabBar() {
         });
         chip.addEventListener("contextmenu", (e) => {
             e.preventDefault();
-            _showTabContextMenu(e, tab, chip);
+            _showTabContextMenu(e, tab);
         });
         chip.querySelector(".tab-chip-close")?.addEventListener("click", (e) => {
             e.stopPropagation();
             closeTab(tab.id);
         });
 
+        chip.addEventListener("mouseenter", (e) => _tpScheduleShow(tab, e.clientX, e.clientY));
+        chip.addEventListener("mousemove", (e) => {
+            if (_tpActiveTabId === tab.id) _tpPosition(e.clientX, e.clientY);
+        });
+        chip.addEventListener("mouseleave", _tpHide);
+
         chip.addEventListener("dragstart", () => {
+            _tpHide();
             _dragTabId = tab.id;
             requestAnimationFrame(() => chip.classList.add("dragging"));
         });
@@ -526,6 +831,7 @@ function renderTabBar() {
         scroll.appendChild(chip);
     });
 
+    _initMarqueeText(scroll, { hoverOnly: true, hoverTarget: ".tab-chip" });
     _updateTabBarFades();
 }
 

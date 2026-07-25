@@ -85,6 +85,29 @@ function _evictUnusedGunInitCache(gunId) {
     const stillOpen = (EFTForge.state.tabs || []).some(t => t.gunId === gunId);
     if (!stillOpen) delete _gunInitCache[gunId];
 }
+
+// Warm _gunInitCache (and slotCache) for a gun that may never have been activated
+// this session - e.g. a tab restored from localStorage that hasn't been clicked yet.
+// Used by the tab hover preview so it can resolve a gun's factory config without
+// going through the full selectGun render path.
+async function _ensureGunInitCached(gun) {
+    let initData = _gunInitCache[gun.id];
+    if (initData) return initData;
+    try {
+        const savedAmmoId = (JSON.parse(localStorage.getItem("eftforge_ammo_prefs") || "{}") || {})[gun.caliber] || null;
+        initData = await fetchGunInit(gun.id, {
+            selectedAmmoId: savedAmmoId,
+            assumeFullMag: EFTForge.state.assumeFullMag ?? true,
+        });
+        _gunInitCache[gun.id] = initData;
+        for (const [itemId, slots] of Object.entries(initData.slots_by_item)) {
+            cacheSet(EFTForge.state.slotCache, itemId, slots);
+        }
+    } catch (_) {
+        return null;
+    }
+    return initData;
+}
 let _gunProximityHandler = null;
 let _gunProximityLeaveHandler = null;
 let _rafPending = false;

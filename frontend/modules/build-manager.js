@@ -183,6 +183,10 @@ function syncBuildDisplayName() {
                     gunImg.referrerPolicy = "no-referrer";
                 }
             }
+            // Re-run now that communityBuild is authoritatively set - cancels/overrides any
+            // generation scheduleBuildPreview() may have already kicked off from the render
+            // that happened before this function got a chance to populate communityBuild.
+            window.scheduleBuildPreview?.();
             EFTForge.tabs?.syncActiveTab({ buildName, communityBuild: EFTForge.state.communityBuild });
             // skip snapshot persistence for community builds
             return;
