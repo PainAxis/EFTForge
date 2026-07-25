@@ -1031,8 +1031,6 @@ async function _tpShow(tab, cx, cy, connected = false) {
    RENDER
 =========================== */
 
-let _dragTabId = null;
-
 function _syncTabBarSpacer() {
     const spacer = document.querySelector(".header-spacer");
     if (spacer) spacer.classList.toggle("with-tab-bar", EFTForge.state.tabs.length > 0);
@@ -1092,7 +1090,6 @@ function renderTabBar() {
         chip.className = "tab-chip"
             + (tab.id === EFTForge.state.activeTabId ? " active" : "")
             + (tab.pinned ? " pinned" : "");
-        chip.draggable = true;
         chip.dataset.tabId = tab.id;
         chip.innerHTML = `
             ${tab.pinned ? `<img class="tab-chip-pin-icon" src="./assets/images/pin.png" alt="" />` : ""}
@@ -1101,6 +1098,7 @@ function renderTabBar() {
         `;
 
         chip.addEventListener("click", (e) => {
+            if (_tdSuppressClick) { _tdSuppressClick = false; return; }
             if (e.target.closest(".tab-chip-close")) return;
             switchToTab(tab.id);
         });
@@ -1108,7 +1106,9 @@ function renderTabBar() {
             // Middle-click's native pan/autoscroll gesture arms on mousedown, before
             // auxclick ever fires (that only fires after mouseup) - preventing default
             // there is too late, the browser has already entered autoscroll mode.
-            if (e.button === 1) e.preventDefault();
+            if (e.button === 1) { e.preventDefault(); return; }
+            if (e.button !== 0 || e.target.closest(".tab-chip-close")) return;
+            _td = { phase: "pending", tab, chip, scroll, startX: e.clientX, startY: e.clientY };
         });
         chip.addEventListener("auxclick", (e) => {
             if (e.button === 1) { e.preventDefault(); closeTab(tab.id); }
@@ -1124,55 +1124,16 @@ function renderTabBar() {
         });
 
         chip.addEventListener("mouseenter", (e) => {
+            if (_td && _td.phase === "active") return;
             _tpLastX = e.clientX; _tpLastY = e.clientY;
             _tpScheduleShow(tab, e.clientX, e.clientY);
         });
         chip.addEventListener("mousemove", (e) => {
+            if (_td && _td.phase === "active") return;
             _tpLastX = e.clientX; _tpLastY = e.clientY;
             if (_tpActiveTabId === tab.id) _tpPosition(e.clientX, e.clientY);
         });
         chip.addEventListener("mouseleave", _tpScheduleHide);
-
-        chip.addEventListener("dragstart", () => {
-            _tpHide();
-            _dragTabId = tab.id;
-            requestAnimationFrame(() => chip.classList.add("dragging"));
-        });
-        chip.addEventListener("dragover", (e) => {
-            if (!_dragTabId || _dragTabId === tab.id) return;
-            const dragged = EFTForge.state.tabs.find(t => t.id === _dragTabId);
-            if (!dragged || dragged.pinned !== tab.pinned) return;
-            e.preventDefault();
-            const rect = chip.getBoundingClientRect();
-            const before = (e.clientX - rect.left) < rect.width / 2;
-            chip.classList.toggle("drag-over-before", before);
-            chip.classList.toggle("drag-over-after", !before);
-        });
-        chip.addEventListener("dragleave", () => {
-            chip.classList.remove("drag-over-before", "drag-over-after");
-        });
-        chip.addEventListener("drop", (e) => {
-            e.preventDefault();
-            chip.classList.remove("drag-over-before", "drag-over-after");
-            if (!_dragTabId || _dragTabId === tab.id) return;
-            const fromIdx = EFTForge.state.tabs.findIndex(t => t.id === _dragTabId);
-            if (fromIdx === -1) return;
-            const dragged = EFTForge.state.tabs[fromIdx];
-            if (dragged.pinned !== tab.pinned) return;
-            const rect = chip.getBoundingClientRect();
-            const before = (e.clientX - rect.left) < rect.width / 2;
-            EFTForge.state.tabs.splice(fromIdx, 1);
-            let toIdx = EFTForge.state.tabs.findIndex(t => t.id === tab.id);
-            if (!before) toIdx += 1;
-            EFTForge.state.tabs.splice(toIdx, 0, dragged);
-            _persistTabs();
-            renderTabBar();
-        });
-        chip.addEventListener("dragend", () => {
-            _dragTabId = null;
-            document.querySelectorAll(".tab-chip.dragging, .tab-chip.drag-over-before, .tab-chip.drag-over-after")
-                .forEach(c => c.classList.remove("dragging", "drag-over-before", "drag-over-after"));
-        });
 
         scroll.appendChild(chip);
     });
@@ -1298,6 +1259,186 @@ function _scrollTabIntoView(tabId) {
         _queueTabBarScroll(scroll, e.deltaY);
     }, { passive: false });
 })();
+
+/* ===========================
+   TAB DRAG REORDER
+   Chrome-style: the dragged chip tracks the mouse along a single horizontal
+   axis only (its transform never gets a Y component, so it can't leave the
+   rail), the other chips in its pinned/unpinned group slide via CSS
+   transform to open a gap at the spot it would land in, and the bar
+   auto-scrolls when the drag nears an overflowing edge. Built on plain
+   mousedown/mousemove/mouseup (like the panel resizer in app.js) rather than
+   native HTML5 drag/drop, since native drag/drop only offers a free-floating
+   ghost image with no control over its axis or the layout of siblings.
+=========================== */
+
+let _td = null;             // pending/active drag state, or null when idle
+let _tdSuppressClick = false; // set right before a drag's mouseup so the trailing "click" doesn't also switchToTab()
+
+const TD_THRESHOLD = 4;     // px of mouse movement before a press becomes a drag
+const TD_GAP = 4;           // must match #tab-bar-scroll's flex `gap`
+const TD_EDGE_ZONE = 44;    // px from the scroll viewport's edge that triggers auto-scroll
+const TD_EDGE_SPEED = 6;    // max px/frame scrolled at the very edge of the edge zone
+
+// Lays out `items` back-to-back (in their fixed relative order) starting at
+// `startLeft`, as if the dragged chip didn't exist - this is the baseline
+// every candidate insertion index is computed against.
+function _tdPackLayout(items, startLeft) {
+    let cursor = startLeft;
+    return items.map(o => {
+        const entry = { id: o.id, left: cursor, width: o.width };
+        cursor += o.width + TD_GAP;
+        return entry;
+    });
+}
+
+function _tdBeginDrag(pending, e) {
+    const { tab, chip, scroll } = pending;
+    _tpHide();
+    // A wheel-driven scroll animation mid-flight would fight the drag's own
+    // scrollLeft writes in _tdAutoScrollStep below.
+    _tabBarAnim = null;
+    if (_tabBarScrollRAF) { cancelAnimationFrame(_tabBarScrollRAF); _tabBarScrollRAF = null; }
+
+    const groupChips = Array.from(scroll.querySelectorAll(".tab-chip"))
+        .filter(c => c.classList.contains("pinned") === tab.pinned);
+    const others = groupChips
+        .filter(c => c.dataset.tabId !== tab.id)
+        .map(c => ({ id: c.dataset.tabId, chip: c, width: c.offsetWidth, left0: c.offsetLeft }));
+    const startIdx = groupChips.findIndex(c => c.dataset.tabId === tab.id);
+
+    const groupMinLeft = groupChips[0].offsetLeft;
+    const lastChip = groupChips[groupChips.length - 1];
+    const groupMaxRight = lastChip.offsetLeft + lastChip.offsetWidth;
+    const chipRect = chip.getBoundingClientRect();
+
+    _td = {
+        phase: "active",
+        tabId: tab.id,
+        chip, scroll,
+        groupIds: groupChips.map(c => c.dataset.tabId),
+        width: chip.offsetWidth,
+        originalLeft: chip.offsetLeft,
+        grabOffset: pending.startX - chipRect.left,
+        groupMinLeft,
+        groupMaxLeft: groupMaxRight - chip.offsetWidth,
+        others,
+        packed: _tdPackLayout(others, groupMinLeft),
+        idx: startIdx,
+        lastClientX: e.clientX,
+        autoScrollRAF: null,
+    };
+
+    chip.classList.add("dragging");
+    chip.style.transition = "none";
+    others.forEach(o => { o.chip.style.transition = "transform 0.16s ease"; });
+
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "grabbing";
+
+    _tdUpdatePosition();
+    _td.autoScrollRAF = requestAnimationFrame(_tdAutoScrollStep);
+}
+
+function _tdUpdatePosition() {
+    const d = _td;
+    if (!d || d.phase !== "active") return;
+    const scrollRect = d.scroll.getBoundingClientRect();
+    // The cursor itself is never clamped - it can wander outside the bar
+    // entirely (horizontally past the last tab, or off its vertical bounds)
+    // while the drag stays live. Only the dragged chip's drawn position
+    // below is locked to the rail/group bounds; reordering below is driven
+    // off this free, unclamped position.
+    const contentX = d.scroll.scrollLeft + (d.lastClientX - scrollRect.left);
+
+    const rawLeft = contentX - d.grabOffset;
+    const clampedLeft = Math.max(d.groupMinLeft, Math.min(d.groupMaxLeft, rawLeft));
+    // Only ever a translateX - the dragged chip's transform never gets a Y
+    // component, so it's physically incapable of leaving the rail.
+    d.chip.style.transform = `translateX(${clampedLeft - d.originalLeft}px)`;
+
+    // A tab only slides out of the way once the cursor crosses ITS near
+    // edge (not the dragged tab's own edge, and not a midpoint) - the tab
+    // immediately ahead unshifts once the cursor passes its current left
+    // edge, the tab immediately behind takes the dragged tab's old spot once
+    // the cursor passes its right edge. Looped in case a single mousemove
+    // (or an autoscroll tick) jumped past more than one tab at once.
+    let idx = d.idx;
+    while (idx < d.others.length && contentX > d.packed[idx].left + d.width + TD_GAP) idx++;
+    while (idx > 0 && contentX < d.packed[idx - 1].left + d.packed[idx - 1].width) idx--;
+    if (idx === d.idx) return;
+    d.idx = idx;
+    d.others.forEach((o, j) => {
+        const targetLeft = d.packed[j].left + (j >= idx ? d.width + TD_GAP : 0);
+        o.chip.style.transform = `translateX(${targetLeft - o.left0}px)`;
+    });
+}
+
+function _tdAutoScrollStep() {
+    const d = _td;
+    if (!d || d.phase !== "active") return;
+
+    const scrollRect = d.scroll.getBoundingClientRect();
+    const maxScroll = d.scroll.scrollWidth - d.scroll.clientWidth;
+    const leftDist = d.lastClientX - scrollRect.left;
+    const rightDist = scrollRect.right - d.lastClientX;
+
+    let speed = 0;
+    if (leftDist < TD_EDGE_ZONE && d.scroll.scrollLeft > 0) {
+        speed = -TD_EDGE_SPEED * (1 - Math.max(0, leftDist) / TD_EDGE_ZONE);
+    } else if (rightDist < TD_EDGE_ZONE && d.scroll.scrollLeft < maxScroll) {
+        speed = TD_EDGE_SPEED * (1 - Math.max(0, rightDist) / TD_EDGE_ZONE);
+    }
+
+    if (speed !== 0) {
+        d.scroll.scrollLeft = Math.max(0, Math.min(maxScroll, d.scroll.scrollLeft + speed));
+        _tdUpdatePosition();
+    }
+    d.autoScrollRAF = requestAnimationFrame(_tdAutoScrollStep);
+}
+
+function _tdEndDrag() {
+    const d = _td;
+    _td = null;
+    if (d.autoScrollRAF) cancelAnimationFrame(d.autoScrollRAF);
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+
+    const finalOrder = [
+        ...d.others.slice(0, d.idx).map(o => o.id),
+        d.tabId,
+        ...d.others.slice(d.idx).map(o => o.id),
+    ];
+    const changed = finalOrder.some((id, i) => id !== d.groupIds[i]);
+    if (changed) {
+        const tabs = EFTForge.state.tabs;
+        const groupStart = tabs.findIndex(t => t.id === d.groupIds[0]);
+        const byId = new Map(tabs.map(t => [t.id, t]));
+        tabs.splice(groupStart, finalOrder.length, ...finalOrder.map(id => byId.get(id)));
+        _persistTabs();
+    }
+    // Rebuilds the chips fresh (no leftover inline transform/transition) in
+    // the new order, which lands the dragged chip in the same slot its
+    // siblings had already animated open for it - only a small snap from
+    // wherever the cursor was to that slot's exact edge, same as Chrome.
+    renderTabBar();
+}
+
+document.addEventListener("mousemove", (e) => {
+    if (!_td) return;
+    if (_td.phase === "pending") {
+        if (Math.hypot(e.clientX - _td.startX, e.clientY - _td.startY) < TD_THRESHOLD) return;
+        _tdBeginDrag(_td, e);
+        return;
+    }
+    _td.lastClientX = e.clientX;
+    _tdUpdatePosition();
+});
+document.addEventListener("mouseup", () => {
+    if (!_td) return;
+    if (_td.phase === "active") { _tdSuppressClick = true; _tdEndDrag(); }
+    else _td = null;
+});
 
 // Failsafe against a stuck-open tooltip. The chip-level mouseenter/mouseleave
 // pair (and renderTabBar()'s "keep it open across a re-render" reconnect) covers

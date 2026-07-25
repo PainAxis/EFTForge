@@ -238,15 +238,9 @@ header.header-expanded ~ #tab-bar {
 }
 
 .tab-chip.dragging {
-  opacity: 0.4;
-}
-
-.tab-chip.drag-over-before {
-  box-shadow: inset 3px 0 0 0 #f5c542;
-}
-
-.tab-chip.drag-over-after {
-  box-shadow: inset -3px 0 0 0 #f5c542;
+  z-index: 60;
+  cursor: grabbing;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
 }
 
 .tab-chip-label {
