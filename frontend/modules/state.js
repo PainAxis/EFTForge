@@ -100,4 +100,9 @@ window.EFTForge.state = {
     // Undo / redo history (session-scoped, cleared on gun switch)
     buildHistory: [], // array of serialized pairs strings (past states, newest last)
     buildFuture:  [], // array of serialized pairs strings (redo stack)
+
+    // Build tabs (desktop only) - open build sessions
+    // Each: { id, gunId, pinned, buildName, communityBuild, pairs, ammoId, ubglAmmoId, collapsedSlots }
+    tabs:        [],
+    activeTabId: null,
 };

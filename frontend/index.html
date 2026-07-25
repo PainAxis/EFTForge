@@ -91,8 +91,153 @@ header {
   height: 44px;
 }
 
+.header-spacer.with-tab-bar {
+  height: 78px; /* 44px header baseline + 34px tab bar */
+}
+
 header.header-expanded {
   height: 66px;
+}
+
+/* =========================
+   BUILD TABS
+========================= */
+
+#tab-bar {
+  display: none;
+  position: fixed;
+  top: 44px;
+  left: 0;
+  right: 0;
+  z-index: 99;
+  height: 34px;
+  background: #161616;
+  border-bottom: 1px solid #333;
+  padding: 0 8px;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  transition: top 0.3s ease;
+}
+
+#tab-bar.has-tabs {
+  display: flex;
+}
+
+header.header-expanded ~ #tab-bar {
+  top: 66px;
+}
+
+.tab-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  max-width: 220px;
+  min-width: 84px;
+  height: 26px;
+  margin-top: 6px;
+  padding: 0 10px;
+  border-radius: 6px 6px 0 0;
+  background: #202020;
+  border: 1px solid #333;
+  border-bottom: none;
+  color: #999;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.tab-chip:hover {
+  background: #262626;
+  color: #ccc;
+}
+
+.tab-chip.active {
+  background: #1a1a1a;
+  border-color: #f5c542;
+  color: #f5c542;
+}
+
+.tab-chip.pinned {
+  max-width: 40px;
+  min-width: 32px;
+  justify-content: center;
+  padding: 0 6px;
+}
+
+.tab-chip.dragging {
+  opacity: 0.4;
+}
+
+.tab-chip.drag-over-before {
+  box-shadow: inset 3px 0 0 0 #f5c542;
+}
+
+.tab-chip.drag-over-after {
+  box-shadow: inset -3px 0 0 0 #f5c542;
+}
+
+.tab-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-chip-close {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 3px;
+  border: none;
+  background: transparent;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.tab-chip-close:hover {
+  background: rgba(231, 76, 60, 0.2);
+  color: #e74c3c;
+}
+
+.tab-context-menu {
+  position: fixed;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  background: #202020;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+.tab-context-menu button {
+  background: transparent;
+  border: none;
+  color: #ccc;
+  font-size: 13px;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.tab-context-menu button:hover {
+  background: rgba(245, 197, 66, 0.12);
+  color: #f5c542;
+}
+
+body[data-mobile="true"] #tab-bar {
+  display: none !important;
 }
 
 header h2 {
@@ -2893,7 +3038,8 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
   background: #1f1a10;
 }
 
-.gun-card.mid-build {
+/* Mid-build highlight is a mobile-only safety net - desktop uses the tab strip instead */
+body[data-mobile="true"] .gun-card.mid-build {
   border-color: #c8a84b;
   background: #191408;
   animation: mid-build-pulse 2.4s ease-in-out infinite;
@@ -7081,6 +7227,7 @@ var _hmt = _hmt || [];
     </nav>
   </div>
 </header>
+<div id="tab-bar"></div>
 <div class="header-spacer"></div>
 
 <div class="container no-gun" id="main-container">
@@ -7301,6 +7448,7 @@ var _hmt = _hmt || [];
 <script src="modules/slot-selector.js?v=23"></script>
 <script src="modules/graph.js?v=9"></script>
 <script src="modules/build-manager.js?v=24"></script>
+<script src="modules/tab-manager.js?v=1"></script>
 <script src="modules/profile.js?v=7"></script>
 <script src="app.js?v=34"></script>
 <script src="lzstring.min.js?v=15"></script>

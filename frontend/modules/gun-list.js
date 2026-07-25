@@ -11,7 +11,14 @@ function _applyTree(node, treeData) {
     }
 }
 
+// Mid-build indicator + discard-changes modal are a mobile-only safety net now -
+// on desktop the tab strip itself shows what's open and unsaved (see tab-manager.js).
+function _isDesktopTabs() {
+    return document.body.dataset.mobile !== "true";
+}
+
 function _readMidBuildSnapshot() {
+    if (_isDesktopTabs()) return null;
     try {
         const raw = localStorage.getItem("eftforge_session_snapshot");
         if (!raw) return null;
@@ -23,6 +30,7 @@ function _readMidBuildSnapshot() {
 
 function _applyMidBuildIndicator() {
     document.querySelectorAll(".gun-card.mid-build").forEach(c => c.classList.remove("mid-build"));
+    if (_isDesktopTabs()) return;
     const snap = _readMidBuildSnapshot();
     if (!snap) return;
     const card = document.querySelector(`.gun-card[data-gun-id="${CSS.escape(snap.gunId)}"]`);
@@ -35,6 +43,10 @@ function _applyMidBuildIndicator() {
 }
 
 async function _selectGunOrRestoreSnapshot(gun, card) {
+    if (_isDesktopTabs()) {
+        await EFTForge.tabs.createTabForGun(gun, card);
+        return;
+    }
     const snap = _readMidBuildSnapshot();
     if (snap && snap.gunId === gun.id) {
         clearSessionSnapshot();
@@ -57,6 +69,13 @@ async function _selectGunOrRestoreSnapshot(gun, card) {
 
 let _initialRender = true;
 let _cachedGunCards = []; // [{card, rect}, ...]
+let _gunInitCache = {}; // gunId -> fetchGunInit() response, reused for instant tab switches
+
+// Item/gun names are baked into cached init data - drop it on language switch (mirrors
+// the slotCache/allowedCache/processedCache resets in switchLang()).
+function _clearGunInitCache() {
+    _gunInitCache = {};
+}
 let _gunProximityHandler = null;
 let _gunProximityLeaveHandler = null;
 let _rafPending = false;
@@ -511,19 +530,24 @@ async function selectGun(gun, liElement) {
 
   const selectGunOverlay = startPanelLoading(document.querySelector(".left-panel"), 1000);
 
-  // Fetch all init data in a single request: slots, factory tree, ammo, stats
-  let initData = null;
-  try {
-    const savedAmmoId = (JSON.parse(localStorage.getItem("eftforge_ammo_prefs") || "{}") || {})[gun.caliber] || null;
-    initData = await fetchGunInit(gun.id, {
-      selectedAmmoId: savedAmmoId,
-      assumeFullMag: EFTForge.state.assumeFullMag ?? true,
-    });
-  } catch (err) {
-    console.error("Failed to load gun init data:", err);
-    showToast(t("toast.connectionError"), t("toast.serverUnreachable") + " " + (EFTForge.config.IS_LOCAL_DEV ? t("toast.networkHintDev") : t("toast.networkHintProd")), 5000);
-    stopPanelLoading(selectGunOverlay);
-    return;
+  // Fetch all init data in a single request: slots, factory tree, ammo, stats.
+  // Cached per gun for the rest of the session so re-visiting a gun (e.g. switching
+  // back to an already-open tab) never re-hits the network.
+  let initData = _gunInitCache[gun.id] || null;
+  if (!initData) {
+    try {
+      const savedAmmoId = (JSON.parse(localStorage.getItem("eftforge_ammo_prefs") || "{}") || {})[gun.caliber] || null;
+      initData = await fetchGunInit(gun.id, {
+        selectedAmmoId: savedAmmoId,
+        assumeFullMag: EFTForge.state.assumeFullMag ?? true,
+      });
+      _gunInitCache[gun.id] = initData;
+    } catch (err) {
+      console.error("Failed to load gun init data:", err);
+      showToast(t("toast.connectionError"), t("toast.serverUnreachable") + " " + (EFTForge.config.IS_LOCAL_DEV ? t("toast.networkHintDev") : t("toast.networkHintProd")), 5000);
+      stopPanelLoading(selectGunOverlay);
+      return;
+    }
   }
 
   // Pre-populate slotCache from init response (eliminates per-slot fetches in renderFullTree)

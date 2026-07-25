@@ -183,6 +183,7 @@ function syncBuildDisplayName() {
                     gunImg.referrerPolicy = "no-referrer";
                 }
             }
+            EFTForge.tabs?.syncActiveTab({ buildName, communityBuild: EFTForge.state.communityBuild });
             // skip snapshot persistence for community builds
             return;
         }
@@ -210,21 +211,26 @@ function syncBuildDisplayName() {
     const tagsEl = document.getElementById("build-display-tags");
     if (tagsEl) tagsEl.innerHTML = _tagChipsHtml(match?.tags ?? []);
 
-    // Persist snapshot so a page refresh can offer to restore this state.
-    // Skip factory config - nothing worth restoring.
-    const isFactory = currentKey === EFTForge.state.factoryPairsKey;
-    if (!isFactory) {
-        try {
-            localStorage.setItem("eftforge_session_snapshot", JSON.stringify({
-                gunId:     gun.id,
-                code:      encodeBuild(),
-                gunName:   displayName,
-                gunImage:  gun.image_512_link || gun.icon_link || null,
-                buildName: match ? match.name : null,
-            }));
-        } catch (_) {}
-    } else {
-        clearSessionSnapshot();
+    EFTForge.tabs?.syncActiveTab({ buildName: match ? match.name : null, communityBuild: null });
+
+    // Mobile-only: persist a session snapshot so a page refresh can offer to restore
+    // this state. Desktop persists via the tab strip (eftforge_tabs_v1) instead.
+    if (document.body.dataset.mobile === "true") {
+        // Skip factory config - nothing worth restoring.
+        const isFactory = currentKey === EFTForge.state.factoryPairsKey;
+        if (!isFactory) {
+            try {
+                localStorage.setItem("eftforge_session_snapshot", JSON.stringify({
+                    gunId:     gun.id,
+                    code:      encodeBuild(),
+                    gunName:   displayName,
+                    gunImage:  gun.image_512_link || gun.icon_link || null,
+                    buildName: match ? match.name : null,
+                }));
+            } catch (_) {}
+        } else {
+            clearSessionSnapshot();
+        }
     }
 }
 
@@ -1060,7 +1066,11 @@ async function _loadSavedBuildById(id) {
     }
     const dlg = document.getElementById("builds-dialog");
     if (dlg) dlg.remove();
-    await loadBuildFromPayload(payload, entry.name);
+    if (document.body.dataset.mobile !== "true") {
+        await EFTForge.tabs.createTabFromPayload(payload, entry.name, null, false);
+    } else {
+        await loadBuildFromPayload(payload, entry.name);
+    }
 }
 
 async function _copySavedBuildById(id) {
@@ -1621,13 +1631,17 @@ async function _loadPublicBuildByIdx(idx) {
 
     EFTForge.api.recordBuildLoad(build.id);
 
-    await loadBuildFromPayload({ g: build.gun_id, p: build.pairs, a: build.ammo_id || null }, build.build_name);
-
-    // Set after loadBuildFromPayload (which calls selectGun internally, clearing communityBuild).
-    // syncBuildDisplayName was already called at the end of loadBuildFromPayload, so call it again
-    // now that communityBuild is populated.
-    EFTForge.state.communityBuild = communityBuildInfo;
-    syncBuildDisplayName();
+    const payload = { g: build.gun_id, p: build.pairs, a: build.ammo_id || null };
+    if (document.body.dataset.mobile !== "true") {
+        await EFTForge.tabs.createTabFromPayload(payload, build.build_name, communityBuildInfo, false);
+    } else {
+        await loadBuildFromPayload(payload, build.build_name);
+        // Set after loadBuildFromPayload (which calls selectGun internally, clearing communityBuild).
+        // syncBuildDisplayName was already called at the end of loadBuildFromPayload, so call it again
+        // now that communityBuild is populated.
+        EFTForge.state.communityBuild = communityBuildInfo;
+        syncBuildDisplayName();
+    }
 }
 
 async function _loadMyCommunityBuildByIdx(idx) {
@@ -1653,10 +1667,14 @@ async function _loadMyCommunityBuildByIdx(idx) {
 
     EFTForge.api.recordBuildLoad(build.id);
 
-    await loadBuildFromPayload({ g: build.gun_id, p: build.pairs, a: build.ammo_id || null }, build.build_name);
-
-    EFTForge.state.communityBuild = communityBuildInfo;
-    syncBuildDisplayName();
+    const payload = { g: build.gun_id, p: build.pairs, a: build.ammo_id || null };
+    if (document.body.dataset.mobile !== "true") {
+        await EFTForge.tabs.createTabFromPayload(payload, build.build_name, communityBuildInfo, false);
+    } else {
+        await loadBuildFromPayload(payload, build.build_name);
+        EFTForge.state.communityBuild = communityBuildInfo;
+        syncBuildDisplayName();
+    }
 }
 
 function _isAdminSession() {
@@ -2375,7 +2393,11 @@ async function importBuildFromCode(code) {
     }
     const dlg = document.getElementById("builds-dialog");
     if (dlg) dlg.remove();
-    await loadBuildFromPayload(payload); // no name - uses gun name in toast
+    if (document.body.dataset.mobile !== "true") {
+        await EFTForge.tabs.createTabFromPayload(payload, null, null, false); // no name - uses gun name in toast
+    } else {
+        await loadBuildFromPayload(payload); // no name - uses gun name in toast
+    }
 }
 
 /* ===========================

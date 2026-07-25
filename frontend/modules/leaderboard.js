@@ -332,11 +332,15 @@ window.EFTForge.leaderboard = (function () {
 
         EFTForge.api.recordBuildLoad(build.build_id);
 
-        await loadBuildFromPayload({ g: build.gun_id, p: build.pairs, a: build.ammo_id || null }, build.build_name);
-
-        // set after loadBuildFromPayload (which clears communityBuild internally)
-        EFTForge.state.communityBuild = communityBuildInfo;
-        syncBuildDisplayName();
+        var payload = { g: build.gun_id, p: build.pairs, a: build.ammo_id || null };
+        if (document.body.dataset.mobile !== 'true') {
+            await EFTForge.tabs.createTabFromPayload(payload, build.build_name, communityBuildInfo, false);
+        } else {
+            await loadBuildFromPayload(payload, build.build_name);
+            // set after loadBuildFromPayload (which clears communityBuild internally)
+            EFTForge.state.communityBuild = communityBuildInfo;
+            syncBuildDisplayName();
+        }
     }
 
     /* ===========================

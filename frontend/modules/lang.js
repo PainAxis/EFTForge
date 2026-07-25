@@ -710,6 +710,11 @@ const _TRANSLATIONS = {
         "slot.Hammer":            "Hammer",
         "slot.Chamber":           "Chamber",
         "slot.Catch":             "Catch",
+        // Build tabs
+        "tab.duplicate":          "Duplicate Tab",
+        "tab.pin":                "Pin Tab",
+        "tab.unpin":              "Unpin Tab",
+        "tab.close":              "Close Tab",
     },
     zh: {
         // Header
@@ -1419,6 +1424,11 @@ const _TRANSLATIONS = {
         "ammo.col.class4Tip":         "对4级护甲的效能",
         "ammo.col.class5Tip":         "对5级护甲的效能",
         "ammo.col.class6Tip":         "对6级护甲的效能",
+        // Build tabs
+        "tab.duplicate":          "复制标签页",
+        "tab.pin":                "固定标签页",
+        "tab.unpin":              "取消固定",
+        "tab.close":              "关闭标签页",
     },
 };
 

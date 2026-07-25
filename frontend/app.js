@@ -61,8 +61,10 @@ async function init() {
       EFTForge.state.allGuns = await fetchGuns();
       renderGunList(EFTForge.state.allGuns);
       stopPanelLoading(loadingOverlay);
-      // Highlight any gun with an unfinished mid-build from before the page was refreshed
+      // Highlight any gun with an unfinished mid-build from before the page was refreshed (mobile only)
       _applyMidBuildIndicator();
+      // Desktop: silently restore whatever tabs were open before the page was refreshed
+      await EFTForge.tabs.restoreTabsFromStorage();
       // Auto-load a build from the ?build= URL parameter (for external site integrations)
       _checkUrlBuildParam();
       // Restore flea cache from localStorage before prefetching so new tabs/reloads reuse it instead of refetching.
@@ -1236,6 +1238,7 @@ async function switchLang(lang) {
     EFTForge.state.slotCache      = {};
     EFTForge.state.allowedCache   = {};
     EFTForge.state.processedCache = {};
+    _clearGunInitCache();
 
     if (EFTForge.state.currentGun) returnToGunSelection();
 
@@ -1269,6 +1272,9 @@ async function switchLang(lang) {
             }
         }
     } finally {
+        // Tab labels (gun short names) are language-specific - refresh them now that
+        // allGuns has been re-fetched in the new language.
+        EFTForge.tabs?.renderTabBar();
         _langSwitching = false;
     }
 }
