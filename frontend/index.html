@@ -536,10 +536,28 @@ header.header-expanded .header-logo-img {
   padding: 5px 28px 5px 12px;
 }
 
+/* globe glyph sits before the language label - the source png is already
+   gold, so it is desaturated to match the resting #aaa text */
+#lang-switcher .custom-select-trigger::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  margin-right: 6px;
+  background: url("./assets/images/langGlobe.png") center / contain no-repeat;
+  filter: grayscale(1) brightness(0.86);
+  transition: filter 0.15s;
+}
+
 #lang-switcher .custom-select-trigger:hover {
   background: rgba(245, 197, 66, 0.1);
   color: #f5c542;
   border-color: rgba(245, 197, 66, 0.25);
+}
+
+#lang-switcher .custom-select-trigger:hover::before,
+#lang-switcher .custom-select-wrapper.open .custom-select-trigger::before {
+  filter: none;
 }
 
 .header-btn:hover {
@@ -7626,7 +7644,7 @@ var _hmt = _hmt || [];
 
 <div id="toast-container"></div>
 <!-- ***!!IMPORTANT!!*** - Cache-busting: bump ?v= on any modified files before deploying -->
-<script src="modules/config.js?v=30"></script>
+<script src="modules/config.js?v=31"></script>
 <script src="modules/state.js?v=19"></script>
 <script src="modules/lang.js?v=26"></script>
 <script src="modules/utils.js?v=21"></script>

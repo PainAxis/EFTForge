@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 3
 RETRY_DELAY_SECS = 2
 
+# tarkov.dev requires a user agent on all API requests, and a generic one
+# (python-requests/x.y) risks being blocked as suspected abuse. Identify the
+# project and link both the live site and the repo so they can see what it is.
+USER_AGENT = "EFTForge (+https://eftforge.com; +https://github.com/SouthHorizons76/EFTForge)"
+
 # Snapshot file persists the last known item stats across DB resets.
 # Written at the end of every sync; read at the start of the next one.
 SNAPSHOT_FILE = "stat_snapshot.json"
@@ -194,7 +199,7 @@ def _fetch_json(url, timeout, label):
     """GET a JSON endpoint with retries. Raises on final failure."""
     for attempt in range(MAX_RETRIES):
         try:
-            resp = requests.get(url, timeout=timeout)
+            resp = requests.get(url, timeout=timeout, headers={"User-Agent": USER_AGENT})
             resp.raise_for_status()
             return resp.json()
         except requests.exceptions.RequestException as e:

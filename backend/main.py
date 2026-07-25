@@ -667,9 +667,12 @@ def get_dev_sync_notice():
 _PROXY_ALLOWED_HOSTS = {"assets.tarkov.dev", "image-gen.tarkov-changes.com", "gitee.com", "raw.giteeusercontent.com"}
 _PROXY_MAX_BYTES = 20 * 1024 * 1024  # 20 MB cap per proxied asset
 
-# Shared session: connection pooling for proxy + Gitee API calls
+# Shared session: connection pooling for proxy + Gitee API calls.
+# Identifying user agent so upstreams can tell what
+# the traffic is instead of seeing a generic python-requests default.
 import requests as _requests
 _http_session = _requests.Session()
+_http_session.headers["User-Agent"] = "EFTForge (+https://eftforge.com; +https://github.com/SouthHorizons76/EFTForge)"
 
 def _proxy_host_allowed(netloc: str) -> bool:
     # Exact match or subdomain of an allowed host (e.g. foruda.gitee.com for gitee.com avatars)
