@@ -1125,9 +1125,11 @@ function applyStaticTranslations() {
 
     const beianFooter = document.querySelector(".beian-footer:not(.copyright-footer)");
     const copyrightFooter = document.querySelector(".copyright-footer");
+    const isDev = ["localhost", "127.0.0.1"].includes(location.hostname);
     const isZh = EFTForge.state.lang === "zh";
-    if (beianFooter) beianFooter.style.display = isZh ? "" : "none";
-    if (copyrightFooter) copyrightFooter.style.display = isZh ? "none" : "";
+    const showBeian = !isDev && isZh;
+    if (beianFooter) beianFooter.style.display = showBeian ? "" : "none";
+    if (copyrightFooter) copyrightFooter.style.display = showBeian ? "none" : "";
 
     // Sync lang select value and update the custom trigger
     const langSelect = document.getElementById("lang-select");

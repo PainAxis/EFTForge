@@ -7319,12 +7319,14 @@ var _hmt = _hmt || [];
 </div>
 <script>
 (function(){
+  var isDev = ["localhost", "127.0.0.1"].includes(location.hostname);
   var lang = localStorage.getItem("eftforge_lang") || "zh";
   var isEn = lang !== "zh";
   var beian = document.querySelector(".beian-footer:not(.copyright-footer)");
   var copy  = document.querySelector(".copyright-footer");
-  if (beian) beian.style.display = isEn ? "none" : "";
-  if (copy)  copy.style.display  = isEn ? "" : "none";
+  var showBeian = !isDev && !isEn;
+  if (beian) beian.style.display = showBeian ? "" : "none";
+  if (copy)  copy.style.display  = showBeian ? "none" : "";
 })();
 </script>
 </body>
