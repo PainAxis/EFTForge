@@ -456,6 +456,18 @@ function _tpScheduleHide() {
 function _tpScheduleShow(tab, cx, cy) {
     if (_tabBarAnim) return; // bar is mid-scroll - stay hidden until it settles
     clearTimeout(_tpHoverTimer);
+    // Tooltip already up for this same tab with no leave in progress: this is a
+    // re-fired mouseenter from renderTabBar() replacing the chip DOM under a
+    // stationary cursor (the removed chip never fires mouseleave, the new one
+    // fires mouseenter). Patch in place instead of scheduling the cold-path
+    // rebuild below - that rebuild reseeds the <img> with the factory static
+    // image, and for a just-activated tab nothing corrects it afterward because
+    // build-preview.js is still mid-generation, so the tooltip visibly reverted
+    // to the bare factory gun until the next real re-hover.
+    if (!_tpHideTimer && _tpActiveTabId === tab.id && _tpTooltipEl?.classList.contains("visible")) {
+        _tpShow(tab, cx, cy, true);
+        return;
+    }
     if (_tpHideTimer) {
         // Tooltip is still up from the chip we just left - swap straight to
         // the new one instead of hiding and re-running the hover delay.
@@ -522,9 +534,7 @@ function _tpComputeStatValues(data) {
         },
         weightText:      totalWeight.toFixed(3) + " kg",
         eedText:         (eed > 0 ? "+" : "") + eed.toFixed(1),
-        eedClass:        eed >= 0 ? "positive" : "negative",
         overswingText:   data.overswing ? t("stats.yes") : t("stats.no"),
-        overswingClass:  data.overswing ? "negative" : "positive",
         armStaminaText:  armStamina.toFixed(1) + "s",
         sightingRange,
         muzzleText:      muzzleVelocity !== null ? muzzleVelocity + " m/s" : t("stats.noAmmo"),
@@ -550,8 +560,8 @@ function _tpStatsHtml(data) {
       <div class="stat-subsection-cols">
       <div class="stat-col">
         <div class="stat-row stat-row-weight"><span class="stat-label">${t("stats.weight")}</span><span>${v.weightText}</span></div>
-        <div class="stat-row stat-row-eed"><span class="stat-label">${t("stats.eedLabelShort")}</span><span class="${v.eedClass}">${v.eedText}</span></div>
-        <div class="stat-row stat-row-overswing"><span class="stat-label">${t("stats.overswing")}</span><span class="${v.overswingClass}">${v.overswingText}</span></div>
+        <div class="stat-row stat-row-eed"><span class="stat-label">${t("stats.eedLabelShort")}</span><span>${v.eedText}</span></div>
+        <div class="stat-row stat-row-overswing"><span class="stat-label">${t("stats.overswing")}</span><span>${v.overswingText}</span></div>
       </div>
       <div class="stat-col">
         <div class="stat-row stat-row-arm-stamina"><span class="stat-label">${t("stats.armStamina")}</span><span>${v.armStaminaText}</span></div>
@@ -592,10 +602,10 @@ function _tpUpdateStatsInPlace(statsEl, data) {
     if (weightVal) weightVal.textContent = v.weightText;
 
     const eedVal = statsEl.querySelector(".stat-row-eed span:last-child");
-    if (eedVal) { eedVal.textContent = v.eedText; eedVal.className = v.eedClass; }
+    if (eedVal) eedVal.textContent = v.eedText;
 
     const overswingVal = statsEl.querySelector(".stat-row-overswing span:last-child");
-    if (overswingVal) { overswingVal.textContent = v.overswingText; overswingVal.className = v.overswingClass; }
+    if (overswingVal) overswingVal.textContent = v.overswingText;
 
     const armStaminaVal = statsEl.querySelector(".stat-row-arm-stamina span:last-child");
     if (armStaminaVal) armStaminaVal.textContent = v.armStaminaText;
@@ -624,6 +634,29 @@ function _tpSetQueued(wrap, isQueued) {
     }
 }
 
+// Swap an already-visible tooltip <img> to a new URL without letting the old
+// pixels sit there looking "correct" while the new image is still loading -
+// dims immediately and only clears once the new image (this exact URL, not a
+// later one that raced past it) has actually finished loading. Matters most
+// when hovering several tab chips in a row on a slow connection: without this,
+// the previous tab's gun image stays crisp on screen until the new one decodes,
+// which reads as "the tooltip is showing the wrong gun."
+function _tpSetImg(imgEl, url) {
+    if (!imgEl || !url) return;
+    imgEl.dataset.tpPendingSrc = url;
+    imgEl.style.opacity = "0.35";
+    imgEl.style.filter  = "brightness(0.85)";
+    const onDone = () => {
+        if (imgEl.dataset.tpPendingSrc === url) {
+            imgEl.style.opacity = "";
+            imgEl.style.filter  = "";
+        }
+    };
+    imgEl.addEventListener("load", onDone, { once: true });
+    imgEl.addEventListener("error", onDone, { once: true });
+    imgEl.src = url;
+}
+
 // Resolve (and, for background tabs, lazily generate) the preview image for a
 // tab's chip tooltip. Mirrors build-preview.js's _bpGenerate state machine
 // (dimming + queue overlay) but scoped to the tooltip's own <img>, and never
@@ -637,14 +670,24 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
     // build diverges from the loaded community build), so this is safe to trust as-is.
     if (tab.communityBuild?.cardImageUrl) {
         imgEl.referrerPolicy = "no-referrer"; // Gitee-hosted - needs no-referrer or the load can fail
-        imgEl.src = tab.communityBuild.cardImageUrl;
+        _tpSetImg(imgEl, tab.communityBuild.cardImageUrl);
         return;
     }
 
+    const key = _pairsKey(tab.pairs || []);
+
     if (tab.id === EFTForge.state.activeTabId) {
         // Active tab's image is already being managed by build-preview.js - just mirror it.
-        const liveUrl = window._bpGetLastImageUrl?.();
-        if (liveUrl) imgEl.src = liveUrl;
+        // selectGun() always renders the gun's factory tree first and reapplies the tab's
+        // real pairs a moment later, so build-preview.js's own generation pipeline briefly
+        // settles on the factory image mid-switch before catching up to the real one - only
+        // trust its cached URL when it's actually for this tab's current build, not that
+        // transient intermediate state (which would otherwise flash the tooltip back to the
+        // factory gun right after activating a tab with real attachments).
+        if (window._bpGetLastKey?.() === key) {
+            const liveUrl = window._bpGetLastImageUrl?.();
+            if (liveUrl) _tpSetImg(imgEl, liveUrl);
+        }
         if (window._bpIsInflight?.()) {
             imgEl.style.opacity = "0.35";
             imgEl.style.filter  = "brightness(0.85)";
@@ -653,13 +696,12 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
         return;
     }
 
-    const key = _pairsKey(tab.pairs || []);
     const cacheKey = tab.id + ":" + key;
     const cachedUrl = _tpImageCache.get(cacheKey);
-    if (cachedUrl) { imgEl.src = cachedUrl; return; }
+    if (cachedUrl) { _tpSetImg(imgEl, cachedUrl); return; }
 
     if (key === "") {
-        imgEl.src = gun.bare_image_512_link || gun.image_512_link || gun.icon_link || "";
+        _tpSetImg(imgEl, gun.bare_image_512_link || gun.image_512_link || gun.icon_link || "");
         return;
     }
 
@@ -670,7 +712,7 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
         ? _pairsKey(collectSlotPairs({ children: initData.factory_tree }))
         : null;
     if (key === factoryKey) {
-        imgEl.src = gun.image_512_link || gun.icon_link || "";
+        _tpSetImg(imgEl, gun.image_512_link || gun.icon_link || "");
         return;
     }
 
@@ -692,6 +734,10 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
     const abort = new AbortController();
     _tpImgAbort = abort;
 
+    // Invalidate any earlier _tpSetImg() call's pending "load" listener (e.g. from
+    // the static fallback image swapped in at the top of _tpShow) so it can't fire
+    // mid-generation and clear this dim early, briefly revealing the stale image.
+    delete imgEl.dataset.tpPendingSrc;
     imgEl.style.opacity = "0.35";
     imgEl.style.filter  = "brightness(0.85)";
 
@@ -736,6 +782,7 @@ async function _tpShow(tab, cx, cy, connected = false) {
     if (!gun) return;
 
     const gen = ++_tpGen;
+    const isSameTab = tab.id === _tpActiveTabId;
     _tpActiveTabId = tab.id;
 
     const el = _tpEnsureTooltipEl();
@@ -750,7 +797,15 @@ async function _tpShow(tab, cx, cy, connected = false) {
     if (canUpdateInPlace) {
         const imgEl  = el.querySelector(".tab-preview-img");
         const nameEl = el.querySelector(".tab-preview-gunname");
-        if (imgEl)  imgEl.src = staticImg;
+        // Only reset to the plain factory image when actually swapping to a
+        // different tab - the gun/build hasn't changed here (e.g. renderTabBar()
+        // re-connecting the tooltip after a click activated this same tab), so
+        // the composite image already showing is still correct. Resetting it
+        // anyway just replaces it with the factory image and, if the just-
+        // activated tab's live build-preview image isn't ready yet (a moment
+        // after activation - see _tpLoadImage's active-tab branch below),
+        // nothing corrects it back until the next real hover.
+        if (imgEl && !isSameTab) _tpSetImg(imgEl, staticImg);
         if (nameEl) nameEl.textContent = gun.name;
     } else {
         el.innerHTML = `
@@ -854,7 +909,17 @@ function renderTabBar() {
     bar.classList.toggle("has-tabs", EFTForge.state.tabs.length > 0);
     _syncTabBarSpacer();
     _clearMarqueeTimers();
-    _tpHide();
+
+    // Chips get torn down and rebuilt below (innerHTML reset), which would
+    // otherwise force the tooltip closed even when the hovered tab isn't going
+    // anywhere - clicking a chip re-renders the whole strip to flip its
+    // "active" class, and that alone shouldn't hide the tooltip the user is
+    // still sitting on top of, only to have a stray mousemove reopen it a
+    // moment later. Only actually hide it when the hovered tab won't exist
+    // after this render (e.g. it was just closed).
+    const hoveredTabId = _tpActiveTabId;
+    const keepTooltipOpen = hoveredTabId && EFTForge.state.tabs.some(t => t.id === hoveredTabId);
+    if (!keepTooltipOpen) _tpHide();
     scroll.innerHTML = "";
 
     EFTForge.state.tabs.forEach(tab => {
@@ -946,6 +1011,15 @@ function renderTabBar() {
 
     _initMarqueeText(scroll, { hoverOnly: true, hoverTarget: ".tab-chip" });
     _updateTabBarFades();
+
+    // Chips were just rebuilt from scratch, so the old element the tooltip's
+    // hover listeners were attached to is gone - patch it onto the new one in
+    // place (same "connected" path used when swapping between adjacent chips)
+    // instead of waiting for the next stray mousemove to re-open it from cold.
+    if (keepTooltipOpen) {
+        const tab = EFTForge.state.tabs.find(t => t.id === hoveredTabId);
+        if (tab) _tpShow(tab, _tpLastX, _tpLastY, true);
+    }
 }
 
 // Manual rAF-eased smooth scroll for the wheel handler below - CSS

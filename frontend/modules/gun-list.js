@@ -99,6 +99,7 @@ async function _ensureGunInitCached(gun) {
             selectedAmmoId: savedAmmoId,
             assumeFullMag: EFTForge.state.assumeFullMag ?? true,
         });
+        initData._statsAmmoId = savedAmmoId;
         _gunInitCache[gun.id] = initData;
         for (const [itemId, slots] of Object.entries(initData.slots_by_item)) {
             cacheSet(EFTForge.state.slotCache, itemId, slots);
@@ -564,17 +565,25 @@ async function selectGun(gun, liElement) {
 
   const selectGunOverlay = startPanelLoading(document.querySelector(".left-panel"), 1000);
 
+  // The tab about to become active may carry its own ammo choice (different from
+  // whatever ammo another tab on this same gun last cached stats for) - fall back
+  // to the saved per-caliber preference when there's no tab context yet (fresh pick).
+  const activeTab = (EFTForge.state.tabs || []).find(t => t.id === EFTForge.state.activeTabId);
+  const targetAmmoId = activeTab?.ammoId
+    || (JSON.parse(localStorage.getItem("eftforge_ammo_prefs") || "{}") || {})[gun.caliber]
+    || null;
+
   // Fetch all init data in a single request: slots, factory tree, ammo, stats.
   // Cached per gun for the rest of the session so re-visiting a gun (e.g. switching
   // back to an already-open tab) never re-hits the network.
   let initData = _gunInitCache[gun.id] || null;
   if (!initData) {
     try {
-      const savedAmmoId = (JSON.parse(localStorage.getItem("eftforge_ammo_prefs") || "{}") || {})[gun.caliber] || null;
       initData = await fetchGunInit(gun.id, {
-        selectedAmmoId: savedAmmoId,
+        selectedAmmoId: targetAmmoId,
         assumeFullMag: EFTForge.state.assumeFullMag ?? true,
       });
+      initData._statsAmmoId = targetAmmoId;
       _gunInitCache[gun.id] = initData;
     } catch (err) {
       console.error("Failed to load gun init data:", err);
@@ -582,6 +591,13 @@ async function selectGun(gun, liElement) {
       stopPanelLoading(selectGunOverlay);
       return;
     }
+  } else if (initData._statsAmmoId !== targetAmmoId) {
+    // Cached stats were baked for a different tab's ammo choice on this same gun -
+    // muzzle_velocity (and other ammo-dependent numbers) would be momentarily wrong
+    // if shown as-is. Blank it for this render only (cache stays untouched); the
+    // refreshBuildStats() call that always follows a tab switch fixes it a moment
+    // later anyway, so this costs no extra network round trip.
+    initData = { ...initData, stats: { ...initData.stats, muzzle_velocity: null } };
   }
 
   // Pre-populate slotCache from init response (eliminates per-slot fetches in renderFullTree)
@@ -594,6 +610,17 @@ async function selectGun(gun, liElement) {
   _applyTree(EFTForge.state.buildTree, initData.factory_tree);
 
   EFTForge.state.factoryPairsKey = _pairsKey(collectSlotPairs(EFTForge.state.buildTree));
+
+  // Repopulate the ammo dropdown for this gun's caliber. Only relevant past the very
+  // first gun of the session - #stats-content (and the <select> inside it) doesn't
+  // exist yet on that first call, so this is a no-op there and updateStatsPanel's
+  // "create controls once" branch handles it below instead. On every switch after
+  // that, this is what used to be missing: the tab-switch flow never routes back
+  // through returnToGunSelection() (unlike the old "Back to grid" flow), so without
+  // this call the <select> kept showing the previous gun's caliber ammo options -
+  // whatever stale option ended up selected then fed a wrong-caliber ammo id into
+  // every stats calculation for the new gun.
+  await loadAmmoForGun(gun, initData.ammo);
 
   await renderFullTree();
 
@@ -609,9 +636,17 @@ async function loadAmmoForGun(gun, preloadedAmmo = null) {
   const ammoSelect = document.getElementById("ammo-select");
   if (!ammoSelect) return;
 
+  // Switching between tabs on the same gun/caliber: options are already correct,
+  // the caller (_applyPayloadAmmo) sets the tab-specific selection afterward -
+  // skip the rebuild so this stays a no-op cost on the common "same caliber" path.
+  if (gun.caliber && ammoSelect.dataset.caliber === gun.caliber && ammoSelect.options.length > 0) {
+    return;
+  }
+
   ammoSelect.innerHTML = "";
 
   if (!gun.caliber) return;
+  ammoSelect.dataset.caliber = gun.caliber;
 
   let ammoList;
   if (preloadedAmmo) {
