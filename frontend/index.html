@@ -170,6 +170,19 @@ header.header-expanded ~ #tab-bar {
   background: linear-gradient(to left, rgba(0, 0, 0, 0.6), transparent);
 }
 
+#tab-bar-count {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  color: #666;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
 .tab-chip {
   display: flex;
   align-items: center;
@@ -355,6 +368,26 @@ header.header-expanded ~ #tab-bar {
 
 body[data-mobile="true"] #tab-bar {
   display: none !important;
+}
+
+@keyframes tab-close-hint-float {
+  0%   { opacity: 0; transform: translate(-50%, -100%); }
+  12%  { opacity: 1; transform: translate(-50%, calc(-100% - 6px)); }
+  75%  { opacity: 1; transform: translate(-50%, calc(-100% - 6px)); }
+  100% { opacity: 0; transform: translate(-50%, calc(-100% - 30px)); }
+}
+
+.tab-close-hint {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 9999;
+  color: #f5c542;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: tab-close-hint-float 3200ms ease forwards;
 }
 
 header h2 {

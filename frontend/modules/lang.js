@@ -716,6 +716,10 @@ const _TRANSLATIONS = {
         "tab.pin":                "Pin Tab",
         "tab.unpin":              "Unpin Tab",
         "tab.close":              "Close Tab",
+        "tab.hintMiddleClick":    "Middle-click a tab to close it instantly",
+        "tab.manyTabsTitle":      "Excessive Tabs Notice",
+        "tab.manyTabsMsg":        "You have 20+ tabs open, which may have an impact on site / device performance. Consider closing any unused tabs.",
+        "tab.manyTabsDismiss":    "Don't Show Again",
     },
     zh: {
         // Header
@@ -1431,6 +1435,10 @@ const _TRANSLATIONS = {
         "tab.pin":                "固定标签页",
         "tab.unpin":              "取消固定",
         "tab.close":              "关闭标签页",
+        "tab.hintMiddleClick":    "按下鼠标中键以快速关闭配置标签",
+        "tab.manyTabsTitle":      "配置标签过多",
+        "tab.manyTabsMsg":        "您已打开超过20个配置标签，可能会影响页面/设备性能，建议关闭不需要的配置标签。",
+        "tab.manyTabsDismiss":    "不再提示",
     },
 };
 

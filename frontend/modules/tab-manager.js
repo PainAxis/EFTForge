@@ -17,6 +17,27 @@ let _tabIdCounter = 0;
 let _tabSwitchInFlight = false;
 const _tabHistory = new Map(); // tabId -> { buildHistory, buildFuture } (session-only, not persisted)
 
+// Once per page load, nudge users toward closing tabs once the strip gets
+// large - fires on whatever action first crosses the threshold (new tab,
+// duplicate, or a restore-from-storage that's already past it), not on
+// every tab opened after. "Don't Show Again" persists across reloads via
+// localStorage, same pattern as eftforge_migration_notice_seen (app.js).
+const MANY_TABS_WARN_THRESHOLD = 20;
+const MANY_TABS_DISMISSED_KEY = "eftforge_many_tabs_warning_dismissed";
+let _manyTabsWarned = false;
+
+function _maybeWarnManyTabs() {
+    if (_manyTabsWarned) return;
+    if (EFTForge.state.tabs.length < MANY_TABS_WARN_THRESHOLD) return;
+    _manyTabsWarned = true;
+    if (localStorage.getItem(MANY_TABS_DISMISSED_KEY)) return;
+    showToast(t("tab.manyTabsTitle"), t("tab.manyTabsMsg"), 6000, "#4a90d9", [
+        { label: t("tab.manyTabsDismiss"), onClick: () => {
+            try { localStorage.setItem(MANY_TABS_DISMISSED_KEY, "1"); } catch (_) {}
+        }},
+    ]);
+}
+
 // _isDesktopTabs() is defined in gun-list.js (loads before this module)
 
 function _newTabId() {
@@ -75,6 +96,7 @@ async function restoreTabsFromStorage() {
     // grid, never jumps straight back into whichever tab was last active.
     EFTForge.state.activeTabId = null;
     renderTabBar();
+    _maybeWarnManyTabs();
 }
 
 /* ===========================
@@ -180,6 +202,7 @@ async function createTabForGun(gun, card = null) {
         _persistTabs();
         renderTabBar();
         _scrollTabIntoView(id);
+        _maybeWarnManyTabs();
     } finally {
         _tabSwitchInFlight = false;
     }
@@ -221,6 +244,7 @@ async function createTabFromPayload(payload, buildName = null, communityBuild = 
         _persistTabs();
         renderTabBar();
         _scrollTabIntoView(id);
+        _maybeWarnManyTabs();
     } finally {
         _tabSwitchInFlight = false;
     }
@@ -281,6 +305,38 @@ async function switchToTab(tabId) {
     }
 }
 
+// Nudges users toward middle-click closing after they've clicked the x button
+// several times in quick succession (chip widths vary, so aiming for x repeatedly
+// is more finicky than a single middle-click per tab). Floats up from the click
+// point and fades - the toast tray is bottom-right, too far from where the
+// user's mouse/eyes already are.
+const X_CLOSE_HINT_WINDOW_MS = 4000;
+const X_CLOSE_HINT_THRESHOLD = 3;
+const X_CLOSE_HINT_LIFETIME_MS = 4200;
+let _xCloseClickTimes = [];
+let _xCloseHintShown = false;
+
+function _showXCloseHint(x, y) {
+    const el = document.createElement("div");
+    el.className = "tab-close-hint";
+    el.textContent = t("tab.hintMiddleClick");
+    el.style.left = x + "px";
+    el.style.top = y + "px";
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), X_CLOSE_HINT_LIFETIME_MS);
+}
+
+function _trackXCloseClick(e) {
+    if (_xCloseHintShown) return;
+    const now = Date.now();
+    _xCloseClickTimes = _xCloseClickTimes.filter(ts => now - ts < X_CLOSE_HINT_WINDOW_MS);
+    _xCloseClickTimes.push(now);
+    if (_xCloseClickTimes.length >= X_CLOSE_HINT_THRESHOLD) {
+        _xCloseHintShown = true;
+        _showXCloseHint(e.clientX, e.clientY);
+    }
+}
+
 async function closeTab(tabId) {
     const idx = EFTForge.state.tabs.findIndex(t => t.id === tabId);
     if (idx === -1) return;
@@ -330,6 +386,7 @@ async function duplicateTab(tabId) {
     _tabHistory.set(clone.id, { buildHistory: [], buildFuture: [] });
     _persistTabs();
     await switchToTab(clone.id);
+    _maybeWarnManyTabs();
 }
 
 function togglePin(tabId) {
@@ -1062,6 +1119,7 @@ function renderTabBar() {
         });
         chip.querySelector(".tab-chip-close")?.addEventListener("click", (e) => {
             e.stopPropagation();
+            _trackXCloseClick(e);
             closeTab(tab.id);
         });
 
@@ -1118,6 +1176,11 @@ function renderTabBar() {
 
         scroll.appendChild(chip);
     });
+
+    const countEl = document.createElement("div");
+    countEl.id = "tab-bar-count";
+    countEl.textContent = EFTForge.state.tabs.length;
+    scroll.appendChild(countEl);
 
     _initMarqueeText(scroll, { hoverOnly: true, hoverTarget: ".tab-chip" });
     _updateTabBarFades();
