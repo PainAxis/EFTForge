@@ -71,12 +71,10 @@ async function restoreTabsFromStorage() {
     }));
     EFTForge.state.tabs.forEach(t => _tabHistory.set(t.id, { buildHistory: [], buildFuture: [] }));
 
-    const activeId = EFTForge.state.tabs.some(t => t.id === data.activeTabId)
-        ? data.activeTabId
-        : EFTForge.state.tabs[0].id;
-
+    // Tabs are restored but left inactive - a reload always lands on the gun
+    // grid, never jumps straight back into whichever tab was last active.
     EFTForge.state.activeTabId = null;
-    await switchToTab(activeId);
+    renderTabBar();
 }
 
 /* ===========================
@@ -343,9 +341,18 @@ function togglePin(tabId) {
 =========================== */
 
 let _ctxMenuEl = null;
+let _ctxMenuChip = null;
+let _ctxMenuChipTooltip = null;
 
 function _closeTabContextMenu() {
     if (_ctxMenuEl) { _ctxMenuEl.remove(); _ctxMenuEl = null; }
+    // Re-arm the chip's custom tooltip now that the menu is gone - it was
+    // suppressed while open so the two didn't overlap.
+    if (_ctxMenuChip) {
+        if (_ctxMenuChipTooltip !== null) _ctxMenuChip.dataset.tooltip = _ctxMenuChipTooltip;
+        _ctxMenuChip = null;
+        _ctxMenuChipTooltip = null;
+    }
     document.removeEventListener("mousedown", _onCtxMenuOutside, true);
     document.removeEventListener("keydown", _onCtxMenuKey, true);
 }
@@ -358,8 +365,14 @@ function _onCtxMenuKey(e) {
     if (e.key === "Escape") _closeTabContextMenu();
 }
 
-function _showTabContextMenu(e, tab) {
+function _showTabContextMenu(e, tab, chip) {
     _closeTabContextMenu();
+    if (chip) {
+        _ctxMenuChip = chip;
+        _ctxMenuChipTooltip = chip.dataset.tooltip ?? null;
+        delete chip.dataset.tooltip;
+        EFTForge.tooltip?.hide();
+    }
     const menu = document.createElement("div");
     menu.className = "tab-context-menu";
     menu.innerHTML = `
@@ -447,7 +460,7 @@ function renderTabBar() {
             + (tab.pinned ? " pinned" : "");
         chip.draggable = true;
         chip.dataset.tabId = tab.id;
-        chip.title = label;
+        chip.dataset.tooltip = label;
         chip.innerHTML = `
             ${tab.pinned ? `<img class="tab-chip-pin-icon" src="./assets/images/pin.png" alt="" />` : ""}
             <span class="tab-chip-label">${escapeHtml(label)}</span>
@@ -463,7 +476,7 @@ function renderTabBar() {
         });
         chip.addEventListener("contextmenu", (e) => {
             e.preventDefault();
-            _showTabContextMenu(e, tab);
+            _showTabContextMenu(e, tab, chip);
         });
         chip.querySelector(".tab-chip-close")?.addEventListener("click", (e) => {
             e.stopPropagation();

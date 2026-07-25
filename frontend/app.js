@@ -1362,6 +1362,8 @@ async function switchLang(lang) {
 
     // Hide when mouse leaves the document
     document.addEventListener("mouseleave", hide, true);
+
+    window.EFTForge.tooltip = { hide };
 })();
 
 /* ===========================
