@@ -488,6 +488,10 @@ window.EFTForge.tracker = (function () {
             var fSign = fv >= 0 ? '+' : '';
             return fSign + parseFloat(fv.toFixed(1)) + '%';
         }
+        if (statName === 'velocity_modifier') {
+            var vSign = v >= 0 ? '+' : '';
+            return vSign + parseFloat(v.toFixed(1)) + '%';
+        }
         return _fmtVal(v);
     }
 
