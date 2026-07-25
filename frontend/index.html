@@ -99,6 +99,29 @@ header.header-expanded {
   height: 66px;
 }
 
+.header-scroll {
+  height: 100%;
+}
+
+.header-fade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 36px;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.header-fade-left {
+  left: 0;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.6), transparent);
+}
+
+.header-fade-right {
+  right: 0;
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.6), transparent);
+}
+
 /* =========================
    BUILD TABS
 ========================= */
@@ -241,6 +264,15 @@ header.header-expanded ~ #tab-bar {
   z-index: 60;
   cursor: grabbing;
   box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
+}
+
+.tab-bar-divider {
+  flex-shrink: 0;
+  align-self: center;
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: #333333;
 }
 
 .tab-chip-label {
@@ -7007,8 +7039,9 @@ body[data-mobile="true"] #build-controls .back-button { white-space: normal; min
 
 @media (max-width: 767px) {
   /* Header compression */
-  header { padding: 0 10px; gap: 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none; }
-  header::-webkit-scrollbar { display: none; }
+  header { padding: 0 10px; gap: 8px; }
+  .header-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none; }
+  .header-scroll::-webkit-scrollbar { display: none; }
   .header-content { min-width: max-content; }
   #tarkov-clock { display: none; }
   .header-btn { padding: 5px 8px; font-size: 11px; letter-spacing: 0.5px; }
@@ -7310,6 +7343,7 @@ var _hmt = _hmt || [];
 <body>
 
 <header>
+  <div class="header-scroll">
   <div class="header-content">
     <div class="header-logo-link" onclick="if (EFTForge.state.currentGun) returnToGunSelection()">
       <img class="header-logo-img" src="./assets/images/EFTForge1080x1080.png" alt="EFTForge Logo" />
@@ -7370,6 +7404,9 @@ var _hmt = _hmt || [];
       </button>
     </nav>
   </div>
+  </div>
+  <div class="header-fade header-fade-left"></div>
+  <div class="header-fade header-fade-right"></div>
 </header>
 <div id="tab-bar">
   <div id="tab-bar-scroll"></div>
@@ -7598,7 +7635,7 @@ var _hmt = _hmt || [];
 <script src="modules/build-manager.js?v=24"></script>
 <script src="modules/tab-manager.js?v=1"></script>
 <script src="modules/profile.js?v=7"></script>
-<script src="app.js?v=34"></script>
+<script src="app.js?v=36"></script>
 <script src="lzstring.min.js?v=15"></script>
 <script src="marked.min.js?v=15"></script>
 <script src="modules/news.js?v=16"></script>

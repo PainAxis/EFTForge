@@ -379,7 +379,9 @@ async function duplicateTab(tabId) {
         collapsedSlots: { ...source.collapsedSlots },
     };
     if (source.pinned) {
-        EFTForge.state.tabs.push(clone);
+        let insertAt = 0;
+        while (insertAt < EFTForge.state.tabs.length && EFTForge.state.tabs[insertAt].pinned) insertAt++;
+        EFTForge.state.tabs.splice(insertAt, 0, clone);
     } else {
         EFTForge.state.tabs.splice(idx + 1, 0, clone);
     }
@@ -1081,7 +1083,15 @@ function renderTabBar() {
     if (!keepTooltipOpen) _tpHide();
     scroll.innerHTML = "";
 
-    EFTForge.state.tabs.forEach(tab => {
+    EFTForge.state.tabs.forEach((tab, idx) => {
+        // First unpinned tab right after the pinned block gets a thin divider
+        // ahead of it, marking where the pinned group ends.
+        if (!tab.pinned && idx > 0 && EFTForge.state.tabs[idx - 1].pinned) {
+            const divider = document.createElement("div");
+            divider.className = "tab-bar-divider";
+            scroll.appendChild(divider);
+        }
+
         const gun = EFTForge.state.allGuns.find(g => g.id === tab.gunId);
         const shortName = gun ? gun.short_name : "?";
         const label = tab.buildName ? `${shortName} - ${tab.buildName}` : shortName;
@@ -1098,7 +1108,6 @@ function renderTabBar() {
         `;
 
         chip.addEventListener("click", (e) => {
-            if (_tdSuppressClick) { _tdSuppressClick = false; return; }
             if (e.target.closest(".tab-chip-close")) return;
             switchToTab(tab.id);
         });
@@ -1273,12 +1282,31 @@ function _scrollTabIntoView(tabId) {
 =========================== */
 
 let _td = null;             // pending/active drag state, or null when idle
-let _tdSuppressClick = false; // set right before a drag's mouseup so the trailing "click" doesn't also switchToTab()
 
 const TD_THRESHOLD = 4;     // px of mouse movement before a press becomes a drag
 const TD_GAP = 4;           // must match #tab-bar-scroll's flex `gap`
 const TD_EDGE_ZONE = 44;    // px from the scroll viewport's edge that triggers auto-scroll
 const TD_EDGE_SPEED = 6;    // max px/frame scrolled at the very edge of the edge zone
+
+// A drag's mouseup is followed by a trailing "click" the gesture didn't
+// intend as one, and it needs to be swallowed regardless of what it lands
+// on - the mouse can drift outside the dragged chip's clamped position while
+// dragging (into the other pinned/unpinned group, or past the bar's edge
+// entirely, both being deliberately allowed - see _tdUpdatePosition), so
+// that click's target at mouseup is often not the chip mousedown fired on,
+// sometimes not even a chip at all. A per-chip "was this a drag" flag can
+// only ever be checked by a listener on the element the click actually
+// lands on, which this can't guarantee - so instead capture the very next
+// click at the document root, ahead of any bubbling listener, and stop it
+// there regardless of its target. If no click ever arrives (e.g. the button
+// was released outside the window), the listener would otherwise sit armed
+// forever waiting to eat some unrelated later click - the timeout clears it
+// unconditionally on the next tick so that can't happen.
+function _tdSwallowNextClick() {
+    const swallow = (e) => { e.stopPropagation(); };
+    document.addEventListener("click", swallow, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener("click", swallow, { capture: true }), 0);
+}
 
 // Lays out `items` back-to-back (in their fixed relative order) starting at
 // `startLeft`, as if the dragged chip didn't exist - this is the baseline
@@ -1417,10 +1445,6 @@ function _tdEndDrag() {
         tabs.splice(groupStart, finalOrder.length, ...finalOrder.map(id => byId.get(id)));
         _persistTabs();
     }
-    // Rebuilds the chips fresh (no leftover inline transform/transition) in
-    // the new order, which lands the dragged chip in the same slot its
-    // siblings had already animated open for it - only a small snap from
-    // wherever the cursor was to that slot's exact edge, same as Chrome.
     renderTabBar();
 }
 
@@ -1436,7 +1460,7 @@ document.addEventListener("mousemove", (e) => {
 });
 document.addEventListener("mouseup", () => {
     if (!_td) return;
-    if (_td.phase === "active") { _tdSuppressClick = true; _tdEndDrag(); }
+    if (_td.phase === "active") { _tdSwallowNextClick(); _tdEndDrag(); }
     else _td = null;
 });
 

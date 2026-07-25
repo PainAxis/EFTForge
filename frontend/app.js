@@ -8,6 +8,9 @@ let _clockInterval      = null;
 let _langSwitching      = false;
 let _headerLastScroll   = 0;
 let _headerAnimating    = false;
+// Fade opacity ramps smoothly over this many px of scroll near each edge,
+// instead of snapping straight to fully visible.
+const HEADER_FADE_DISTANCE = 40;
 
 // Strip the cache-busting _v param added by the update checker so it doesn't
 // linger in the address bar after a forced reload.
@@ -41,6 +44,7 @@ devVersionCheck();
 mobileWarning();
 initTarkovClock();
 initHeaderExpand();
+initHeaderFades();
 initBpGlobalStatus();
 showMigrationNotice();
 
@@ -306,6 +310,40 @@ function initHeaderExpand() {
     const ws = document.getElementById("weapon-selector");
     if (ws) ws.addEventListener("scroll", _onWeaponSelectorScroll, { passive: true });
     _syncHeaderExpand();
+}
+
+/* ===========================
+   HEADER OVERFLOW FADES
+   Portrait phones can be too narrow for the header content, which becomes
+   horizontally swipeable. These edge gradients mirror the tab bar's fades
+   to hint that there's more to scroll to.
+=========================== */
+
+function _updateHeaderFades() {
+    const scroll = document.querySelector(".header-scroll");
+    const fadeLeft = document.querySelector(".header-fade-left");
+    const fadeRight = document.querySelector(".header-fade-right");
+    if (!scroll || !fadeLeft || !fadeRight) return;
+
+    const maxScroll = scroll.scrollWidth - scroll.clientWidth;
+    if (maxScroll <= 1) {
+        fadeLeft.style.opacity = 0;
+        fadeRight.style.opacity = 0;
+        return;
+    }
+
+    const left = scroll.scrollLeft;
+    const right = maxScroll - scroll.scrollLeft;
+    fadeLeft.style.opacity = Math.max(0, Math.min(1, left / HEADER_FADE_DISTANCE));
+    fadeRight.style.opacity = Math.max(0, Math.min(1, right / HEADER_FADE_DISTANCE));
+}
+
+function initHeaderFades() {
+    const scroll = document.querySelector(".header-scroll");
+    if (!scroll) return;
+    scroll.addEventListener("scroll", _updateHeaderFades, { passive: true });
+    window.addEventListener("resize", _updateHeaderFades);
+    _updateHeaderFades();
 }
 
 /* ===========================
