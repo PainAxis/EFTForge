@@ -1169,7 +1169,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
 }
 
 /* Auto-hide empty columns */
-/* Column order: 1=name 2=price 3=₽/recoil 4=weight 5=recoil 6=acc 7=ergo 8=evo 9=R+E 10=heat/cool/burn */
+/* Column order: 1=name 2=price 3=₽/recoil 4=weight 5=recoil 6=acc 7=ergo 8=evo 9=R+E 10=heat/cool/burn 11=velocity */
 .attachment-table.hide-col-price th:nth-child(2),
 .attachment-table.hide-col-price td:nth-child(2) { display: none; }
 .attachment-table.hide-col-rub-recoil th:nth-child(3),
@@ -1188,6 +1188,8 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .attachment-table.hide-col-balance td:nth-child(9) { display: none; }
 .attachment-table.hide-col-heat th:nth-child(10),
 .attachment-table.hide-col-heat td:nth-child(10) { display: none; }
+.attachment-table.hide-col-vel th:nth-child(11),
+.attachment-table.hide-col-vel td:nth-child(11) { display: none; }
 
 /* Balance controls: slider shown when R+E sort is active */
 .balance-controls {
@@ -4126,6 +4128,16 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
     font-size: 13px;
 }
 
+.stat-subsection-cols {
+    display: flex;
+    gap: 16px;
+}
+
+.stat-subsection-cols .stat-col {
+    flex: 1;
+    min-width: 0;
+}
+
 /* Deprecated overswing group */
 .deprecated-group-outer {
     display: flex;
@@ -6692,6 +6704,8 @@ body[data-mobile="true"] #left-build-area { overflow-x: hidden; max-width: 100%;
 body[data-mobile="true"] #stats { overflow-x: hidden; max-width: 100%; }
 body[data-mobile="true"] #slots { max-width: 100%; }
 body[data-mobile="true"] .stats-section { overflow-x: hidden; }
+/* Mobile: keep the sub-stats single-column (desktop-only space-saving layout) */
+body[data-mobile="true"] .stat-subsection-cols { display: block; }
 body[data-mobile="true"] #build-controls { flex-wrap: wrap; }
 body[data-mobile="true"] #build-controls .back-button { white-space: normal; min-width: 0; }
 

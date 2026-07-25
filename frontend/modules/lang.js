@@ -67,6 +67,8 @@ const _TRANSLATIONS = {
 
         "stats.weight":             "Weight:",
         "stats.sightingRange":      "Sighting Range:",
+        "stats.muzzleVelocity":     "Muzzle Velocity:",
+        "stats.noAmmo":             "No Ammo",
         "stats.eed":                "EvoErgoDelta",
         "stats.eedLabel":           "EED:",
         "stats.overswing":          "OverSwing:",
@@ -173,6 +175,7 @@ const _TRANSLATIONS = {
         "th.price":               "Price",
         "th.priceTooltip":        "To switch between PvP and PvE pricing, open the Price panel and toggle PvE mode",
         "th.heatCoolBurn":        "Heat/Cool/Burn",
+        "th.muzzleVelocity":      "Muzzle Velocity",
         // Build manager modals
         "modal.save":             "SAVE BUILD",
         "modal.share":            "SHARE BUILD",
@@ -773,6 +776,8 @@ const _TRANSLATIONS = {
 
         "stats.weight":             "重量：",
         "stats.sightingRange":      "瞄具有效距离：",
+        "stats.muzzleVelocity":     "枪口初速：",
+        "stats.noAmmo":             "无弹药",
         "stats.eed":                "Evo人机Delta",
         "stats.eedLabel":           "Evo人机Delta（EED）：",
         "stats.overswing":          "过摆：",
@@ -816,7 +821,7 @@ const _TRANSLATIONS = {
         "hidden.recAngle":          "后坐力角度",
         "hidden.recHandRot":        "后坐手部旋转",
         "hidden.recDispersion":     "后坐力散布",
-"hidden.recReturnSpeed":    "后坐回中速度",
+        "hidden.recReturnSpeed":    "后坐回中速度",
         "hidden.tip.aimPlane":      "开镜状态下武器的基础弹道散布",
         "hidden.tip.aimSens":       "开镜时相机对鼠标输入的响应幅度",
         "hidden.tip.camAngleStep":  "每次步进时摄像机视角的偏移量",
@@ -830,7 +835,7 @@ const _TRANSLATIONS = {
         "hidden.tip.recAngle":      "后坐力模板的偏移方向角度",
         "hidden.tip.recHandRot":    "后坐力手部旋转分类倍数",
         "hidden.tip.recDispersion": "连发射击时后坐力模板的散布范围",
-"hidden.tip.recReturnSpeed":"后坐力结束后武器回正到基准位置的速度",
+        "hidden.tip.recReturnSpeed":"后坐力结束后武器回正到基准位置的速度",
         "hidden.tip.heatFactor":    "当前已安装的全部配件与所选弹药的单发热量累积倍数总和",
         "hidden.tip.coolingFactor": "当前已安装的全部配件的射击间冷却速度倍数总和",
         "hidden.tip.durabilityBurn": "当前已安装的全部配件与所选弹药导致的耐久损耗倍数总和",
@@ -879,6 +884,7 @@ const _TRANSLATIONS = {
         "th.price":               "价格",
         "th.priceTooltip":        "如需切换PvP舆PvE定价，请打开价格面板并切换PvE模式",
         "th.heatCoolBurn":        "发热/冷却/耐久损耗",
+        "th.muzzleVelocity":      "枪口初速",
         // Build manager modals
         "modal.save":             "保存配置",
         "modal.share":            "分享配置",

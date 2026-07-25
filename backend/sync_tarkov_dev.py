@@ -44,6 +44,7 @@ _ATTACHMENT_STATS = [
     "heat_factor",
     "cooling_factor",
     "durability_burn_factor",
+    "velocity_modifier",
 ]
 _AMMO_STATS = [
     "ammo_damage",
@@ -422,6 +423,7 @@ def sync_items(sync_source: str = "scheduled"):
         heat_factor = None
         cooling_factor = None
         durability_burn_factor = None
+        velocity_modifier = None
 
         item_weight = item.get("weight") or 0
         # tarkov.dev GraphQL exposed Item.accuracyModifier as a percentage; the JSON
@@ -524,6 +526,11 @@ def sync_items(sync_source: str = "scheduled"):
                 heat_factor      = properties.get("heatFactor")
                 cooling_factor   = properties.get("coolingFactor")
                 durability_burn_factor = properties.get("durabilityBurnFactor")
+                # Muzzle velocity % modifier - NOT under properties like the other mod stats;
+                # the JSON API only exposes this as a top-level Item field (mirrors the GraphQL
+                # schema's Item.velocity, distinct from ItemPropertiesAmmo.initialSpeed). Already
+                # a plain percentage (e.g. -2 for -2%), no scaling needed.
+                velocity_modifier = item.get("velocity")
 
             # --------------------------
             # Magazine
@@ -638,6 +645,7 @@ def sync_items(sync_source: str = "scheduled"):
             heat_factor=heat_factor,
             cooling_factor=cooling_factor,
             durability_burn_factor=durability_burn_factor,
+            velocity_modifier=velocity_modifier,
         )
 
         items_to_add.append(db_item)

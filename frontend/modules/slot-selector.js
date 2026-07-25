@@ -410,6 +410,9 @@ async function openSlotSelector(parentNode, slot) {
                     <th id="th-heat" onclick="changeSort('heat')">
                         ${t("th.heatCoolBurn")} <span class="sort-indicator"></span>
                     </th>
+                    <th id="th-vel" onclick="changeSort('vel')">
+                        ${t("th.muzzleVelocity")} <span class="sort-indicator"></span>
+                    </th>
                 </tr>
             </thead>
 
@@ -690,6 +693,10 @@ function applyAttachmentSort() {
             primary = (a.item.heat_factor ?? 1) - (b.item.heat_factor ?? 1);
             break;
 
+        case "vel":
+            primary = (a.item.velocity_modifier ?? 0) - (b.item.velocity_modifier ?? 0);
+            break;
+
         default:
             primary = 0;
     }
@@ -729,6 +736,7 @@ function _updateColumnVisibility(items) {
     const hasHeat    = items.some(e =>
         e.item.heat_factor != null || e.item.cooling_factor != null || e.item.durability_burn_factor != null
     );
+    const hasVel     = items.some(e => e.item.velocity_modifier != null && e.item.velocity_modifier !== 0);
 
     table.classList.toggle("hide-col-weight", !hasWeight);
     table.classList.toggle("hide-col-recoil", !hasRecoil);
@@ -737,6 +745,7 @@ function _updateColumnVisibility(items) {
     table.classList.toggle("hide-col-evo",    !hasEvo);
     table.classList.toggle("hide-col-price",  !hasPrice);
     table.classList.toggle("hide-col-heat",   !hasHeat);
+    table.classList.toggle("hide-col-vel",    !hasVel);
     // Combo-only columns - always hidden in list mode
     table.classList.add("hide-col-rub-recoil", "hide-col-balance");
 }
@@ -778,7 +787,7 @@ function updateSortIndicators() {
       ? EFTForge.state.comboSort
       : EFTForge.state.attachmentSort;
 
-  const headers = ["name", "weight", "recoil", "ergo", "acc", "evo", "rub-recoil", "price", "balance", "heat"];
+  const headers = ["name", "weight", "recoil", "ergo", "acc", "evo", "rub-recoil", "price", "balance", "heat", "vel"];
   headers.forEach(key => {
     const th = document.getElementById(`th-${key}`);
     if (!th) return;
@@ -900,6 +909,13 @@ function _heatCoolBurnCellHtml(item) {
     return `<td class="hcb-cell">${html}</td>`;
 }
 
+function _velCellHtml(item) {
+    const v = item.velocity_modifier ?? null;
+    if (v == null || v === 0) return `<td class="vel-cell">-</td>`;
+    const cls = v > 0 ? "positive" : "negative";
+    return `<td class="vel-cell"><span class="${cls}">${v > 0 ? "+" : ""}${v.toFixed(1)}%</span></td>`;
+}
+
 function renderAttachmentRows(items) {
 
   _clearMarqueeTimers();
@@ -1018,6 +1034,7 @@ function renderAttachmentRows(items) {
           <td class="${(ghostStats ? ghostStats.contrib : bl.contribution) >= 0 ? "evo-positive" : "evo-negative"}">${(ghostStats ? ghostStats.contrib : bl.contribution) >= 0 ? "+" : ""}${(ghostStats ? ghostStats.contrib : bl.contribution).toFixed(1)}</td>
           <td class="col-combo-only"></td>
           ${_heatCoolBurnCellHtml(blItem)}
+          ${_velCellHtml(blItem)}
       `;
 
       ghostRow.addEventListener("mouseenter", () => {
@@ -1189,6 +1206,7 @@ function renderAttachmentRows(items) {
         ${evoCell}
         <td class="col-combo-only"></td>
         ${_heatCoolBurnCellHtml(item)}
+        ${_velCellHtml(item)}
     `;
 
     row.addEventListener("mouseenter", () => {
@@ -2033,8 +2051,9 @@ function _updateComboColumnVisibility(items) {
     table.classList.toggle("hide-col-price",       !hasPrice);
     table.classList.toggle("hide-col-rub-recoil",  !(hasRecoil && hasPrice));
     table.classList.toggle("hide-col-balance",     !(hasRecoil && hasErgo));
-    // Heat/cooling/durability-burn are per-item stats with no combo aggregation - always hidden here
+    // Heat/cooling/durability-burn and velocity modifier are per-item stats with no combo aggregation - always hidden here
     table.classList.add("hide-col-heat");
+    table.classList.add("hide-col-vel");
 }
 
 function _isComboInstalled(entry) {

@@ -203,6 +203,9 @@ def _migrate_items_db():
         if "durability_burn_factor" not in existing:
             conn.execute(text("ALTER TABLE items ADD COLUMN durability_burn_factor REAL"))
             conn.commit()
+        if "velocity_modifier" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN velocity_modifier REAL"))
+            conn.commit()
 
 
 
@@ -465,6 +468,7 @@ def _compute_stats(base_item, current_ids: list, items_map: dict,
 
     total_recoil_modifier = 0.0
     total_accuracy_mod = 0.0
+    total_velocity_mod = base_item.velocity_modifier or 0
     barrel_coi = None  # installed barrel's centerOfImpact overrides the weapon base
     heat_factor = 1.0
     cooling_factor = 1.0
@@ -484,6 +488,9 @@ def _compute_stats(base_item, current_ids: list, items_map: dict,
             barrel_coi = att.center_of_impact
         else:
             total_accuracy_mod += att.accuracy_modifier or 0
+        # Muzzle velocity: summed percentage modifier (barrel + muzzle devices); applied to the
+        # loaded ammo's velocity, not overridden like accuracy's COI
+        total_velocity_mod += att.velocity_modifier or 0
         # Heat/cooling/durability-burn are multipliers (not summed percentages) - default 1.0 for parts without the stat
         if att.heat_factor is not None:
             heat_factor *= att.heat_factor
@@ -536,6 +543,7 @@ def _compute_stats(base_item, current_ids: list, items_map: dict,
         "heat_factor": round(heat_factor, 4),
         "cooling_factor": round(cooling_factor, 4),
         "durability_burn_factor": round(durability_burn_factor, 4),
+        "velocity_modifier_pct": round(total_velocity_mod, 4),
     }
 
 
@@ -990,6 +998,7 @@ def get_allowed_items(slot_id: str, lang: str = "en", db: Session = Depends(get_
             "heat_factor": item.heat_factor,
             "cooling_factor": item.cooling_factor,
             "durability_burn_factor": item.durability_burn_factor,
+            "velocity_modifier": item.velocity_modifier,
             "icon_link": item.icon_link,
             "base_image_link": item.base_image_link,
             "conflicting_item_ids": item.conflicting_item_ids,
@@ -1048,6 +1057,7 @@ def get_allowed_items_batch(
                 "heat_factor": item.heat_factor,
                 "cooling_factor": item.cooling_factor,
                 "durability_burn_factor": item.durability_burn_factor,
+                "velocity_modifier": item.velocity_modifier,
                 "icon_link": item.icon_link,
                 "base_image_link": item.base_image_link,
                 "conflicting_item_ids": item.conflicting_item_ids,
@@ -1209,6 +1219,11 @@ def calculate_build(
     # of magazine capacity - it's a per-shot multiplier, not a per-round total like weight.
     ammo_weight_added = False
 
+    # Muzzle velocity: the gun's velocity is the loaded round's own velocity, adjusted by the
+    # installed attachments' summed percentage modifier. With no ammo assumed loaded there is no
+    # base m/s to report, so it stays None (frontend shows "No Ammo" for the row in that case).
+    stats["muzzle_velocity"] = None
+
     if selected_ammo_id and assume_full_mag:
         ammo = db.query(Item).filter(Item.id == selected_ammo_id).first()
         if ammo and ammo.is_ammo:
@@ -1216,6 +1231,8 @@ def calculate_build(
                 stats["heat_factor"] = round(stats["heat_factor"] * ammo.heat_factor, 4)
             if ammo.durability_burn_factor is not None:
                 stats["durability_burn_factor"] = round(stats["durability_burn_factor"] * ammo.durability_burn_factor, 4)
+            if ammo.velocity is not None:
+                stats["muzzle_velocity"] = round(ammo.velocity * (1 + stats["velocity_modifier_pct"] / 100))
             for att in items_map.values():
                 if att.magazine_capacity:
                     stats["total_weight"] = round(
@@ -1635,6 +1652,7 @@ def combo_full(
             "heat_factor":          item.heat_factor,
             "cooling_factor":       item.cooling_factor,
             "durability_burn_factor": item.durability_burn_factor,
+            "velocity_modifier":    item.velocity_modifier,
             "icon_link":            item.icon_link,
             "base_image_link":      item.base_image_link,
             "conflicting_item_ids": item.conflicting_item_ids,
@@ -1913,6 +1931,7 @@ def get_gun_init(
             "heat_factor": item.heat_factor,
             "cooling_factor": item.cooling_factor,
             "durability_burn_factor": item.durability_burn_factor,
+            "velocity_modifier": item.velocity_modifier,
             "icon_link": item.icon_link,
             "base_image_link": item.base_image_link,
             "conflicting_item_ids": item.conflicting_item_ids,
@@ -1996,6 +2015,7 @@ def get_gun_init(
     # Mirrors /build/calculate's ammo logic - must stay in sync or the very first stats
     # shown on gun load (from this endpoint) disagree with every subsequent recalculation.
     ammo_weight_added = False
+    stats["muzzle_velocity"] = None
 
     if assume_full_mag and selected_ammo_id:
         ammo = db.query(Item).filter(Item.id == selected_ammo_id).first()
@@ -2004,6 +2024,8 @@ def get_gun_init(
                 stats["heat_factor"] = round(stats["heat_factor"] * ammo.heat_factor, 4)
             if ammo.durability_burn_factor is not None:
                 stats["durability_burn_factor"] = round(stats["durability_burn_factor"] * ammo.durability_burn_factor, 4)
+            if ammo.velocity is not None:
+                stats["muzzle_velocity"] = round(ammo.velocity * (1 + stats["velocity_modifier_pct"] / 100))
             for att in factory_items_map.values():
                 if att.magazine_capacity:
                     stats["total_weight"] = round(

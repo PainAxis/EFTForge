@@ -748,6 +748,7 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
   EFTForge.state.lastRecoilH = data.recoil_horizontal ?? null;
   EFTForge.state.lastAccuracyMoa = data.accuracy_moa ?? null;
   EFTForge.state.lastSightingRange = data.sighting_range ?? null;
+  EFTForge.state.lastMuzzleVelocity = data.muzzle_velocity ?? null;
   EFTForge.state.lastEED = parseFloat(data.evo_ergo_delta ?? 0);
   EFTForge.state.lastOverswing  = data.overswing ?? false;
   EFTForge.state.lastArmStamina = parseFloat(data.arm_stamina ?? 0);
@@ -770,6 +771,7 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
 
   const sightingRange = data.sighting_range ?? null;
   const accuracyMoa = data.accuracy_moa ?? null;
+  const muzzleVelocity = data.muzzle_velocity ?? null;
   // Bar fill: higher MOA = more fill (same direction as recoil bars). Cap at 10 MOA.
   const accuracyBarPct = accuracyMoa !== null ? Math.min(accuracyMoa / 10, 1) * 100 : 0;
   const accuracyDisplay = accuracyMoa !== null ? accuracyMoa.toFixed(2) + " MOA" : "-";
@@ -822,6 +824,8 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
       <div class="stats-divider"></div>
 
       <div class="stat-subsection">
+      <div class="stat-subsection-cols">
+      <div class="stat-col">
       <div class="stat-row stat-row-weight"><span class="stat-label">${t("stats.weight")}</span><span>${totalWeight.toFixed(3)} kg</span></div>
       <div class="deprecated-group-outer">
         <div class="deprecated-group-rows">
@@ -837,11 +841,16 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
         <div class="deprecated-group-bracket"></div>
         <span class="deprecated-group-note">${t("stats.overswingDeprecated")}</span>
       </div>
+      </div>
+      <div class="stat-col">
       <div class="stat-row" id="arm-stam-row">
         <span class="stat-label">${t("stats.armStamina")}<span class="stamina-info-btn" id="stamina-info-btn" data-tooltip="${t("stats.configStrengthTooltip")}">i</span>:</span>
         <span>${armStamina.toFixed(1)}s</span>
       </div>
       ${sightingRange !== null ? `<div class="stat-row"><span class="stat-label">${t("stats.sightingRange")}</span><span>${sightingRange} m</span></div>` : ""}
+      <div class="stat-row"><span class="stat-label">${t("stats.muzzleVelocity")}</span><span>${muzzleVelocity !== null ? muzzleVelocity + " m/s" : t("stats.noAmmo")}</span></div>
+      </div>
+      </div>
       </div>
       <div id="hidden-stats-anchor"></div>
     </div>
@@ -915,7 +924,7 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
                   </div>
               </div>
           `;
-          document.getElementById("stamina-info-btn").closest(".stat-row").after(panel);
+          document.getElementById("stamina-info-btn").closest(".stat-subsection-cols").after(panel);
 
           panel.style.height = "0px";
           panel.style.opacity = "0";
@@ -966,7 +975,7 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
                   </div>
               </div>
           `;
-          document.getElementById("overswing-value-span").closest(".deprecated-group-outer").after(panel);
+          document.getElementById("overswing-value-span").closest(".stat-subsection-cols").after(panel);
 
           panel.style.height = "0px";
           panel.style.opacity = "0";
@@ -983,11 +992,11 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
   });
 
   if (savedStaminaPanel) {
-    document.getElementById("stamina-info-btn")?.closest(".stat-row")?.after(savedStaminaPanel);
+    document.getElementById("stamina-info-btn")?.closest(".stat-subsection-cols")?.after(savedStaminaPanel);
     wireStrengthControls();
   }
   if (savedEquipErgoPanel) {
-    document.getElementById("overswing-value-span")?.closest(".deprecated-group-outer")?.after(savedEquipErgoPanel);
+    document.getElementById("overswing-value-span")?.closest(".stat-subsection-cols")?.after(savedEquipErgoPanel);
     wireEquipErgoControls();
   }
 }
