@@ -76,6 +76,15 @@ let _gunInitCache = {}; // gunId -> fetchGunInit() response, reused for instant 
 function _clearGunInitCache() {
     _gunInitCache = {};
 }
+
+// Drop a gun's cached /guns/{id}/init payload once no open tab references it
+// anymore - otherwise every gun visited in the session (not just currently
+// open ones) stays cached for the rest of the page's life.
+function _evictUnusedGunInitCache(gunId) {
+    if (!_gunInitCache[gunId]) return;
+    const stillOpen = (EFTForge.state.tabs || []).some(t => t.gunId === gunId);
+    if (!stillOpen) delete _gunInitCache[gunId];
+}
 let _gunProximityHandler = null;
 let _gunProximityLeaveHandler = null;
 let _rafPending = false;
@@ -231,6 +240,8 @@ function updateToggleUI() {
 }
 
 function returnToGunSelection() {
+
+    EFTForge.tabs?.deactivateActiveTab();
 
     if (EFTForge.state.publishMode) {
         EFTForge.state.publishMode = false;

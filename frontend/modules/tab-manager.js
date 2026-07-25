@@ -122,8 +122,26 @@ function syncActiveTab({ buildName = null, communityBuild = null } = {}) {
    CORE ACTIONS
 =========================== */
 
+// A tab counts as a duplicate of {gunId, pairs, ammoId, ubglAmmoId} when the
+// gun and the full attachment/ammo state match exactly - buildName/pinned/
+// collapsedSlots are just labels/UI state and don't factor in. Used to fold
+// automatic tab creation (fresh gun pick, saved/community/URL build) into an
+// existing tab instead of opening a carbon copy; explicit right-click
+// Duplicate deliberately skips this check.
+function _findDuplicateTab(gunId, pairs, ammoId, ubglAmmoId, excludeTabId = null) {
+    const key = _pairsKey(pairs || []);
+    return EFTForge.state.tabs.find(t =>
+        t.id !== excludeTabId &&
+        t.gunId === gunId &&
+        _pairsKey(t.pairs) === key &&
+        (t.ammoId || null) === (ammoId || null) &&
+        (t.ubglAmmoId || null) === (ubglAmmoId || null)
+    );
+}
+
 // A fresh gun pick from gunSelect - always opens a brand new tab with the
-// gun's factory attachment set (selectGun applies it exactly as today).
+// gun's factory attachment set (selectGun applies it exactly as today),
+// unless that exact factory build is already open in another tab.
 async function createTabForGun(gun, card = null) {
     if (!gun || _tabSwitchInFlight) return;
     _tabSwitchInFlight = true;
@@ -141,6 +159,18 @@ async function createTabForGun(gun, card = null) {
         await selectGun(gun, el);
 
         tab.pairs = collectSlotPairs(EFTForge.state.buildTree);
+        tab.ammoId = document.getElementById("ammo-select")?.value || null;
+        tab.ubglAmmoId = document.getElementById("ubgl-ammo-select")?.value || null;
+
+        const dup = _findDuplicateTab(gun.id, tab.pairs, tab.ammoId, tab.ubglAmmoId, id);
+        if (dup) {
+            EFTForge.state.tabs = EFTForge.state.tabs.filter(t => t.id !== id);
+            _tabHistory.delete(id);
+            await _activateTab(dup.id);
+            _persistTabs();
+            return;
+        }
+
         _persistTabs();
         renderTabBar();
     } finally {
@@ -149,7 +179,8 @@ async function createTabForGun(gun, card = null) {
 }
 
 // A saved build / community build / shared-URL build - opens as a new tab
-// carrying that build's name (and community attribution, if any).
+// carrying that build's name (and community attribution, if any), unless
+// that exact build is already open in another tab.
 async function createTabFromPayload(payload, buildName = null, communityBuild = null, silent = true) {
     if (_tabSwitchInFlight) return;
     const gun = EFTForge.state.allGuns.find(g => g.id === payload.g);
@@ -157,10 +188,17 @@ async function createTabFromPayload(payload, buildName = null, communityBuild = 
         showToast(t("toast.loadFailed"), t("toast.unknownWeapon"), 3500);
         return;
     }
+
+    _serializeActiveTab();
+
+    const dup = _findDuplicateTab(gun.id, payload.p || [], payload.a || null, payload.ua || null);
+    if (dup) {
+        if (dup.id !== EFTForge.state.activeTabId) await switchToTab(dup.id);
+        return;
+    }
+
     _tabSwitchInFlight = true;
     try {
-        _serializeActiveTab();
-
         const id = _newTabId();
         const tab = { id, gunId: gun.id, pinned: false, buildName, communityBuild, pairs: payload.p || [], ammoId: payload.a || null, ubglAmmoId: payload.ua || null, collapsedSlots: {} };
         EFTForge.state.tabs.push(tab);
@@ -179,9 +217,11 @@ async function createTabFromPayload(payload, buildName = null, communityBuild = 
     }
 }
 
-async function switchToTab(tabId) {
+// Actual tab-activation work, shared by switchToTab() and the duplicate-
+// collapse paths above (which are already inside a _tabSwitchInFlight
+// section and so can't go through the guarded switchToTab()).
+async function _activateTab(tabId) {
     if (tabId === EFTForge.state.activeTabId) return;
-    if (_tabSwitchInFlight) return; // ignore rapid re-clicks while a switch is already in progress
     const target = EFTForge.state.tabs.find(t => t.id === tabId);
     if (!target) return;
 
@@ -191,24 +231,42 @@ async function switchToTab(tabId) {
         return;
     }
 
+    _serializeActiveTab();
+    EFTForge.state.activeTabId = tabId;
+
+    await loadBuildFromPayload({ g: target.gunId, p: target.pairs, a: target.ammoId, ua: target.ubglAmmoId }, target.buildName, true);
+    EFTForge.state.communityBuild = target.communityBuild || null;
+    syncBuildDisplayName();
+
+    // loadBuildFromPayload always resets collapsedSlots - reapply this tab's own state
+    EFTForge.state.collapsedSlots = target.collapsedSlots || {};
+    await renderFullTree(false);
+
+    const hist = _tabHistory.get(tabId);
+    EFTForge.state.buildHistory = hist ? [...hist.buildHistory] : [];
+    EFTForge.state.buildFuture  = hist ? [...hist.buildFuture]  : [];
+
+    renderTabBar();
+}
+
+// Back button / logo click -> gun grid. No tab closes, but nothing should
+// read as "active" while the user is browsing the grid; clicking the tab
+// again later resumes it exactly where it was left via switchToTab().
+function deactivateActiveTab() {
+    if (!_isDesktopTabs()) return;
+    if (!EFTForge.state.activeTabId) return;
+    _serializeActiveTab();
+    EFTForge.state.activeTabId = null;
+    _persistTabs();
+    renderTabBar();
+}
+
+async function switchToTab(tabId) {
+    if (tabId === EFTForge.state.activeTabId) return;
+    if (_tabSwitchInFlight) return; // ignore rapid re-clicks while a switch is already in progress
     _tabSwitchInFlight = true;
     try {
-        _serializeActiveTab();
-        EFTForge.state.activeTabId = tabId;
-
-        await loadBuildFromPayload({ g: target.gunId, p: target.pairs, a: target.ammoId, ua: target.ubglAmmoId }, target.buildName, true);
-        EFTForge.state.communityBuild = target.communityBuild || null;
-        syncBuildDisplayName();
-
-        // loadBuildFromPayload always resets collapsedSlots - reapply this tab's own state
-        EFTForge.state.collapsedSlots = target.collapsedSlots || {};
-        await renderFullTree(false);
-
-        const hist = _tabHistory.get(tabId);
-        EFTForge.state.buildHistory = hist ? [...hist.buildHistory] : [];
-        EFTForge.state.buildFuture  = hist ? [...hist.buildFuture]  : [];
-
-        renderTabBar();
+        await _activateTab(tabId);
     } finally {
         _tabSwitchInFlight = false;
     }
@@ -218,9 +276,11 @@ async function closeTab(tabId) {
     const idx = EFTForge.state.tabs.findIndex(t => t.id === tabId);
     if (idx === -1) return;
     const wasActive = EFTForge.state.activeTabId === tabId;
+    const gunId = EFTForge.state.tabs[idx].gunId;
 
     EFTForge.state.tabs.splice(idx, 1);
     _tabHistory.delete(tabId);
+    _evictUnusedGunInitCache(gunId);
 
     if (!wasActive) {
         _persistTabs();
@@ -249,10 +309,15 @@ async function duplicateTab(tabId) {
     const clone = {
         ...source,
         id: _newTabId(),
+        pinned: false,
         pairs: [...source.pairs],
         collapsedSlots: { ...source.collapsedSlots },
     };
-    EFTForge.state.tabs.splice(idx + 1, 0, clone);
+    if (source.pinned) {
+        EFTForge.state.tabs.push(clone);
+    } else {
+        EFTForge.state.tabs.splice(idx + 1, 0, clone);
+    }
     _tabHistory.set(clone.id, { buildHistory: [], buildFuture: [] });
     _persistTabs();
     await switchToTab(clone.id);
@@ -338,14 +403,38 @@ function _syncTabBarSpacer() {
     if (spacer) spacer.classList.toggle("with-tab-bar", EFTForge.state.tabs.length > 0);
 }
 
+// Fade opacity ramps smoothly over this many px of scroll near each edge,
+// instead of snapping straight to fully visible.
+const TAB_BAR_FADE_DISTANCE = 40;
+
+function _updateTabBarFades() {
+    const scroll = document.getElementById("tab-bar-scroll");
+    const fadeLeft = document.querySelector(".tab-bar-fade-left");
+    const fadeRight = document.querySelector(".tab-bar-fade-right");
+    if (!scroll || !fadeLeft || !fadeRight) return;
+
+    const maxScroll = scroll.scrollWidth - scroll.clientWidth;
+    if (maxScroll <= 1) {
+        fadeLeft.style.opacity = 0;
+        fadeRight.style.opacity = 0;
+        return;
+    }
+
+    const left = scroll.scrollLeft;
+    const right = maxScroll - scroll.scrollLeft;
+    fadeLeft.style.opacity = Math.max(0, Math.min(1, left / TAB_BAR_FADE_DISTANCE));
+    fadeRight.style.opacity = Math.max(0, Math.min(1, right / TAB_BAR_FADE_DISTANCE));
+}
+
 function renderTabBar() {
     if (!_isDesktopTabs()) return;
     const bar = document.getElementById("tab-bar");
-    if (!bar) return;
+    const scroll = document.getElementById("tab-bar-scroll");
+    if (!bar || !scroll) return;
 
     bar.classList.toggle("has-tabs", EFTForge.state.tabs.length > 0);
     _syncTabBarSpacer();
-    bar.innerHTML = "";
+    scroll.innerHTML = "";
 
     EFTForge.state.tabs.forEach(tab => {
         const gun = EFTForge.state.allGuns.find(g => g.id === tab.gunId);
@@ -360,6 +449,7 @@ function renderTabBar() {
         chip.dataset.tabId = tab.id;
         chip.title = label;
         chip.innerHTML = `
+            ${tab.pinned ? `<img class="tab-chip-pin-icon" src="./assets/images/pin.png" alt="" />` : ""}
             <span class="tab-chip-label">${escapeHtml(label)}</span>
             ${tab.pinned ? "" : `<button class="tab-chip-close" type="button" aria-label="${escapeHtml(t("tab.close"))}">&times;</button>`}
         `;
@@ -420,9 +510,72 @@ function renderTabBar() {
                 .forEach(c => c.classList.remove("dragging", "drag-over-before", "drag-over-after"));
         });
 
-        bar.appendChild(chip);
+        scroll.appendChild(chip);
     });
+
+    _updateTabBarFades();
 }
+
+// Manual rAF-eased smooth scroll for the wheel handler below - CSS
+// scroll-behavior:smooth is at the mercy of the user's OS/browser smooth-
+// scrolling setting (can be force-disabled), so we animate scrollLeft
+// ourselves to get consistent behavior everywhere.
+//
+// Fixed-duration ease-out (not an asymptotic per-frame chase): a chase that
+// closes a fraction of the remaining distance every frame slows into
+// sub-pixel steps that get rounded away by the renderer, so the bar looked
+// visually "stuck" for a stretch before finally snapping to place. Animating
+// over a fixed duration guarantees it actually finishes on schedule.
+let _tabBarAnim = null; // { fromX, toX, startTs, duration }
+let _tabBarScrollRAF = null;
+
+const TAB_BAR_SCROLL_DURATION = 260; // ms
+
+function _easeOutCubic(p) {
+    const inv = 1 - p;
+    return 1 - inv * inv * inv;
+}
+
+function _stepTabBarScroll(scroll, ts) {
+    if (!_tabBarAnim) { _tabBarScrollRAF = null; return; }
+    const { fromX, toX, startTs, duration } = _tabBarAnim;
+    const p = Math.min(1, (ts - startTs) / duration);
+    scroll.scrollLeft = Math.round(fromX + (toX - fromX) * _easeOutCubic(p));
+
+    if (p >= 1) {
+        _tabBarAnim = null;
+        _tabBarScrollRAF = null;
+        return;
+    }
+    _tabBarScrollRAF = requestAnimationFrame((t) => _stepTabBarScroll(scroll, t));
+}
+
+function _queueTabBarScroll(scroll, deltaY) {
+    const max = scroll.scrollWidth - scroll.clientWidth;
+    const currentTarget = _tabBarAnim ? _tabBarAnim.toX : scroll.scrollLeft;
+    _tabBarAnim = {
+        fromX: scroll.scrollLeft,
+        toX: Math.max(0, Math.min(max, currentTarget + deltaY)),
+        startTs: performance.now(),
+        duration: TAB_BAR_SCROLL_DURATION,
+    };
+    if (!_tabBarScrollRAF) _tabBarScrollRAF = requestAnimationFrame((t) => _stepTabBarScroll(scroll, t));
+}
+
+(function _initTabBarScrollUX() {
+    const scroll = document.getElementById("tab-bar-scroll");
+    if (!scroll) return;
+
+    scroll.addEventListener("scroll", _updateTabBarFades, { passive: true });
+    window.addEventListener("resize", _updateTabBarFades);
+
+    scroll.addEventListener("wheel", (e) => {
+        if (scroll.scrollWidth <= scroll.clientWidth) return;
+        if (e.deltaY === 0) return;
+        e.preventDefault();
+        _queueTabBarScroll(scroll, e.deltaY);
+    }, { passive: false });
+})();
 
 window.EFTForge.tabs = {
     createTabForGun,
@@ -431,6 +584,7 @@ window.EFTForge.tabs = {
     closeTab,
     duplicateTab,
     togglePin,
+    deactivateActiveTab,
     renderTabBar,
     syncActiveTab,
     restoreTabsFromStorage,
