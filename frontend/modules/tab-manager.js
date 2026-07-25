@@ -402,12 +402,16 @@ function _showTabContextMenu(e, tab) {
 =========================== */
 
 const TAB_PREVIEW_HOVER_DELAY = 150; // ms - lets the cursor pass over several chips without firing requests for each
+const TAB_PREVIEW_HIDE_GRACE  = 100; // ms - bridges the gap between adjacent chips so grazing it doesn't hide+reopen the tooltip
 
 let _tpTooltipEl   = null;
 let _tpGen         = 0;     // bumped on every hide/hover-away - invalidates in-flight async work
 let _tpHoverTimer  = null;
+let _tpHideTimer   = null;
 let _tpActiveTabId = null;
 let _tpImgAbort    = null;  // AbortController for the in-flight tooltip image-gen fetch
+let _tpLastX       = 0;     // last known cursor position, used to resume the tooltip once a scroll animation settles
+let _tpLastY       = 0;
 const _tpImageCache = new Map(); // `${tabId}:${pairsKey}` -> generated image URL, avoids re-generating on repeat hovers
 
 function _tpEnsureTooltipEl() {
@@ -434,19 +438,42 @@ function _tpPosition(cx, cy) {
 function _tpHide() {
     _tpGen++;
     clearTimeout(_tpHoverTimer);
+    clearTimeout(_tpHideTimer);
+    _tpHideTimer = null;
     _tpActiveTabId = null;
     if (_tpImgAbort) { _tpImgAbort.abort(); _tpImgAbort = null; }
     if (_tpTooltipEl) _tpTooltipEl.classList.remove("visible");
 }
 
-function _tpScheduleShow(tab, cx, cy) {
-    clearTimeout(_tpHoverTimer);
-    _tpHoverTimer = setTimeout(() => _tpShow(tab, cx, cy), TAB_PREVIEW_HOVER_DELAY);
+// Used on chip mouseleave instead of hiding instantly - the small gap between
+// adjacent chips would otherwise register as a leave, hiding the tooltip only
+// to reopen it (after the hover delay) a moment later on the next chip.
+function _tpScheduleHide() {
+    clearTimeout(_tpHideTimer);
+    _tpHideTimer = setTimeout(_tpHide, TAB_PREVIEW_HIDE_GRACE);
 }
 
-function _tpStatBarRow(labelKey, fillClass, target, valueText) {
+function _tpScheduleShow(tab, cx, cy) {
+    if (_tabBarAnim) return; // bar is mid-scroll - stay hidden until it settles
+    clearTimeout(_tpHoverTimer);
+    if (_tpHideTimer) {
+        // Tooltip is still up from the chip we just left - swap straight to
+        // the new one instead of hiding and re-running the hover delay.
+        clearTimeout(_tpHideTimer);
+        _tpHideTimer = null;
+        _tpShow(tab, cx, cy, true);
+        return;
+    }
+    // Use the cursor's live position when the timer actually fires, not the
+    // one captured at mouseenter - 150ms is enough for the mouse to have kept
+    // moving, and showing up at the stale spot made the tooltip visibly jump
+    // to the cursor on the next mousemove instead of appearing under it.
+    _tpHoverTimer = setTimeout(() => _tpShow(tab, _tpLastX, _tpLastY, false), TAB_PREVIEW_HOVER_DELAY);
+}
+
+function _tpStatBarRow(key, labelKey, fillClass, target, valueText) {
     return `
-      <div class="stat-bar-row">
+      <div class="stat-bar-row" data-stat="${key}">
         <div class="stat-bar-label">${t(labelKey)}</div>
         <div class="stat-bar-track">
           <div class="stat-bar-fill ${fillClass}" style="width:0%"${target !== null ? ` data-target="${target}"` : ""}></div>
@@ -456,40 +483,65 @@ function _tpStatBarRow(labelKey, fillClass, target, valueText) {
 }
 
 function _tpStatsSkeletonHtml() {
-    return _tpStatBarRow("stats.ergo", "ergo-bar", null, "-")
-         + _tpStatBarRow("stats.verRecoil", "recoil-bar", null, "-")
-         + _tpStatBarRow("stats.horRecoil", "recoil-bar", null, "-")
-         + _tpStatBarRow("stats.accuracy", "accuracy-bar", null, "-");
+    return _tpStatBarRow("ergo", "stats.ergo", "ergo-bar", null, "-")
+         + _tpStatBarRow("verRecoil", "stats.verRecoil", "recoil-bar", null, "-")
+         + _tpStatBarRow("horRecoil", "stats.horRecoil", "recoil-bar", null, "-")
+         + _tpStatBarRow("accuracy", "stats.accuracy", "accuracy-bar", null, "-");
+}
+
+// Shared number-crunching for the minified bars/rows below, used both to
+// render fresh markup and to patch an already-visible tooltip in place.
+function _tpComputeStatValues(data) {
+    const totalErgo   = parseFloat(data.total_ergo ?? 0);
+    const totalWeight = parseFloat(data.total_weight ?? 0);
+    const eed         = parseFloat(data.evo_ergo_delta ?? 0);
+    const armStamina  = parseFloat(data.arm_stamina ?? 0);
+
+    const accuracyMoa    = data.accuracy_moa ?? null;
+    const sightingRange  = data.sighting_range ?? null;
+    const muzzleVelocity = data.muzzle_velocity ?? null;
+
+    return {
+        bars: {
+            ergo: {
+                target: Math.max(0, Math.min(totalErgo, 100)),
+                text: Math.abs(totalErgo - Math.round(totalErgo)) < 0.001 ? Math.round(totalErgo) : totalErgo.toFixed(1),
+            },
+            verRecoil: {
+                target: data.recoil_vertical !== null && data.recoil_vertical !== undefined ? Math.min(Math.round(data.recoil_vertical), 500) / 5 : 0,
+                text: data.recoil_vertical !== null && data.recoil_vertical !== undefined ? Math.round(data.recoil_vertical) : "-",
+            },
+            horRecoil: {
+                target: data.recoil_horizontal !== null && data.recoil_horizontal !== undefined ? Math.min(Math.round(data.recoil_horizontal), 500) / 5 : 0,
+                text: data.recoil_horizontal !== null && data.recoil_horizontal !== undefined ? Math.round(data.recoil_horizontal) : "-",
+            },
+            accuracy: {
+                target: accuracyMoa !== null ? Math.min(accuracyMoa / 10, 1) * 100 : 0,
+                text: accuracyMoa !== null ? accuracyMoa.toFixed(2) + " MOA" : "-",
+            },
+        },
+        weightText:      totalWeight.toFixed(3) + " kg",
+        eedText:         (eed > 0 ? "+" : "") + eed.toFixed(1),
+        eedClass:        eed >= 0 ? "positive" : "negative",
+        overswingText:   data.overswing ? t("stats.yes") : t("stats.no"),
+        overswingClass:  data.overswing ? "negative" : "positive",
+        armStaminaText:  armStamina.toFixed(1) + "s",
+        sightingRange,
+        muzzleText:      muzzleVelocity !== null ? muzzleVelocity + " m/s" : t("stats.noAmmo"),
+    };
 }
 
 // Minified version of updateStatsPanel()'s content.innerHTML (stats-panel.js) -
 // same bars/rows, minus the title, the advanced-stats button, the EED/arm-stamina
 // config ("i") buttons and their popups, and the "Only Applicable in Arena" note.
 function _tpStatsHtml(data) {
-    const totalErgo   = parseFloat(data.total_ergo ?? 0);
-    const totalWeight = parseFloat(data.total_weight ?? 0);
-    const eed         = parseFloat(data.evo_ergo_delta ?? 0);
-    const armStamina  = parseFloat(data.arm_stamina ?? 0);
-    const eedClass        = eed >= 0 ? "positive" : "negative";
-    const overswingClass  = data.overswing ? "negative" : "positive";
-
-    const accuracyMoa    = data.accuracy_moa ?? null;
-    const accuracyBarPct = accuracyMoa !== null ? Math.min(accuracyMoa / 10, 1) * 100 : 0;
-    const accuracyDisplay = accuracyMoa !== null ? accuracyMoa.toFixed(2) + " MOA" : "-";
-
-    const sightingRange  = data.sighting_range ?? null;
-    const muzzleVelocity = data.muzzle_velocity ?? null;
+    const v = _tpComputeStatValues(data);
 
     const bars =
-        _tpStatBarRow("stats.ergo", "ergo-bar", Math.max(0, Math.min(totalErgo, 100)),
-            Math.abs(totalErgo - Math.round(totalErgo)) < 0.001 ? Math.round(totalErgo) : totalErgo.toFixed(1)) +
-        _tpStatBarRow("stats.verRecoil", "recoil-bar",
-            data.recoil_vertical !== null && data.recoil_vertical !== undefined ? Math.min(Math.round(data.recoil_vertical), 500) / 5 : 0,
-            data.recoil_vertical !== null && data.recoil_vertical !== undefined ? Math.round(data.recoil_vertical) : "-") +
-        _tpStatBarRow("stats.horRecoil", "recoil-bar",
-            data.recoil_horizontal !== null && data.recoil_horizontal !== undefined ? Math.min(Math.round(data.recoil_horizontal), 500) / 5 : 0,
-            data.recoil_horizontal !== null && data.recoil_horizontal !== undefined ? Math.round(data.recoil_horizontal) : "-") +
-        _tpStatBarRow("stats.accuracy", "accuracy-bar", accuracyBarPct, accuracyDisplay);
+        _tpStatBarRow("ergo", "stats.ergo", "ergo-bar", v.bars.ergo.target, v.bars.ergo.text) +
+        _tpStatBarRow("verRecoil", "stats.verRecoil", "recoil-bar", v.bars.verRecoil.target, v.bars.verRecoil.text) +
+        _tpStatBarRow("horRecoil", "stats.horRecoil", "recoil-bar", v.bars.horRecoil.target, v.bars.horRecoil.text) +
+        _tpStatBarRow("accuracy", "stats.accuracy", "accuracy-bar", v.bars.accuracy.target, v.bars.accuracy.text);
 
     return `
       ${bars}
@@ -497,14 +549,14 @@ function _tpStatsHtml(data) {
       <div class="stat-subsection">
       <div class="stat-subsection-cols">
       <div class="stat-col">
-        <div class="stat-row stat-row-weight"><span class="stat-label">${t("stats.weight")}</span><span>${totalWeight.toFixed(3)} kg</span></div>
-        <div class="stat-row"><span class="stat-label">${t("stats.eedLabel")}</span><span class="${eedClass}">${eed > 0 ? "+" : ""}${eed.toFixed(1)}</span></div>
-        <div class="stat-row"><span class="stat-label">${t("stats.overswing")}</span><span class="${overswingClass}">${data.overswing ? t("stats.yes") : t("stats.no")}</span></div>
+        <div class="stat-row stat-row-weight"><span class="stat-label">${t("stats.weight")}</span><span>${v.weightText}</span></div>
+        <div class="stat-row stat-row-eed"><span class="stat-label">${t("stats.eedLabelShort")}</span><span class="${v.eedClass}">${v.eedText}</span></div>
+        <div class="stat-row stat-row-overswing"><span class="stat-label">${t("stats.overswing")}</span><span class="${v.overswingClass}">${v.overswingText}</span></div>
       </div>
       <div class="stat-col">
-        <div class="stat-row"><span class="stat-label">${t("stats.armStamina")}</span><span>${armStamina.toFixed(1)}s</span></div>
-        ${sightingRange !== null ? `<div class="stat-row"><span class="stat-label">${t("stats.sightingRange")}</span><span>${sightingRange} m</span></div>` : ""}
-        <div class="stat-row"><span class="stat-label">${t("stats.muzzleVelocity")}</span><span>${muzzleVelocity !== null ? muzzleVelocity + " m/s" : t("stats.noAmmo")}</span></div>
+        <div class="stat-row stat-row-arm-stamina"><span class="stat-label">${t("stats.armStamina")}</span><span>${v.armStaminaText}</span></div>
+        <div class="stat-row stat-row-sighting"${v.sightingRange === null ? ` style="display:none"` : ""}><span class="stat-label">${t("stats.sightingRange")}</span><span>${v.sightingRange !== null ? v.sightingRange + " m" : ""}</span></div>
+        <div class="stat-row stat-row-muzzle"><span class="stat-label">${t("stats.muzzleVelocity")}</span><span>${v.muzzleText}</span></div>
       </div>
       </div>
       </div>`;
@@ -517,6 +569,46 @@ function _tpAnimateBars(statsEl, gen) {
             fillEl.style.width = fillEl.dataset.target + "%";
         });
     }));
+}
+
+// Used when swapping directly from one still-visible tab preview to another
+// (see _tpShow's `connected` param) - patches values/bar widths on the
+// existing DOM instead of tearing it down, so bars transition from their
+// current width (CSS already animates width changes) instead of restarting
+// from 0%, and nothing flashes.
+function _tpUpdateStatsInPlace(statsEl, data) {
+    const v = _tpComputeStatValues(data);
+
+    for (const key of ["ergo", "verRecoil", "horRecoil", "accuracy"]) {
+        const row = statsEl.querySelector(`.stat-bar-row[data-stat="${key}"]`);
+        if (!row) continue;
+        const fillEl  = row.querySelector(".stat-bar-fill");
+        const valueEl = row.querySelector(".stat-bar-value");
+        if (fillEl)  fillEl.style.width = v.bars[key].target + "%";
+        if (valueEl) valueEl.textContent = v.bars[key].text;
+    }
+
+    const weightVal = statsEl.querySelector(".stat-row-weight span:last-child");
+    if (weightVal) weightVal.textContent = v.weightText;
+
+    const eedVal = statsEl.querySelector(".stat-row-eed span:last-child");
+    if (eedVal) { eedVal.textContent = v.eedText; eedVal.className = v.eedClass; }
+
+    const overswingVal = statsEl.querySelector(".stat-row-overswing span:last-child");
+    if (overswingVal) { overswingVal.textContent = v.overswingText; overswingVal.className = v.overswingClass; }
+
+    const armStaminaVal = statsEl.querySelector(".stat-row-arm-stamina span:last-child");
+    if (armStaminaVal) armStaminaVal.textContent = v.armStaminaText;
+
+    const sightingRow = statsEl.querySelector(".stat-row-sighting");
+    if (sightingRow) {
+        sightingRow.style.display = v.sightingRange === null ? "none" : "";
+        const sightingVal = sightingRow.querySelector("span:last-child");
+        if (sightingVal) sightingVal.textContent = v.sightingRange !== null ? v.sightingRange + " m" : "";
+    }
+
+    const muzzleVal = statsEl.querySelector(".stat-row-muzzle span:last-child");
+    if (muzzleVal) muzzleVal.textContent = v.muzzleText;
 }
 
 function _tpSetQueued(wrap, isQueued) {
@@ -639,7 +731,7 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
     }
 }
 
-async function _tpShow(tab, cx, cy) {
+async function _tpShow(tab, cx, cy, connected = false) {
     const gun = EFTForge.state.allGuns.find(g => g.id === tab.gunId);
     if (!gun) return;
 
@@ -649,11 +741,24 @@ async function _tpShow(tab, cx, cy) {
     const el = _tpEnsureTooltipEl();
     const staticImg = gun.image_512_link || gun.icon_link || "";
 
-    el.innerHTML = `
-        <div class="tab-preview-img-wrap"><img class="tab-preview-img" src="${escapeHtml(staticImg)}" alt="" /></div>
-        <div class="tab-preview-gunname">${escapeHtml(gun.name)}</div>
-        <div class="tab-preview-stats">${_tpStatsSkeletonHtml()}</div>
-    `;
+    // "Connected" = swapping straight from another chip's still-visible
+    // preview (see _tpScheduleShow). Patch the existing DOM instead of
+    // rebuilding it so nothing flashes; a plain reveal from hidden still
+    // gets the normal skeleton + bars-grow-from-0 treatment.
+    const canUpdateInPlace = connected && el.classList.contains("visible") && el.querySelector(".tab-preview-stats");
+
+    if (canUpdateInPlace) {
+        const imgEl  = el.querySelector(".tab-preview-img");
+        const nameEl = el.querySelector(".tab-preview-gunname");
+        if (imgEl)  imgEl.src = staticImg;
+        if (nameEl) nameEl.textContent = gun.name;
+    } else {
+        el.innerHTML = `
+            <div class="tab-preview-img-wrap"><img class="tab-preview-img" src="${escapeHtml(staticImg)}" alt="" /></div>
+            <div class="tab-preview-gunname">${escapeHtml(gun.name)}</div>
+            <div class="tab-preview-stats">${_tpStatsSkeletonHtml()}</div>
+        `;
+    }
     el.classList.add("visible");
     _tpPosition(cx, cy);
 
@@ -692,8 +797,12 @@ async function _tpShow(tab, cx, cy) {
 
     const statsEl = el.querySelector(".tab-preview-stats");
     if (statsEl && data) {
-        statsEl.innerHTML = _tpStatsHtml(data);
-        _tpAnimateBars(statsEl, gen);
+        if (canUpdateInPlace) {
+            _tpUpdateStatsInPlace(statsEl, data);
+        } else {
+            statsEl.innerHTML = _tpStatsHtml(data);
+            _tpAnimateBars(statsEl, gen);
+        }
     }
     _tpPosition(cx, cy);
 
@@ -781,11 +890,15 @@ function renderTabBar() {
             closeTab(tab.id);
         });
 
-        chip.addEventListener("mouseenter", (e) => _tpScheduleShow(tab, e.clientX, e.clientY));
+        chip.addEventListener("mouseenter", (e) => {
+            _tpLastX = e.clientX; _tpLastY = e.clientY;
+            _tpScheduleShow(tab, e.clientX, e.clientY);
+        });
         chip.addEventListener("mousemove", (e) => {
+            _tpLastX = e.clientX; _tpLastY = e.clientY;
             if (_tpActiveTabId === tab.id) _tpPosition(e.clientX, e.clientY);
         });
-        chip.addEventListener("mouseleave", _tpHide);
+        chip.addEventListener("mouseleave", _tpScheduleHide);
 
         chip.addEventListener("dragstart", () => {
             _tpHide();
@@ -864,12 +977,24 @@ function _stepTabBarScroll(scroll, ts) {
     if (p >= 1) {
         _tabBarAnim = null;
         _tabBarScrollRAF = null;
+        _tpResumeAfterScroll();
         return;
     }
     _tabBarScrollRAF = requestAnimationFrame((t) => _stepTabBarScroll(scroll, t));
 }
 
+// Chips slide under a stationary cursor during the scroll animation, so the
+// hover preview would otherwise point at a chip that's no longer underneath
+// it. Hide it for the duration and re-evaluate what's under the cursor once
+// the bar settles.
+function _tpResumeAfterScroll() {
+    const chip = document.elementFromPoint(_tpLastX, _tpLastY)?.closest(".tab-chip");
+    const tab = chip && EFTForge.state.tabs.find(t => t.id === chip.dataset.tabId);
+    if (tab) _tpScheduleShow(tab, _tpLastX, _tpLastY);
+}
+
 function _queueTabBarScroll(scroll, deltaY) {
+    _tpHide();
     const max = scroll.scrollWidth - scroll.clientWidth;
     const currentTarget = _tabBarAnim ? _tabBarAnim.toX : scroll.scrollLeft;
     _tabBarAnim = {
