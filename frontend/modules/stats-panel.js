@@ -438,7 +438,7 @@ async function renderPriceOverview() {
 // Hidden stats panel insert/remove helpers
 // ---------------------------------------------------
 
-function _insertHiddenStatsPanel() {
+function _insertHiddenStatsPanel(animate = true) {
   const { t } = EFTForge.lang;
   const gun = EFTForge.state.currentGun;
   if (!gun) return;
@@ -471,15 +471,17 @@ function _insertHiddenStatsPanel() {
   panel.id = "hidden-stats-panel";
   panel.innerHTML = `<div class="hidden-stats-grid">${rowsHtml}</div>`;
   document.getElementById("hidden-stats-anchor").after(panel);
-  panel.style.height = "0px";
-  panel.style.opacity = "0";
-  void panel.offsetHeight;
-  panel.style.height = panel.scrollHeight + "px";
-  panel.style.opacity = "1";
-  panel.addEventListener("transitionend", () => {
-    panel.style.height = "";
-    panel.style.opacity = "";
-  }, { once: true });
+  if (animate) {
+    panel.style.height = "0px";
+    panel.style.opacity = "0";
+    void panel.offsetHeight;
+    panel.style.height = panel.scrollHeight + "px";
+    panel.style.opacity = "1";
+    panel.addEventListener("transitionend", () => {
+      panel.style.height = "";
+      panel.style.opacity = "";
+    }, { once: true });
+  }
   EFTForge.state.hiddenStatsOpen = true;
   const btn = document.getElementById("hidden-stats-btn");
   if (btn) btn.classList.add("open");
@@ -856,9 +858,11 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
     </div>
   `;
 
-  // Recreate hidden stats panel fresh (with current language) if it was open
+  // Recreate hidden stats panel fresh (with current language) if it was open.
+  // Skip the opening animation here - the panel was already open, this is just
+  // re-parenting it after stats-content's innerHTML got rebuilt.
   if (EFTForge.state.hiddenStatsOpen && EFTForge.state.currentGun) {
-    _insertHiddenStatsPanel();
+    _insertHiddenStatsPanel(false);
   }
 
   // Hidden stats button
