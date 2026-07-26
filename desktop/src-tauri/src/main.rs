@@ -17,7 +17,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
+use tauri::{Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
@@ -65,6 +67,23 @@ fn read_update_source(data_dir: &PathBuf) -> String {
         }
     }
     "auto".to_string()
+}
+
+/// close_action from data/settings.json ("ask" | "tray" | "exit"). The
+/// backend (POST /desktop/settings, from the close-choice modal's "remember
+/// my choice" checkbox and the desktop settings modal) owns this file - it
+/// is re-read on every close request rather than cached, since the running
+/// app never restarts when the user changes it.
+fn read_close_action(data_dir: &PathBuf) -> String {
+    let path = data_dir.join("settings.json");
+    if let Ok(raw) = fs::read_to_string(path) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if let Some(s) = v.get("close_action").and_then(|s| s.as_str()) {
+                return s.to_string();
+            }
+        }
+    }
+    "ask".to_string()
 }
 
 fn build_updater(
@@ -191,6 +210,24 @@ async fn manual_check_for_updates(handle: tauri::AppHandle) -> UpdateCheckResult
     }
 }
 
+/// Invoked by the close-choice modal (frontend/modules/window-controls.js)
+/// when the user picks "Minimize to Tray" for the close request currently
+/// being held open by the CloseRequested handler below.
+#[tauri::command]
+fn close_to_tray(handle: tauri::AppHandle) {
+    if let Some(w) = handle.get_webview_window("main") {
+        let _ = w.hide();
+    }
+}
+
+/// Invoked by the close-choice modal when the user picks "Exit". Goes
+/// through AppHandle::exit so the existing RunEvent::Exit handler still
+/// kills the backend sidecar.
+#[tauri::command]
+fn exit_app(handle: tauri::AppHandle) {
+    handle.exit(0);
+}
+
 /// Ties the sidecar's lifetime to this process at the OS level, so it cannot
 /// be orphaned no matter how this process ends - normal exit, a crash, or a
 /// forced kill from Task Manager/taskkill. The RunEvent::Exit handler below
@@ -257,7 +294,13 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // A "minimize to tray" close hides the window (hide/show), which
+            // is a different state from minimized (unminimize alone doesn't
+            // undo it) - a second launch attempt while tray-hidden needs
+            // show() too, or the window silently stays invisible and it
+            // looks like the relaunch did nothing.
             if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
                 let _ = w.unminimize();
                 let _ = w.set_focus();
             }
@@ -266,7 +309,11 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![manual_check_for_updates])
+        .invoke_handler(tauri::generate_handler![
+            manual_check_for_updates,
+            close_to_tray,
+            exit_app
+        ])
         .manage(BackendChild(Mutex::new(None)))
         .setup(|app| {
             let handle = app.handle().clone();
@@ -358,6 +405,75 @@ fn main() {
                     eprintln!("[webview] with_webview failed: {e}");
                 }
             }
+
+            // System tray: lets a "minimize to tray" close choice actually mean
+            // something. Double-clicking the icon or its "Open" menu item
+            // restores the window; "Exit" fully quits (bypasses the close
+            // prompt/tray behavior entirely, same as choosing "Exit" there).
+            if let Some(tray_icon) = app.default_window_icon().cloned() {
+                let tray_open = MenuItem::with_id(app, "tray_open", "Open", true, None::<&str>)?;
+                let tray_exit = MenuItem::with_id(app, "tray_exit", "Exit", true, None::<&str>)?;
+                let tray_menu = Menu::with_items(app, &[&tray_open, &tray_exit])?;
+                TrayIconBuilder::new()
+                    .icon(tray_icon)
+                    .menu(&tray_menu)
+                    .tooltip("EFTForge")
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "tray_open" => {
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.unminimize();
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        }
+                        "tray_exit" => app.exit(0),
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::DoubleClick {
+                            button: MouseButton::Left,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.unminimize();
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        }
+                    })
+                    .build(app)?;
+            } else {
+                eprintln!("[tray] no default window icon configured - system tray disabled");
+            }
+
+            // Close button (and Alt+F4/taskbar close) never closes the window
+            // directly - it's intercepted here so "minimize to tray" and "ask
+            // every time" can both work regardless of what triggered the
+            // close. A remembered choice (data/settings.json close_action,
+            // set via the close-choice modal's "remember" checkbox or the
+            // desktop settings modal) acts immediately with no prompt; "ask"
+            // (the default) hands off to the frontend's own modal via this
+            // event, which then calls back through close_to_tray/exit_app.
+            let close_data_dir = data_dir.clone();
+            let close_handle = handle.clone();
+            window.on_window_event(move |event| {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    match read_close_action(&close_data_dir).as_str() {
+                        "tray" => {
+                            if let Some(w) = close_handle.get_webview_window("main") {
+                                let _ = w.hide();
+                            }
+                        }
+                        "exit" => close_handle.exit(0),
+                        _ => {
+                            let _ = close_handle.emit("close-requested", ());
+                        }
+                    }
+                }
+            });
 
             // Backend sidecar.
             let resource_dir = handle.path().resource_dir()?;

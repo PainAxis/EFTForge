@@ -92,13 +92,19 @@ GitHub Actions secrets as `TAURI_SIGNING_PRIVATE_KEY` (+ `_PASSWORD`).
 
 ## Releasing
 
-1. Bump `version` in `src-tauri/tauri.conf.json` (and `package.json`).
+1. Bump `version` in `src-tauri/tauri.conf.json` (and `src-tauri/Cargo.toml`).
 2. Commit, then tag and push: `git tag app-v0.1.0 && git push origin app-v0.1.0`.
-3. `.github/workflows/desktop-release.yml` builds a fresh-snapshot installer,
-   publishes the GitHub release, and mirrors installer + manifest to Gitee
-   (secrets: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`,
-   `GITEE_TOKEN`; Gitee repos configurable via env in
-   `scripts/mirror_to_gitee.py`).
+3. `.github/workflows/desktop-release.yml` builds a fresh-snapshot installer
+   and publishes the GitHub release (secrets: `TAURI_SIGNING_PRIVATE_KEY`,
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`).
+4. Mirror to Gitee manually, from a machine with real Gitee connectivity
+   (GitHub-hosted runners throttle/stall on the installer upload - this is
+   *not* run in CI):
+   ```
+   $env:GITEE_TOKEN = "..."
+   python desktop/scripts/mirror_to_gitee.py --tag app-v0.1.0
+   ```
+   Gitee repos configurable via env in `scripts/mirror_to_gitee.py`.
 
 Compatibility note: shipped apps keep talking to the live community API in
 connected mode - keep those endpoints backward compatible, or gate breaking
@@ -106,11 +112,12 @@ changes on a minimum-app-version check.
 
 ## Known gaps / follow-ups
 
-- `pubkey` placeholder must be replaced before the first real release.
 - The Windows installer itself is not Authenticode-signed (SmartScreen will
   warn on first download); Tauri update signing is independent of this.
 - Verify Gitee release-attachment download URLs work anonymously for files of
   installer size on the account tier in use; if not, host the installer as a
   raw file or via Gitee Pages instead (mirror script would need a small tweak).
+- Gitee mirroring is a manual post-release step (see above) - GitHub Actions
+  runners can't reliably upload the installer to Gitee.
 - macOS/Linux builds are possible later (the sidecar spec and scripts already
   compute target triples) but are out of scope for v1.

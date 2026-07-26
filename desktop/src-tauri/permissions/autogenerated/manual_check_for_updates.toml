@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-manual-check-for-updates"
+description = "Enables the manual_check_for_updates command without any pre-configured scope."
+commands.allow = ["manual_check_for_updates"]
+
+[[permission]]
+identifier = "deny-manual-check-for-updates"
+description = "Denies the manual_check_for_updates command without any pre-configured scope."
+commands.deny = ["manual_check_for_updates"]
