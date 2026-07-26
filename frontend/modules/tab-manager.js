@@ -21,7 +21,7 @@ const _tabHistory = new Map(); // tabId -> { buildHistory, buildFuture } (sessio
 // large - fires on whatever action first crosses the threshold (new tab,
 // duplicate, or a restore-from-storage that's already past it), not on
 // every tab opened after. "Don't Show Again" persists across reloads via
-// localStorage, same pattern as eftforge_migration_notice_seen (app.js).
+// localStorage.
 const MANY_TABS_WARN_THRESHOLD = 20;
 const MANY_TABS_DISMISSED_KEY = "eftforge_many_tabs_warning_dismissed";
 let _manyTabsWarned = false;

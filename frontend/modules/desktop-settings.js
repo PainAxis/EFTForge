@@ -7,9 +7,13 @@
    Uses the site's own modal factory (_createModalOverlay), t() and
    modal-* classes. Provides:
      - header "Settings" nav button (cog icon)
-     - settings modal: community mode / update source / item data sync
+     - settings modal: community mode / close behavior / update source /
+       item data sync
      - EFTForge.desktopSettings.goOnline() - used by the local-mode
        prompts in build-manager to switch to connected mode
+     - EFTForge.desktopSettings.setCloseAction() - used by
+       window-controls.js's close-choice modal to persist "remember my
+       choice" (same close_action setting this modal's own radios write)
      - local mode: hides the community-only header buttons
        (leaderboards, profile)
 ============================================================ */
@@ -85,6 +89,28 @@
             </label>`;
     }
 
+    const _CLOSE_NAME_KEY = { tray: "dt.closeTray", exit: "dt.closeExit" };
+    const _CLOSE_DESC_KEY = { tray: "dt.closeTrayDesc", exit: "dt.closeExitDesc" };
+
+    function _closeOptionHtml(value, current) {
+        return `
+            <label style="display:flex; gap:10px; align-items:flex-start; padding:6px 0; cursor:pointer;">
+                <input type="radio" name="dt-close" value="${value}" ${current === value ? "checked" : ""}
+                       style="margin-top:3px; accent-color:#9a8866; cursor:pointer;" />
+                <span style="min-width:0;">
+                    <span style="display:block; font-size:13px; font-weight:700; color:#ddd;">${t(_CLOSE_NAME_KEY[value])}</span>
+                    <span style="display:block; font-size:12px; color:#888; margin-top:2px; line-height:1.45;">${t(_CLOSE_DESC_KEY[value])}</span>
+                </span>
+            </label>`;
+    }
+
+    /* Used by window-controls.js's close-choice modal to persist the
+       "remember my choice" checkbox - shares this module's _postSetting
+       so both places write the same close_action key the same way. */
+    async function setCloseAction(action) {
+        try { await _postSetting({ close_action: action }); } catch { /* best-effort - worst case the modal just asks again next time */ }
+    }
+
     function _renderBody(body, info, syncStatus) {
         const settings = info.settings || {};
 
@@ -93,10 +119,19 @@
                 <div class="modal-label">${t("dt.sectionCommunity")}</div>
                 ${_modeOptionHtml("connected", settings.community_mode)}
                 ${_modeOptionHtml("local",     settings.community_mode)}
-                <div id="dt-mode-status" style="display:none; font-size:12px; color:#c9a53c; align-items:center; gap:8px; margin-top:4px;">
-                    <span>${t("dt.modeChanged")}</span>
-                    <button class="modal-btn primary" style="font-size:11px;" onclick="window.location.reload()">${t("dt.reloadNow")}</button>
+                <div id="dt-mode-status" style="display:none; font-size:12px; align-items:center; gap:8px; margin-top:4px;">
+                    <span id="dt-mode-status-text">${t("dt.modeChanged")}</span>
+                    <button class="modal-btn primary" id="dt-mode-reload-btn" style="font-size:11px;">${t("dt.reloadNow")}</button>
                 </div>
+            </div>
+
+            <hr class="modal-divider">
+
+            <div class="modal-section" style="gap:2px;">
+                <div class="modal-label">${t("dt.sectionClose")}</div>
+                ${_closeOptionHtml("tray", settings.close_action)}
+                ${_closeOptionHtml("exit", settings.close_action)}
+                <span id="dt-close-status" style="font-size:11px; color:#7ba05b;"></span>
             </div>
 
             <hr class="modal-divider">
@@ -129,16 +164,54 @@
         `;
 
         // --- community mode ---
+        // Picking a radio only stages the choice in the UI - it is NOT sent to
+        // the backend until "Reload Now" is clicked. The running page (and the
+        // backend's own in-memory behavior) only actually switches mode on that
+        // reload, so persisting on every radio click let the settings file say
+        // one thing while the app kept running in the old mode - reopening this
+        // modal without ever reloading showed the newly *picked* mode as if it
+        // were already in effect. Only committing on "Reload Now" keeps the
+        // saved setting matched to what's actually running at all times.
+        const originalMode = settings.community_mode;
         const modeStatus = body.querySelector("#dt-mode-status");
+        const modeStatusText = body.querySelector("#dt-mode-status-text");
+        const modeReloadBtn = body.querySelector("#dt-mode-reload-btn");
         body.querySelectorAll('input[name="dt-mode"]').forEach(input => {
+            input.addEventListener("change", () => {
+                if (input.value === originalMode) {
+                    modeStatus.style.display = "none";
+                    return;
+                }
+                modeStatusText.style.color = "#c9a53c";
+                modeStatusText.textContent = t("dt.modeChanged");
+                modeStatus.style.display = "flex";
+            });
+        });
+        modeReloadBtn.addEventListener("click", async () => {
+            const selected = body.querySelector('input[name="dt-mode"]:checked');
+            if (!selected) return;
+            modeReloadBtn.disabled = true;
+            try {
+                await _postSetting({ community_mode: selected.value });
+                window.location.reload();
+            } catch (e) {
+                modeReloadBtn.disabled = false;
+                modeStatusText.style.color = "#f44336";
+                modeStatusText.textContent = String(e);
+            }
+        });
+
+        // --- close behavior ---
+        const closeStatus = body.querySelector("#dt-close-status");
+        body.querySelectorAll('input[name="dt-close"]').forEach(input => {
             input.addEventListener("change", async () => {
                 try {
-                    await _postSetting({ community_mode: input.value });
-                    modeStatus.style.display = "flex";
+                    await _postSetting({ close_action: input.value });
+                    closeStatus.textContent = "✓";
+                    setTimeout(() => { closeStatus.textContent = ""; }, 1500);
                 } catch (e) {
-                    modeStatus.style.display = "flex";
-                    modeStatus.style.color = "#f44336";
-                    modeStatus.textContent = String(e);
+                    closeStatus.style.color = "#f44336";
+                    closeStatus.textContent = String(e);
                 }
             });
         });
@@ -252,5 +325,5 @@
         _init();
     }
 
-    window.EFTForge.desktopSettings = { showPanel, goOnline };
+    window.EFTForge.desktopSettings = { showPanel, goOnline, setCloseAction };
 })();

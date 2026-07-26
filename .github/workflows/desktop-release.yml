@@ -1,5 +1,10 @@
-# Builds the Windows desktop app and publishes it to GitHub Releases,
-# then mirrors the installer + updater manifest to Gitee for users in China.
+# Builds the Windows desktop app and publishes it to GitHub Releases.
+#
+# Gitee mirroring is NOT done here - GitHub-hosted runners have unreliable
+# (throttled/blocked) upload bandwidth to Gitee, so large-file uploads
+# consistently time out. After this workflow publishes the GitHub release,
+# mirror it manually from a machine with real Gitee connectivity:
+#   python desktop/scripts/mirror_to_gitee.py --tag app-vX.Y.Z
 #
 # Trigger: push a tag like app-v0.1.0 (version must match
 # desktop/src-tauri/tauri.conf.json's "version").
@@ -7,7 +12,6 @@
 # Required repo secrets:
 #   TAURI_SIGNING_PRIVATE_KEY           from `tauri signer generate`
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password (empty string if none)
-#   GITEE_TOKEN                         Gitee personal access token
 
 name: Desktop Release
 
@@ -78,8 +82,3 @@ jobs:
             desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
             desktop/src-tauri/target/release/bundle/nsis/*-setup.exe.sig
             desktop/dist-manifests/latest.json
-
-      - name: Mirror release to Gitee
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: python desktop/scripts/mirror_to_gitee.py --tag $env:RELEASE_TAG

@@ -58,17 +58,24 @@ _SETTINGS_LOCK = threading.Lock()
 #                               syncs from tarkov.dev).
 # update_source:  "auto" | "gitee" | "github" - read by the Tauri launcher on
 #                 startup to order the updater endpoints.
+# close_action:   "ask" | "tray" | "exit" - what the X button does. "ask" (the
+#                 default) shows a one-off choice modal every time; the other
+#                 two are what the user picked with "remember my choice" on
+#                 that modal, read directly by the Rust side (main.rs) on
+#                 every window close request.
 #
 # First run defaults to fully local: connecting to EFTForge.com is an explicit
 # opt-in from the UI.
 _DEFAULT_SETTINGS = {
     "community_mode": "local",
     "update_source":  "auto",
+    "close_action":   "ask",
 }
 
 _VALID_VALUES = {
     "community_mode": {"connected", "local"},
     "update_source":  {"auto", "gitee", "github"},
+    "close_action":   {"ask", "tray", "exit"},
 }
 
 

@@ -2021,11 +2021,16 @@ def get_gun_init(
     # Apply ammo weight + heat/durability-burn if a valid ammo ID was provided.
     # Mirrors /build/calculate's ammo logic - must stay in sync or the very first stats
     # shown on gun load (from this endpoint) disagree with every subsequent recalculation.
+    # Falls back to the first ammo in the list (same ordering the frontend's <select>
+    # defaults to) when the caller has no saved per-caliber preference yet, so a
+    # first-time visitor sees a real muzzle velocity instead of "No Ammo".
+    effective_ammo_id = selected_ammo_id or (ammo_list[0]["id"] if ammo_list else None)
+
     ammo_weight_added = False
     stats["muzzle_velocity"] = None
 
-    if assume_full_mag and selected_ammo_id:
-        ammo = db.query(Item).filter(Item.id == selected_ammo_id).first()
+    if assume_full_mag and effective_ammo_id:
+        ammo = db.query(Item).filter(Item.id == effective_ammo_id).first()
         if ammo and ammo.is_ammo:
             if ammo.heat_factor is not None:
                 stats["heat_factor"] = round(stats["heat_factor"] * ammo.heat_factor, 4)
