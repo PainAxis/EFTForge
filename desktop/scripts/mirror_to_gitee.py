@@ -22,9 +22,13 @@ import glob
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 
 import requests
+
+UPLOAD_RETRIES = 4
+UPLOAD_RETRY_BACKOFF_SECS = 20  # doubles each attempt: 20s, 40s, 80s
 
 API = "https://gitee.com/api/v5"
 
@@ -77,17 +81,32 @@ def ensure_release(tag: str, notes: str) -> int:
 
 
 def upload_attachment(release_id: int, path: str) -> str:
-    with open(path, "rb") as f:
-        r = requests.post(
-            f"{API}/repos/{OWNER}/{RELEASES_REPO}/releases/{release_id}/attach_files",
-            params={"access_token": TOKEN},
-            files={"file": (os.path.basename(path), f)},
-            timeout=600,
-        )
-    if r.status_code not in (200, 201):
-        _die(f"attachment upload failed for {path} ({r.status_code}): {r.text[:500]}")
-    data = r.json()
-    return data.get("browser_download_url") or data.get("download_url") or ""
+    """Upload with retries - cross-border connections to Gitee from CI runners
+    stall often enough that a single attempt isn't reliable."""
+    last_err = None
+    for attempt in range(1, UPLOAD_RETRIES + 1):
+        try:
+            with open(path, "rb") as f:
+                r = requests.post(
+                    f"{API}/repos/{OWNER}/{RELEASES_REPO}/releases/{release_id}/attach_files",
+                    params={"access_token": TOKEN},
+                    files={"file": (os.path.basename(path), f)},
+                    timeout=600,
+                )
+            if r.status_code in (200, 201):
+                data = r.json()
+                return data.get("browser_download_url") or data.get("download_url") or ""
+            last_err = f"{r.status_code}: {r.text[:500]}"
+        except requests.exceptions.RequestException as exc:
+            last_err = str(exc)
+
+        if attempt < UPLOAD_RETRIES:
+            wait = UPLOAD_RETRY_BACKOFF_SECS * (2 ** (attempt - 1))
+            print(f"attachment upload attempt {attempt}/{UPLOAD_RETRIES} failed ({last_err}); retrying in {wait}s")
+            time.sleep(wait)
+
+    _die(f"attachment upload failed for {path} after {UPLOAD_RETRIES} attempts: {last_err}")
+    return ""  # unreachable, _die exits
 
 
 def upsert_assets_file(repo_path: str, content: bytes, message: str) -> None:
