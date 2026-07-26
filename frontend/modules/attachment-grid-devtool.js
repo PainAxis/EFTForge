@@ -618,22 +618,41 @@
     // INIT
     // ============================================================
 
+    // Off by default: the floating "Grid Dev" toolbar only appears after an
+    // explicit one-time opt-in (persisted). Run _agDevTool.show() in the
+    // console to enable it, _agDevTool.hide() to put it away again.
+    // Overrides still apply to the grid either way.
+    const TOOLBAR_OPTIN_KEY = 'ag_devtool_visible';
+
     function init() {
         _injectCSS();
-        _injectToolbar();
         _wrapRenderFullTree();
-        console.log(
-            '[AG DevTool] Active on localhost. ' +
-            `${Object.keys(window._AG_OVERRIDES_BASE || {}).length} base override(s) + ` +
-            `${Object.keys(localOverrides).length} local override(s). ` +
-            'Click "Grid Dev" to start.'
-        );
+        if (localStorage.getItem(TOOLBAR_OPTIN_KEY) === '1') {
+            _injectToolbar();
+            console.log(
+                '[AG DevTool] Active. ' +
+                `${Object.keys(window._AG_OVERRIDES_BASE || {}).length} base override(s) + ` +
+                `${Object.keys(localOverrides).length} local override(s). ` +
+                'Click "Grid Dev" to start.'
+            );
+        } else {
+            console.log('[AG DevTool] Available but off - run _agDevTool.show() to enable the Grid Dev toolbar.');
+        }
     }
 
-    // Public API for the dev modal
+    // Public API for the dev modal / console
     window._agDevTool = {
         toggle:   toggleDevMode,
         isActive: () => devModeActive,
+        show: () => {
+            localStorage.setItem(TOOLBAR_OPTIN_KEY, '1');
+            _injectToolbar();
+        },
+        hide: () => {
+            localStorage.removeItem(TOOLBAR_OPTIN_KEY);
+            if (devModeActive) toggleDevMode();
+            document.getElementById('ag-dev-toolbar')?.remove();
+        },
     };
 
     if (document.readyState === 'loading') {

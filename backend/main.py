@@ -35,7 +35,7 @@ from models_builds import PublicBuild, PublicBuildAuthor, IPBan, PendingNotifica
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import CORS_ORIGINS, IP_HASH_SECRET, ADMIN_API_KEY, ENABLE_API_DOCS, TRUSTED_PROXY_IPS
+from config import CORS_ORIGINS, IP_HASH_SECRET, ADMIN_API_KEY, ENABLE_API_DOCS, TRUSTED_PROXY_IPS, RUNTIME_DIR, DESKTOP_MODE
 
 _docs_url    = "/docs"    if ENABLE_API_DOCS else None
 _redoc_url   = "/redoc"   if ENABLE_API_DOCS else None
@@ -307,23 +307,27 @@ def _evict_expired_admin_failures(now: float) -> None:
 
 # Community builds kill switch.
 # Persisted via a sentinel file so it survives server restarts.
-_COMMUNITY_BUILDS_LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "community_builds.lock")
+_COMMUNITY_BUILDS_LOCK_FILE = os.path.join(RUNTIME_DIR, "community_builds.lock")
 _community_builds_disabled: bool = os.path.exists(_COMMUNITY_BUILDS_LOCK_FILE)
 
 # Hyperactive sync mode: re-syncs tarkov.dev data every 30 minutes instead of relying
 # solely on the external daily cron. Useful immediately after a game patch when
 # tarkov.dev data is still catching up to the new game state.
-_HYPERACTIVE_LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hyperactive.lock")
+_HYPERACTIVE_LOCK_FILE = os.path.join(RUNTIME_DIR, "hyperactive.lock")
 _hyperactive_mode: bool = os.path.exists(_HYPERACTIVE_LOCK_FILE)
 
-_IMGGEN_DISABLED_LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "imggen_disabled.lock")
-_imggen_disabled: bool = os.path.exists(_IMGGEN_DISABLED_LOCK_FILE)
+_IMGGEN_DISABLED_LOCK_FILE = os.path.join(RUNTIME_DIR, "imggen_disabled.lock")
+# Desktop builds exclude patchright, so image generation can never run locally.
+# This flag only matters when /build-image is answered locally (local mode) -
+# in connected mode the community proxy forwards it to prod first. The frontend
+# already renders a disabled preview toggle off /build-image/busy's flag.
+_imggen_disabled: bool = os.path.exists(_IMGGEN_DISABLED_LOCK_FILE) or DESKTOP_MODE
 _SYNC_INTERVAL_HYPERACTIVE_SECS = 1800   # 30 minutes
 _sync_running: bool = False
 _last_sync_at: float | None = None
 _sync_trigger: asyncio.Event = asyncio.Event()
 # Written before the subprocess starts and removed after - visible to all gunicorn workers.
-_SYNC_IN_PROGRESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sync_in_progress.lock")
+_SYNC_IN_PROGRESS_FILE = os.path.join(RUNTIME_DIR, "sync_in_progress.lock")
 
 def _require_admin(request: Request, x_admin_key: str = Header(None)) -> None:
     if not ADMIN_API_KEY:
@@ -624,7 +628,7 @@ def health_check(request: Request, db: Session = Depends(get_db)):
     return {"status": "ok", "started": SERVER_START_TIME}
 
 
-_LAST_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "last_sync.json")
+_LAST_SYNC_FILE = os.path.join(RUNTIME_DIR, "last_sync.json")
 
 
 @app.get("/sync-status")
@@ -643,7 +647,7 @@ def get_sync_status():
     return {"sync_running": running, "last_synced_at": last_synced_at}
 
 
-_DEV_SYNC_NOTICE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dev_sync_notice.json")
+_DEV_SYNC_NOTICE_FILE = os.path.join(RUNTIME_DIR, "dev_sync_notice.json")
 
 
 @app.get("/dev/sync-notice")
@@ -2389,7 +2393,7 @@ _pw_context    = None
 _pw_page       = None   # persistent page - API calls run as real browser fetch()
 
 # Persistent profile dir - Cloudflare session data accumulates across restarts
-_PW_PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pw_profile")
+_PW_PROFILE_DIR = os.path.join(RUNTIME_DIR, "pw_profile")
 
 def _run_pw_event_loop():
     global _pw_loop
@@ -5039,3 +5043,18 @@ def admin_list_authors(
         }
         for a in authors
     ]
+
+
+# ---------------------------------------------------
+# Desktop app mode - must stay at the very bottom: the static-frontend mount
+# it registers is a catch-all, so every API route has to be defined first.
+# ---------------------------------------------------
+
+if DESKTOP_MODE:
+    from desktop import init_desktop
+
+    def _desktop_clear_caches():
+        with _COMBO_FULL_CACHE_LOCK:
+            _COMBO_FULL_CACHE.clear()
+
+    init_desktop(app, clear_caches=_desktop_clear_caches)

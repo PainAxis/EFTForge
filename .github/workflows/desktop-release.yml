@@ -1,0 +1,85 @@
+# Builds the Windows desktop app and publishes it to GitHub Releases,
+# then mirrors the installer + updater manifest to Gitee for users in China.
+#
+# Trigger: push a tag like app-v0.1.0 (version must match
+# desktop/src-tauri/tauri.conf.json's "version").
+#
+# Required repo secrets:
+#   TAURI_SIGNING_PRIVATE_KEY           from `tauri signer generate`
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password (empty string if none)
+#   GITEE_TOKEN                         Gitee personal access token
+
+name: Desktop Release
+
+on:
+  push:
+    tags: ["app-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build (e.g. app-v0.1.0)"
+        required: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pyinstaller
+
+      - name: Build backend sidecar (fresh tarkov.db snapshot)
+        run: python desktop/scripts/build_backend.py --fresh-snapshot
+
+      - name: Install Tauri CLI
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build Tauri app (signed)
+        working-directory: desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run build
+
+      - name: Generate updater manifest (GitHub variant)
+        run: python desktop/scripts/make_manifests.py --tag $env:RELEASE_TAG
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: EFTForge Desktop ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          files: |
+            desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+            desktop/src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+            desktop/dist-manifests/latest.json
+
+      - name: Mirror release to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: python desktop/scripts/mirror_to_gitee.py --tag $env:RELEASE_TAG

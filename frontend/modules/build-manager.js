@@ -51,6 +51,9 @@ async function updateGunBuildsBadge(gunId) {
     // Apply immediately with whatever we have cached
     _applyBadge(cachedCommunity);
 
+    // Desktop local mode: community features are off - badge counts saved builds only
+    if (EFTForge.config.COMMUNITY_DISABLED) return;
+
     // Fetch community count if not yet cached
     if (cachedCommunity === null) {
         try {
@@ -499,7 +502,9 @@ function _confirmDeleteBuild(btn, id, gunId) {
     if (btn.dataset.confirming === "1") {
         const { builds } = loadSavedBuilds();
         const entry = builds.find(b => b.id === id);
-        if (entry?.publishedId) {
+        // Local mode can't manage published builds - delete locally only,
+        // the community copy stays untouched until the user reconnects.
+        if (entry?.publishedId && !EFTForge.config.COMMUNITY_DISABLED) {
             _showDeletePublishedConfirm(id, gunId || null);
             return;
         }
@@ -606,7 +611,7 @@ function _renderSaveBuildBody(prefill, existingTags = null) {
             <div class="modal-label" style="display:flex; align-items:center; gap:6px;">
                 ${t("modal.myBuilds")} <span style="color:#f5c542; font-weight:700;">${escapeHtml(gun.name)}</span>
             </div>
-            <div style="font-size:12px; color:#555; margin-bottom:8px;">${t(isMobileLayout() ? "modal.publishHintMobile" : "modal.publishHint")}</div>
+            ${EFTForge.config.COMMUNITY_DISABLED ? "" : `<div style="font-size:12px; color:#555; margin-bottom:8px;">${t(isMobileLayout() ? "modal.publishHintMobile" : "modal.publishHint")}</div>`}
             <div id="save-panel-builds-list" style="max-height:220px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:#444 #111;"></div>
         </div>
     `;
@@ -684,7 +689,9 @@ function _renderSavePanelBuilds(gunId) {
     list.innerHTML = pool.map(entry => {
         const safeId = escapeHtml(entry.id);
         const isPublished = publishedIds.has(entry.id);
-        const publishBtnHtml = isPublished
+        const publishBtnHtml = EFTForge.config.COMMUNITY_DISABLED
+            ? ""
+            : isPublished
             ? `<button class="saved-build-btn publish-btn"
                        data-id="${safeId}"
                        style="opacity:0.4; cursor:default;"
@@ -717,7 +724,7 @@ function _confirmDeleteSavePanelBuild(btn, id, gunId) {
     if (btn.dataset.confirming === "1") {
         const { builds } = loadSavedBuilds();
         const entry = builds.find(b => b.id === id);
-        if (entry?.publishedId) {
+        if (entry?.publishedId && !EFTForge.config.COMMUNITY_DISABLED) {
             _showDeletePublishedConfirm(id, gunId);
             return;
         }
@@ -747,6 +754,18 @@ function _confirmDeleteSavePanelBuild(btn, id, gunId) {
    UI - BUILDS DIALOG
 =========================== */
 
+/* Desktop local mode: shown wherever community content would render.
+   The connect button flips the app to connected mode and reloads. */
+function _communityLocalPromptHtml() {
+    const { t } = EFTForge.lang;
+    return `
+        <div style="display:flex; flex-direction:column; align-items:center; gap:12px;
+                    padding:22px 16px; text-align:center;">
+            <div style="color:#888; font-size:13px; line-height:1.6; max-width:420px;">${t("cb.localModeMsg")}</div>
+            <button class="modal-btn primary" onclick="EFTForge.desktopSettings && EFTForge.desktopSettings.goOnline(this)">${t("cb.goOnlineBtn")}</button>
+        </div>`;
+}
+
 function showBuildsDialog() {
     const { t } = EFTForge.lang;
     let _myCommunityLoaded = false;
@@ -760,7 +779,7 @@ function showBuildsDialog() {
             { id: "bm-tab-community", label: t("modal.tabCommunity") },
         ],
         onTabSwitch(tabId) {
-            if (tabId === "bm-tab-community" && !_myCommunityLoaded) {
+            if (tabId === "bm-tab-community" && !_myCommunityLoaded && !EFTForge.config.COMMUNITY_DISABLED) {
                 _myCommunityLoaded = true;
                 _loadMyCommunityBuilds();
             }
@@ -805,7 +824,9 @@ function showBuildsDialog() {
         </div>
     `;
 
-    document.getElementById("bm-tab-community").innerHTML = `
+    document.getElementById("bm-tab-community").innerHTML = EFTForge.config.COMMUNITY_DISABLED
+        ? _communityLocalPromptHtml()
+        : `
         <div class="modal-section">
             <div style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
                 <input id="my-community-search" type="text" class="search-input"
@@ -825,7 +846,7 @@ function showBuildsDialog() {
     searchInput.addEventListener("input", () => renderSavedBuildsList(searchInput.value));
 
     const myCommunitySearch = document.getElementById("my-community-search");
-    myCommunitySearch.addEventListener("input", _applyMyCommunityFilter);
+    if (myCommunitySearch) myCommunitySearch.addEventListener("input", _applyMyCommunityFilter);
 
     const modalWindow = overlay.querySelector(".modal-window");
 
@@ -903,6 +924,7 @@ async function showGunBuildsDialog() {
                 <span style="color:#f5c542; font-weight:700;">${escapeHtml(gunName)}</span>
                 <span id="public-builds-count" class="cb-count-label"></span>
             </div>
+            ${EFTForge.config.COMMUNITY_DISABLED ? _communityLocalPromptHtml() : `
             <div class="cb-controls">
                 <input id="cb-search-input" type="text" class="search-input cb-search-input"
                        placeholder="${escapeHtml(t("cb.searchPlaceholder"))}" />
@@ -920,6 +942,7 @@ async function showGunBuildsDialog() {
             <div id="public-builds-list">
                 <div style="color:#555; font-size:13px; font-style:italic; padding:4px 0 2px 0;">${t("modal.publishLoading")}</div>
             </div>
+            `}
         </div>
     `;
 
@@ -928,13 +951,15 @@ async function showGunBuildsDialog() {
     const searchInput = document.getElementById("builds-search-input");
     searchInput.addEventListener("input", () => renderSavedBuildsList(searchInput.value, gunId));
 
-    _renderPublicBuilds(gunId);
+    if (!EFTForge.config.COMMUNITY_DISABLED) {
+        _renderPublicBuilds(gunId);
 
-    const cbSearch = document.getElementById("cb-search-input");
-    const cbSort   = document.getElementById("cb-sort-select");
-    if (cbSearch) cbSearch.addEventListener("input",  _applyPublicBuildsFilter);
-    if (cbSort)   cbSort.addEventListener("change",   _applyPublicBuildsFilter);
-    setupCustomSelect("cb-sort-select");
+        const cbSearch = document.getElementById("cb-search-input");
+        const cbSort   = document.getElementById("cb-sort-select");
+        if (cbSearch) cbSearch.addEventListener("input",  _applyPublicBuildsFilter);
+        if (cbSort)   cbSort.addEventListener("change",   _applyPublicBuildsFilter);
+        setupCustomSelect("cb-sort-select");
+    }
 }
 
 /* ===========================
@@ -950,6 +975,9 @@ function _toggleTagFilter(tag) {
 window._toggleTagFilter = _toggleTagFilter;
 
 function renderSavedBuildsList(query = "", gunId = null, showPublish = true) {
+    // Desktop local mode: publishing is a community feature - builds stay
+    // saved locally and become publishable once the user connects.
+    showPublish = showPublish && !EFTForge.config.COMMUNITY_DISABLED;
     _buildsListGunId = gunId;
     _clearMarqueeTimers();
 
@@ -2525,7 +2553,10 @@ function _showBackupModeModal(backup) {
 }
 
 function _maybeWarnVersionThenApply(backup, mode) {
-    if (backup.appVersion !== EFTForge.config.APP_VERSION) {
+    // Web and desktop builds of the same release differ only by the
+    // "-desktop" suffix - don't warn when moving backups between them.
+    const _baseVersion = v => String(v || "").replace(/-desktop$/, "");
+    if (_baseVersion(backup.appVersion) !== _baseVersion(EFTForge.config.APP_VERSION)) {
         const body = document.getElementById("backup-mode-body");
         if (!body) return;
 

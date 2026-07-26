@@ -1,13 +1,28 @@
 window.EFTForge = window.EFTForge || {};
 
+// Set by the desktop app's local backend, which injects a flag object into
+// index.html: { appVersion, adminKey }. The desktop app deliberately behaves
+// like a dev environment (devtools and all localhost-gated features enabled) -
+// it's the user's own machine and own data.
+const _desktop = window.__EFTFORGE_DESKTOP__ || null;
+
 const _isLocalDev = ["localhost", "127.0.0.1"].includes(location.hostname);
 
 window.EFTForge.config = {
-    // On localhost the backend runs on a separate port; in production the API is
-    // served from the same origin (e.g. behind an nginx proxy), so relative paths work.
-    API_BASE: _isLocalDev ? "http://127.0.0.1:8000" : "",
+    // On localhost the backend runs on a separate port; in production and in
+    // the desktop app the API is served from the same origin, so relative
+    // paths work.
+    API_BASE: (_isLocalDev && !_desktop) ? "http://127.0.0.1:8000" : "",
 
     IS_LOCAL_DEV: _isLocalDev,
+
+    IS_DESKTOP: !!_desktop,
+    DESKTOP:    _desktop,
+
+    // Desktop local mode: community features (community builds, ratings,
+    // comments, publishing, leaderboards, profile) are stripped from the UI
+    // until the user explicitly connects to EFTForge.com live services.
+    COMMUNITY_DISABLED: !!(_desktop && _desktop.communityMode === "local"),
 
     // Static announcements fetched as fallback when the backend is unreachable.
     // Edit frontend/offline/announcements.json and deploy - nginx serves it at the same path in production.
@@ -15,7 +30,7 @@ window.EFTForge.config = {
     STATIC_ANNOUNCEMENTS_URL: "/offline/announcements.json",
 
     APP_VERSION:    "v1.4.7",
-    APP_BUILD_DATE: "2026-07-25T18:42:11.370Z", // new Date().toISOString()
+    APP_BUILD_DATE: "2026-07-26T11:29:41.084Z", // new Date().toISOString()
 
     CALIBER_DISPLAY_MAP: {
         "Caliber20x1mm":      "20x1mm disk",
@@ -195,3 +210,16 @@ window.EFTForge.config = {
         "5b3a337e5acfc4704b4a19a0",
     ],
 };
+
+// Desktop app: the local backend generates its own admin key (it only grants
+// admin over the user's own local data - /admin is never proxied to prod).
+// Keep localStorage in sync so the existing admin tools work out of the box.
+if (_desktop && _desktop.adminKey) {
+    try { localStorage.setItem("eftforge_admin_key", _desktop.adminKey); } catch {}
+}
+
+// Desktop builds show a distinct version string everywhere the app version
+// appears (about modal, settings modal, backups): e.g. "v1.4.7-desktop".
+if (_desktop) {
+    window.EFTForge.config.APP_VERSION += "-desktop";
+}

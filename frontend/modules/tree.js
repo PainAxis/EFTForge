@@ -54,7 +54,7 @@ async function renderFullTree(preserveScroll = true) {
                 ${t("tree.title")}
                 <span class="tree-swipe-hint">${t("tree.swipeHint")}</span>
                 <span class="tree-view-toggle">
-                    <button class="compare-toggle bp-imggen-toggle${_bpEnabled ? ' active' : ''}${_bpGlobalDisabled ? ' bp-imggen-globally-disabled' : ''}" onclick="toggleImgGen()" ${_bpGlobalDisabled ? `data-tooltip="${t('toast.imgGenDisabledTip')}"` : ''} style="margin-right:6px;">
+                    <button class="compare-toggle bp-imggen-toggle${_bpEnabled && !_bpGlobalDisabled ? ' active' : ''}${_bpGlobalDisabled ? ' bp-imggen-globally-disabled' : ''}" onclick="toggleImgGen()" ${_bpGlobalDisabled ? `data-tooltip="${_bpDisabledTip()}"` : ''} style="margin-right:6px;">
                         ${t("ui.imgGen")}
                         <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
                     </button>

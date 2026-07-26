@@ -1020,7 +1020,9 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
     }
 
     // Everything above resolves without a render request. Past this point we're
-    // committing to a server-side generation, so require the extra dwell first.
+    // committing to a server-side generation - skip when image generation is
+    // off (admin kill-switch or desktop local mode) and keep the static image.
+    if (_bpGlobalDisabled) return;
     await _sleep(TAB_PREVIEW_IMAGE_GEN_DELAY);
     if (_tpGen !== gen) return;
 

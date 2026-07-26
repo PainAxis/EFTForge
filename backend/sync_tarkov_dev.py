@@ -27,11 +27,15 @@ USER_AGENT = "EFTForge (+https://eftforge.com; +https://github.com/SouthHorizons
 
 # Snapshot file persists the last known item stats across DB resets.
 # Written at the end of every sync; read at the start of the next one.
-SNAPSHOT_FILE = "stat_snapshot.json"
+# Anchored to RUNTIME_DIR (backend dir on web/dev, the app data dir in desktop
+# mode) so these land in the right place regardless of the process cwd.
+from config import RUNTIME_DIR as _RUNTIME_DIR
+
+SNAPSHOT_FILE = os.path.join(_RUNTIME_DIR, "stat_snapshot.json")
 
 # Records when a sync last completed, regardless of trigger (cron, hyperactive
 # mode, or a dev background sync) - read by GET /sync-status for display.
-LAST_SYNC_FILE = "last_sync.json"
+LAST_SYNC_FILE = os.path.join(_RUNTIME_DIR, "last_sync.json")
 
 # Stats tracked per category. Changes to these fields are logged on every sync.
 _WEAPON_STATS = [

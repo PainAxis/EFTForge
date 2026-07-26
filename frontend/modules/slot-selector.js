@@ -456,11 +456,14 @@ async function openSlotSelector(parentNode, slot) {
       if (_stale()) { stopPanelLoading(slotOverlay); return; }
   }
 
-  // Non-blocking: fetch ratings in the background; update cells when ready
-  EFTForge.api.fetchBulkRatings(items.map(i => i.id)).then(ratings => {
-      Object.assign(EFTForge.state.ratingsCache, ratings);
-      _refreshRatingCells();
-  }).catch(() => {});
+  // Non-blocking: fetch ratings in the background; update cells when ready.
+  // Desktop local mode: ratings are a community feature - skip entirely.
+  if (!EFTForge.config.COMMUNITY_DISABLED) {
+      EFTForge.api.fetchBulkRatings(items.map(i => i.id)).then(ratings => {
+          Object.assign(EFTForge.state.ratingsCache, ratings);
+          _refreshRatingCells();
+      }).catch(() => {});
+  }
 
   const baseAttachmentIds = collectAttachmentIds(EFTForge.state.buildTree);
 
@@ -1181,6 +1184,7 @@ function renderAttachmentRows(items) {
                     ${EFTForge._dev?.showItemIds ? `<div class="dev-item-id-badge" data-id="${escapeHtml(item.id)}">${escapeHtml(item.id)}</div>` : ""}
                     ${item.task_unlock_name ? `<div class="att-task-unlock">${escapeHtml(t("ui.taskUnlock"))}${escapeHtml((EFTForge.state.lang === "zh" && item.task_unlock_name_zh) ? item.task_unlock_name_zh : item.task_unlock_name)}</div>` : ""}
                     ${(() => {
+                        if (EFTForge.config.COMMUNITY_DISABLED) return "";
                         const rd  = EFTForge.state.ratingsCache[item.id] || {};
                         const lv  = _getLocalVotes();
                         const uv  = rd.user_vote ?? lv[item.id] ?? null;

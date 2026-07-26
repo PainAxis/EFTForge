@@ -123,6 +123,64 @@ header.header-expanded {
 }
 
 /* =========================
+   DESKTOP APP WINDOW CONTROLS
+   Only present when frontend/modules/window-controls.js injects them (the
+   packaged desktop app, which runs with no native title bar - the header
+   bar doubles as one). header-content's padding-right / header-fade-right's
+   offset reserve exactly the width of the 3 buttons so the existing header
+   content (nav, lang switcher, clock) shifts left to make room, the same
+   way it already reflows for narrower viewports.
+========================= */
+
+header.has-window-controls .header-content {
+  padding-right: 118px; /* 3 buttons x 46px, minus the header's own 20px right padding */
+}
+
+header.has-window-controls .header-fade-right {
+  right: 138px; /* clear the full 46px x 3 button strip flush against the window edge */
+}
+
+.window-controls {
+  position: absolute;
+  top: 0;
+  right: 0; /* offsets on an absolutely-positioned child measure from header's border edge, ignoring its own padding - this is already flush with the real window edge */
+  height: 100%;
+  display: flex;
+  z-index: 102;
+}
+
+.window-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 100%;
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.window-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #eee;
+}
+
+.window-btn:active {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.window-btn-close:hover {
+  background: #f44336;
+  color: #fff;
+}
+
+.window-btn-close:active {
+  background: #d32f2f;
+}
+
+/* =========================
    BUILD TABS
 ========================= */
 
@@ -1192,7 +1250,8 @@ header:not(.header-expanded) .header-nav-btn-icon {
 #ammo-select,
 #ubgl-ammo-select,
 #lang-select,
-#cb-sort-select {
+#cb-sort-select,
+#dt-src-select {
   position: absolute;
   opacity: 0;
   pointer-events: none;
@@ -7644,9 +7703,9 @@ var _hmt = _hmt || [];
 
 <div id="toast-container"></div>
 <!-- ***!!IMPORTANT!!*** - Cache-busting: bump ?v= on any modified files before deploying -->
-<script src="modules/config.js?v=31"></script>
+<script src="modules/config.js?v=33"></script>
 <script src="modules/state.js?v=19"></script>
-<script src="modules/lang.js?v=26"></script>
+<script src="modules/lang.js?v=27"></script>
 <script src="modules/utils.js?v=21"></script>
 <script src="modules/media-viewer.js?v=8"></script>
 <script src="modules/calculations.js?v=17"></script>
@@ -7654,16 +7713,16 @@ var _hmt = _hmt || [];
 <script src="modules/api.js?v=20"></script>
 <script src="modules/gun-list.js?v=22"></script>
 <script src="modules/stats-panel.js?v=22"></script>
-<script src="modules/tree.js?v=20"></script>
-<script src="modules/attachment-grid.js?v=20"></script>
-<script src="modules/attachment-grid-devtool.js?v=16"></script><!-- dev only: self-exits on non-localhost -->
-<script src="modules/build-preview.js?v=18"></script>
-<script src="modules/slot-selector.js?v=24"></script>
+<script src="modules/tree.js?v=21"></script>
+<script src="modules/attachment-grid.js?v=21"></script>
+<script src="modules/attachment-grid-devtool.js?v=17"></script><!-- dev only: self-exits on non-localhost -->
+<script src="modules/build-preview.js?v=19"></script>
+<script src="modules/slot-selector.js?v=25"></script>
 <script src="modules/graph.js?v=10"></script>
-<script src="modules/build-manager.js?v=27"></script>
-<script src="modules/tab-manager.js?v=5"></script>
+<script src="modules/build-manager.js?v=29"></script>
+<script src="modules/tab-manager.js?v=6"></script>
 <script src="modules/profile.js?v=8"></script>
-<script src="app.js?v=39"></script>
+<script src="app.js?v=40"></script>
 <script src="lzstring.min.js?v=16"></script>
 <script src="marked.min.js?v=16"></script>
 <script src="modules/news.js?v=17"></script>
@@ -7671,6 +7730,8 @@ var _hmt = _hmt || [];
 <script src="modules/tracker.js?v=17"></script>
 <script src="modules/ammo-table.js?v=4"></script>
 <script src="modules/tracker-devtool.js?v=15"></script><!-- dev only: self-exits on non-localhost -->
+<script src="modules/desktop-settings.js?v=4"></script><!-- desktop app only: self-exits on the website -->
+<script src="modules/window-controls.js?v=1"></script><!-- desktop app only: self-exits on the website -->
 <div class="beian-footer">
   <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer">粤ICP备2026028988号-1</a>
   <a href="https://beian.mps.gov.cn/#/query/webSearch?code=44197702000132" rel="noreferrer" target="_blank" class="beian-footer-gong"><img src="assets/images/备案图标.png" alt="公网安备" width="14" height="14">粤公网安备44197702000132号</a>

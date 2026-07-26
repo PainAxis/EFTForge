@@ -983,6 +983,36 @@ function showAboutDialog() {
         btn.textContent = _t("about.checking");
         status.textContent = "";
 
+        // Desktop app: there's no separate "deployed frontend" to compare
+        // build dates against (the local backend just serves the copy
+        // bundled in the app), so the web check below is meaningless here.
+        // Delegate to the real Tauri/Rust updater instead, which checks the
+        // Gitee/GitHub manifest per the user's Settings > update source and
+        // (if found) handles the confirm-and-install dialog itself.
+        if (EFTForge.config.IS_DESKTOP) {
+            try {
+                const result = await window.__TAURI__.core.invoke("manual_check_for_updates");
+                btn.disabled = false;
+                btn.textContent = _t("about.checkForUpdates");
+                if (result.status === "available") {
+                    status.style.color = "#4caf50";
+                    status.textContent = _t("about.updateAvailable");
+                } else if (result.status === "up_to_date") {
+                    status.style.color = "#4caf50";
+                    status.textContent = _t("about.upToDate");
+                } else {
+                    status.style.color = "#f44336";
+                    status.textContent = result.message || _t("about.updateServerError");
+                }
+            } catch (e) {
+                btn.disabled = false;
+                btn.textContent = _t("about.checkForUpdates");
+                status.style.color = "#f44336";
+                status.textContent = String(e);
+            }
+            return;
+        }
+
         const serverDate = await _fetchRemoteBuildDate();
 
         btn.disabled = false;
@@ -1150,6 +1180,7 @@ function applyStaticTranslations() {
         if (lbl) lbl.textContent = t(key);
     };
     setNavLabel("about-btn",       "btn.about");
+    setNavLabel("desktop-settings-btn", "dt.navLabel");
     setNavLabel("news-btn",        "btn.news");
     setNavLabel("builds-btn",      "btn.builds");
     setNavLabel("leaderboard-btn", "btn.leaderboard");

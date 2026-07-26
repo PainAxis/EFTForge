@@ -29,3 +29,14 @@ backend/.env
 # OS
 .DS_Store
 Thumbs.db
+# Desktop app build artifacts
+backend/data/
+desktop/node_modules/
+desktop/pyinstaller/build/
+desktop/pyinstaller/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/binaries/
+desktop/src-tauri/tauri.key
+desktop/src-tauri/tauri.key.pub
+desktop/src-tauri/resources/
