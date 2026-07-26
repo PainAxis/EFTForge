@@ -12,7 +12,7 @@ Usage:
 Env:
     GITEE_TOKEN          personal access token (required)
     GITEE_OWNER          default: morph1ne
-    GITEE_RELEASES_REPO  repo that hosts the release attachments, default: EFTForge
+    GITEE_RELEASES_REPO  repo that hosts the release attachments, default: eftforge-gitee-mirror
     GITEE_ASSETS_REPO    repo whose raw files serve latest.json, default: eftforge-assets
 """
 
@@ -33,7 +33,7 @@ BUNDLE_DIR  = os.path.join(DESKTOP_DIR, "src-tauri", "target", "release", "bundl
 
 TOKEN = os.environ.get("GITEE_TOKEN", "")
 OWNER = os.environ.get("GITEE_OWNER", "morph1ne")
-RELEASES_REPO = os.environ.get("GITEE_RELEASES_REPO", "EFTForge")
+RELEASES_REPO = os.environ.get("GITEE_RELEASES_REPO", "eftforge-gitee-mirror")
 ASSETS_REPO   = os.environ.get("GITEE_ASSETS_REPO", "eftforge-assets")
 
 
@@ -67,7 +67,7 @@ def ensure_release(tag: str, notes: str) -> int:
             "tag_name": tag,
             "name": f"EFTForge Desktop {tag}",
             "body": notes or f"EFTForge desktop release {tag}",
-            "target_commitish": "master",
+            "target_commitish": "main",
         },
         timeout=30,
     )
