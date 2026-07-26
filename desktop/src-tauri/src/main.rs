@@ -9,7 +9,7 @@
 //   3. Check for app updates from Gitee/GitHub per the user's
 //      update_source setting (data/settings.json, written by the backend).
 //   4. Guarantee the sidecar dies with this process, no matter how this
-//      process dies - see enable_kill_children_on_exit() below.
+//      process dies - see create_sidecar_job() below.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -123,6 +123,15 @@ enum UpdateCheckResult {
 
 /// Shows the confirm dialog and, if accepted, downloads/installs the update.
 /// Shared by the silent startup check and the manual About-modal check.
+///
+/// The download runs while the app stays fully usable, so its progress is
+/// surfaced to the page via events (frontend/modules/desktop-settings.js
+/// listens and shows a badge on the Settings button + a progress bar in the
+/// settings modal): update-download-started {version}, then throttled
+/// update-download-progress {downloaded, total}, then update-installing
+/// right before the installer takes over (the app exits at that point -
+/// install() launches the NSIS installer and never returns on Windows), or
+/// update-error {message} on any failure.
 async fn prompt_and_install(handle: tauri::AppHandle, update: tauri_plugin_updater::Update) {
     let version = update.version.clone();
     let ask_handle = handle.clone();
@@ -148,14 +157,55 @@ async fn prompt_and_install(handle: tauri::AppHandle, update: tauri_plugin_updat
         return;
     }
 
-    match update.download_and_install(|_, _| {}, || {}).await {
-        Ok(_) => {
-            // NSIS passive install relaunches the app itself; restart() covers
-            // the cases where it does not.
-            handle.restart();
+    let _ = handle.emit(
+        "update-download-started",
+        serde_json::json!({ "version": update.version }),
+    );
+
+    let progress_handle = handle.clone();
+    let mut downloaded: u64 = 0;
+    // Backdated so the very first chunk emits immediately.
+    let mut last_emit = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    let finish_handle = handle.clone();
+
+    let bytes = match update
+        .download(
+            move |chunk, total| {
+                downloaded += chunk as u64;
+                if last_emit.elapsed().as_millis() >= 150 {
+                    last_emit = std::time::Instant::now();
+                    let _ = progress_handle.emit(
+                        "update-download-progress",
+                        serde_json::json!({ "downloaded": downloaded, "total": total }),
+                    );
+                }
+            },
+            move || {
+                let _ = finish_handle.emit("update-installing", ());
+            },
+        )
+        .await
+    {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("[updater] download failed: {e}");
+            let _ = handle.emit("update-error", serde_json::json!({ "message": e.to_string() }));
+            let _ = handle
+                .dialog()
+                .message(format!("更新失败 / Update failed: {e}"))
+                .kind(MessageDialogKind::Error)
+                .blocking_show();
+            return;
         }
+    };
+
+    match update.install(bytes) {
+        // On Windows install() launches the installer and exits this process
+        // itself; restart() only runs on platforms where it returns.
+        Ok(_) => handle.restart(),
         Err(e) => {
             eprintln!("[updater] install failed: {e}");
+            let _ = handle.emit("update-error", serde_json::json!({ "message": e.to_string() }));
             let _ = handle
                 .dialog()
                 .message(format!("更新失败 / Update failed: {e}"))
@@ -200,7 +250,10 @@ async fn manual_check_for_updates(handle: tauri::AppHandle) -> UpdateCheckResult
     match updater.check().await {
         Ok(Some(update)) => {
             let version = update.version.clone();
-            prompt_and_install(handle, update).await;
+            // Fire and forget: the About button gets its "update available"
+            // answer right away instead of hanging until the download (which
+            // can take minutes) finishes behind the confirm dialog.
+            tauri::async_runtime::spawn(prompt_and_install(handle, update));
             UpdateCheckResult::Available { version }
         }
         Ok(None) => UpdateCheckResult::UpToDate,
@@ -233,22 +286,29 @@ fn exit_app(handle: tauri::AppHandle) {
 /// forced kill from Task Manager/taskkill. The RunEvent::Exit handler below
 /// only covers the graceful-shutdown path; this covers every path.
 ///
-/// Mechanism: put this process in a Windows Job Object with
-/// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. Child processes we spawn afterwards
-/// (the backend sidecar, and any process *it* spawns, like the --sync-worker
-/// re-invocation) automatically join the same job. Windows closes every
-/// handle this process owns - including the job handle - the moment the
-/// process terminates for any reason, and KILL_ON_JOB_CLOSE means that last
-/// handle closing takes the whole job down with it.
+/// Mechanism: a Windows Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+/// that the sidecar (and transitively any process *it* spawns, like the
+/// --sync-worker re-invocation) is assigned to right after spawning. This
+/// process holds the only job handle and never closes it; Windows closes
+/// every handle this process owns the moment the process terminates for any
+/// reason, and KILL_ON_JOB_CLOSE means that last handle closing takes the
+/// whole job down with it.
+///
+/// This process itself deliberately stays OUT of the job. It used to be in
+/// it (relying on children auto-joining), but that broke the updater: the
+/// elevated NSIS installer the updater launches gets re-parented to this
+/// process by the UAC elevation flow, inherited the job, and was killed the
+/// instant the updater exited the app - the update silently never happened.
 #[cfg(windows)]
-fn enable_kill_children_on_exit() {
+static SIDECAR_JOB: std::sync::OnceLock<isize> = std::sync::OnceLock::new();
+
+#[cfg(windows)]
+fn create_sidecar_job() {
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
-    use windows::Win32::System::Threading::GetCurrentProcess;
 
     unsafe {
         let job: HANDLE = match CreateJobObjectW(None, None) {
@@ -273,24 +333,48 @@ fn enable_kill_children_on_exit() {
             return;
         }
 
-        if let Err(e) = AssignProcessToJobObject(job, GetCurrentProcess()) {
-            eprintln!("[job] AssignProcessToJobObject failed: {e}");
-            return;
-        }
-
         // `HANDLE` is a plain Copy wrapper with no Drop impl, so this handle
         // is never explicitly closed by us - it only closes when Windows
         // tears the whole process down, which is exactly the moment we want
         // the sidecar killed.
-        let _ = job;
+        let _ = SIDECAR_JOB.set(job.0 as isize);
     }
 }
 
 #[cfg(not(windows))]
-fn enable_kill_children_on_exit() {}
+fn create_sidecar_job() {}
+
+/// Assigns the freshly spawned sidecar to the kill-on-close job created by
+/// create_sidecar_job(). Called immediately after spawn, before the backend
+/// has a chance to spawn any children of its own (those then join the job
+/// automatically, being children of a job member).
+#[cfg(windows)]
+fn put_pid_in_sidecar_job(pid: u32) {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::System::JobObjects::AssignProcessToJobObject;
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
+
+    let Some(&job) = SIDECAR_JOB.get() else {
+        eprintln!("[job] no sidecar job - backend may outlive a crashed app");
+        return;
+    };
+    let job = HANDLE(job as _);
+
+    unsafe {
+        match OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid) {
+            Ok(process) => {
+                if let Err(e) = AssignProcessToJobObject(job, process) {
+                    eprintln!("[job] AssignProcessToJobObject({pid}) failed: {e}");
+                }
+                let _ = CloseHandle(process);
+            }
+            Err(e) => eprintln!("[job] OpenProcess({pid}) failed: {e}"),
+        }
+    }
+}
 
 fn main() {
-    enable_kill_children_on_exit();
+    create_sidecar_job();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -496,6 +580,8 @@ fn main() {
                 )
                 .current_dir(data_dir.clone());
             let (mut rx, child) = sidecar.spawn()?;
+            #[cfg(windows)]
+            put_pid_in_sidecar_job(child.pid());
             app.state::<BackendChild>().0.lock().unwrap().replace(child);
 
             let spawn_time = std::time::Instant::now();

@@ -45,10 +45,14 @@ def _die(msg: str) -> None:
     sys.exit(f"mirror_to_gitee: {msg}")
 
 
-def find_bundle() -> tuple[str, str]:
-    exes = glob.glob(os.path.join(BUNDLE_DIR, "*-setup.exe"))
+def find_bundle(version: str) -> tuple[str, str]:
+    # Match the exe to the requested version - this script usually runs on a
+    # dev machine whose bundle dir accumulates exes from previous builds, and
+    # a bare *-setup.exe glob picks the oldest one alphabetically (this once
+    # published a "1.4.8" manifest that pointed at the 1.4.7 installer).
+    exes = glob.glob(os.path.join(BUNDLE_DIR, f"*_{version}_*-setup.exe"))
     if not exes:
-        _die(f"no NSIS setup exe in {BUNDLE_DIR}")
+        _die(f"no NSIS setup exe for version {version} in {BUNDLE_DIR}")
     exe = exes[0]
     sig = exe + ".sig"
     if not os.path.exists(sig):
@@ -137,7 +141,7 @@ def main() -> None:
         _die("GITEE_TOKEN not set")
 
     version = args.tag.removeprefix("app-v").removeprefix("v")
-    exe, sig = find_bundle()
+    exe, sig = find_bundle(version)
     with open(sig, "r", encoding="utf-8") as f:
         signature = f.read().strip()
 

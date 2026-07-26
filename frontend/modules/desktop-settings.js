@@ -55,6 +55,89 @@
         } catch { return iso; }
     }
 
+    /* ---------------- app update progress ---------------- */
+    // Rust emits these while the Tauri updater downloads a new app version
+    // (see prompt_and_install in desktop/src-tauri/src/main.rs). The download
+    // runs in the background with the app fully usable, so without feedback
+    // it looks like nothing is happening until the app suddenly closes for
+    // the install - surface it as a badge on the header Settings button plus
+    // a live progress section inside this modal.
+    let _upd = { phase: "idle", version: "", downloaded: 0, total: 0, message: "" };
+
+    function _updPct() {
+        if (!_upd.total) return null;
+        return Math.min(100, Math.floor((_upd.downloaded / _upd.total) * 100));
+    }
+
+    function _refreshUpdateUi() {
+        const btn = document.getElementById("desktop-settings-btn");
+        if (btn) {
+            if (_upd.phase === "downloading") {
+                const pct = _updPct();
+                btn.dataset.badge = pct === null ? "↓" : `${pct}%`;
+            } else if (_upd.phase === "installing") {
+                btn.dataset.badge = "↓";
+            } else if (_upd.phase === "error") {
+                btn.dataset.badge = "!";
+            } else {
+                btn.dataset.badge = "";
+            }
+        }
+        const box = document.getElementById("dt-update-progress");
+        if (box) _renderUpdateProgress(box);
+    }
+
+    function _renderUpdateProgress(box) {
+        if (_upd.phase === "idle") {
+            box.style.display = "none";
+            box.innerHTML = "";
+            return;
+        }
+        box.style.display = "";
+        if (_upd.phase === "downloading") {
+            const pct = _updPct();
+            const mb = (v) => (v / 1048576).toFixed(1);
+            const detail = _upd.total
+                ? `${mb(_upd.downloaded)} / ${mb(_upd.total)} MB`
+                : `${mb(_upd.downloaded)} MB`;
+            box.innerHTML = `
+                <div style="font-size:12px; color:#c9a53c;">${escapeHtml(t("dt.updDownloading").replace("{v}", _upd.version))}</div>
+                <div style="height:6px; background:#222; border:1px solid #333; margin-top:6px;">
+                    <div id="dt-update-bar" style="height:100%; width:${pct === null ? 100 : pct}%; background:#9a8866;"></div>
+                </div>
+                <div id="dt-update-detail" style="font-size:11px; color:#888; margin-top:4px;">${pct === null ? "" : pct + "% - "}${detail}</div>`;
+        } else if (_upd.phase === "installing") {
+            box.innerHTML = `<div style="font-size:12px; color:#7ba05b;">${t("dt.updInstalling")}</div>`;
+        } else if (_upd.phase === "error") {
+            box.innerHTML = `<div style="font-size:12px; color:#f44336;">${t("dt.updError")}${escapeHtml(_upd.message)}</div>`;
+        }
+    }
+
+    function _initUpdateEvents() {
+        // Needs the Tauri IPC bridge - present in the packaged app only.
+        if (!window.__TAURI__) return;
+        const listen = window.__TAURI__.event.listen;
+        listen("update-download-started", (e) => {
+            _upd = { phase: "downloading", version: (e.payload && e.payload.version) || "", downloaded: 0, total: 0, message: "" };
+            _refreshUpdateUi();
+        });
+        listen("update-download-progress", (e) => {
+            _upd.phase = "downloading";
+            _upd.downloaded = (e.payload && e.payload.downloaded) || 0;
+            if (e.payload && e.payload.total) _upd.total = e.payload.total;
+            _refreshUpdateUi();
+        });
+        listen("update-installing", () => {
+            _upd.phase = "installing";
+            _refreshUpdateUi();
+        });
+        listen("update-error", (e) => {
+            _upd.phase = "error";
+            _upd.message = String((e.payload && e.payload.message) || "");
+            _refreshUpdateUi();
+        });
+    }
+
     /* ---------------- modal ---------------- */
 
     async function showPanel() {
@@ -144,6 +227,7 @@
                     <option value="github">GitHub</option>
                 </select>
                 <div style="font-size:11px; color:#666;">${t("dt.updateSourceHint")} <span id="dt-src-status" style="color:#7ba05b;"></span></div>
+                <div id="dt-update-progress" style="display:none; margin-top:2px;"></div>
             </div>
 
             <hr class="modal-divider">
@@ -215,6 +299,9 @@
                 }
             });
         });
+
+        // --- app update download progress (if one is running right now) ---
+        _renderUpdateProgress(body.querySelector("#dt-update-progress"));
 
         // --- update source ---
         const srcSelect = body.querySelector("#dt-src-select");
@@ -317,6 +404,8 @@
         const profileBtn = document.getElementById("profile-nav-btn");
         if (profileBtn) nav.insertBefore(btn, profileBtn);
         else nav.appendChild(btn);
+
+        _initUpdateEvents();
     }
 
     if (document.readyState === "loading") {

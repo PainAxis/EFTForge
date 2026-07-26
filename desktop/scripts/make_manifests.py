@@ -24,10 +24,14 @@ BUNDLE_DIR  = os.path.join(DESKTOP_DIR, "src-tauri", "target", "release", "bundl
 OUT_DIR     = os.path.join(DESKTOP_DIR, "dist-manifests")
 
 
-def find_bundle() -> tuple[str, str]:
-    exes = glob.glob(os.path.join(BUNDLE_DIR, "*-setup.exe"))
+def find_bundle(version: str) -> tuple[str, str]:
+    # Match the exe to the requested version - the bundle dir accumulates
+    # exes from previous local builds, and a bare *-setup.exe glob picks the
+    # oldest one alphabetically (this once published a "1.4.8" manifest that
+    # pointed at the 1.4.7 installer).
+    exes = glob.glob(os.path.join(BUNDLE_DIR, f"*_{version}_*-setup.exe"))
     if not exes:
-        sys.exit(f"No NSIS setup exe found in {BUNDLE_DIR} - run tauri build first")
+        sys.exit(f"No NSIS setup exe for version {version} in {BUNDLE_DIR} - run tauri build first")
     exe = exes[0]
     sig = exe + ".sig"
     if not os.path.exists(sig):
@@ -44,7 +48,7 @@ def main() -> None:
     repo = os.environ.get("GITHUB_REPOSITORY", "SouthHorizons76/EFTForge")
     version = args.tag.removeprefix("app-v").removeprefix("v")
 
-    exe, sig = find_bundle()
+    exe, sig = find_bundle(version)
     with open(sig, "r", encoding="utf-8") as f:
         signature = f.read().strip()
 
