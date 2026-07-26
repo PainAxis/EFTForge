@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Minimal capability for the main window. The app UI is served by the local backend over http; almost no Tauri IPC is used from the frontend - the one exception is the custom title bar (frontend/modules/window-controls.js), which needs window minimize/maximize/close/drag. The 'remote' block extends this capability to that http origin, since it's otherwise only granted to the bundled tauri:// asset content (the ui-shell splash page).",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "permissions": [
+    "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging"
+  ]
+}

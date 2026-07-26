@@ -1,0 +1,14 @@
+{
+  "name": "eftforge-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build:backend": "python scripts/build_backend.py",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

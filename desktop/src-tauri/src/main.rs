@@ -1,0 +1,484 @@
+// EFTForge desktop launcher.
+//
+// Responsibilities (all in Rust - the webview UI is the regular EFTForge
+// frontend served over http by the local backend, no Tauri IPC involved):
+//   1. Resolve the portable data dir (next to the exe when writable, else
+//      %LOCALAPPDATA%\EFTForge\data) - must mirror backend/config.py.
+//   2. Spawn the PyInstaller backend sidecar, read "EFTFORGE_PORT=<n>" from
+//      its stdout, then navigate the window to the local server.
+//   3. Check for app updates from Gitee/GitHub per the user's
+//      update_source setting (data/settings.json, written by the backend).
+//   4. Guarantee the sidecar dies with this process, no matter how this
+//      process dies - see enable_kill_children_on_exit() below.
+
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use std::fs;
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_shell::ShellExt;
+use tauri_plugin_updater::UpdaterExt;
+
+const GITEE_MANIFEST: &str =
+    "https://gitee.com/morph1ne/eftforge-assets/raw/master/desktop/latest.json";
+const GITHUB_MANIFEST: &str =
+    "https://github.com/SouthHorizons76/EFTForge/releases/latest/download/latest.json";
+
+struct BackendChild(Mutex<Option<CommandChild>>);
+
+/// Portable-first data dir - keep in sync with _resolve_desktop_data_dir()
+/// in backend/config.py (the backend re-runs the same logic; passing the
+/// result via EFTFORGE_DATA_DIR just guarantees both sides agree).
+fn resolve_data_dir() -> PathBuf {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()));
+    if let Some(dir) = exe_dir {
+        let portable = dir.join("data");
+        if fs::create_dir_all(&portable).is_ok() {
+            let probe = portable.join(".write-probe");
+            if fs::write(&probe, "ok").is_ok() {
+                let _ = fs::remove_file(&probe);
+                return portable;
+            }
+        }
+    }
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("EFTForge").join("data")
+}
+
+/// update_source from data/settings.json ("auto" | "gitee" | "github").
+/// The backend owns this file; we only read it at launch.
+fn read_update_source(data_dir: &PathBuf) -> String {
+    let path = data_dir.join("settings.json");
+    if let Ok(raw) = fs::read_to_string(path) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if let Some(s) = v.get("update_source").and_then(|s| s.as_str()) {
+                return s.to_string();
+            }
+        }
+    }
+    "auto".to_string()
+}
+
+fn build_updater(
+    handle: &tauri::AppHandle,
+    source: &str,
+) -> Result<tauri_plugin_updater::Updater, String> {
+    let endpoints: Vec<&str> = match source {
+        "gitee" => vec![GITEE_MANIFEST],
+        "github" => vec![GITHUB_MANIFEST],
+        // auto: Gitee first - reachable both in and outside China; GitHub
+        // often times out inside China, so it is the fallback.
+        _ => vec![GITEE_MANIFEST, GITHUB_MANIFEST],
+    };
+    let urls: Vec<tauri::Url> = endpoints
+        .iter()
+        .filter_map(|u| u.parse().ok())
+        .collect();
+
+    handle
+        .updater_builder()
+        .endpoints(urls)
+        .and_then(|b| b.build())
+        .map_err(|e| e.to_string())
+}
+
+/// Result of a user-triggered update check, reported back to the About
+/// modal's "Check for Updates" button via the `manual_check_for_updates`
+/// command. The silent startup check (below) doesn't need this - it only
+/// ever acts when an update is actually found.
+#[derive(serde::Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum UpdateCheckResult {
+    UpToDate,
+    Available { version: String },
+    Error { message: String },
+}
+
+/// Shows the confirm dialog and, if accepted, downloads/installs the update.
+/// Shared by the silent startup check and the manual About-modal check.
+async fn prompt_and_install(handle: tauri::AppHandle, update: tauri_plugin_updater::Update) {
+    let version = update.version.clone();
+    let ask_handle = handle.clone();
+    let confirmed = tauri::async_runtime::spawn_blocking(move || {
+        ask_handle
+            .dialog()
+            .message(format!(
+                "发现新版本 EFTForge v{version}，是否现在更新？\n\
+                 A new version (v{version}) is available. Update now?"
+            ))
+            .title("EFTForge 更新 / Update")
+            .kind(MessageDialogKind::Info)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "更新 Update".into(),
+                "稍后 Later".into(),
+            ))
+            .blocking_show()
+    })
+    .await
+    .unwrap_or(false);
+
+    if !confirmed {
+        return;
+    }
+
+    match update.download_and_install(|_, _| {}, || {}).await {
+        Ok(_) => {
+            // NSIS passive install relaunches the app itself; restart() covers
+            // the cases where it does not.
+            handle.restart();
+        }
+        Err(e) => {
+            eprintln!("[updater] install failed: {e}");
+            let _ = handle
+                .dialog()
+                .message(format!("更新失败 / Update failed: {e}"))
+                .kind(MessageDialogKind::Error)
+                .blocking_show();
+        }
+    }
+}
+
+/// Silent startup check - only acts (dialog + install) when an update is
+/// actually found; otherwise says nothing.
+async fn check_for_updates(handle: tauri::AppHandle, source: String) {
+    let updater = match build_updater(&handle, &source) {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("[updater] setup failed: {e}");
+            return;
+        }
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => prompt_and_install(handle, update).await,
+        Ok(None) => {}
+        Err(e) => eprintln!("[updater] check failed: {e}"),
+    }
+}
+
+/// User-triggered check from the About modal's "Check for Updates" button.
+/// Reads update_source the same way the startup check does, so it honors
+/// whatever the user picked in Settings - Gitee/GitHub/auto. Unlike the
+/// silent startup check, this always reports back to the caller so the
+/// button can show "up to date" / an error, not just act silently.
+#[tauri::command]
+async fn manual_check_for_updates(handle: tauri::AppHandle) -> UpdateCheckResult {
+    let source = read_update_source(&resolve_data_dir());
+
+    let updater = match build_updater(&handle, &source) {
+        Ok(u) => u,
+        Err(message) => return UpdateCheckResult::Error { message },
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            let version = update.version.clone();
+            prompt_and_install(handle, update).await;
+            UpdateCheckResult::Available { version }
+        }
+        Ok(None) => UpdateCheckResult::UpToDate,
+        Err(e) => UpdateCheckResult::Error {
+            message: e.to_string(),
+        },
+    }
+}
+
+/// Ties the sidecar's lifetime to this process at the OS level, so it cannot
+/// be orphaned no matter how this process ends - normal exit, a crash, or a
+/// forced kill from Task Manager/taskkill. The RunEvent::Exit handler below
+/// only covers the graceful-shutdown path; this covers every path.
+///
+/// Mechanism: put this process in a Windows Job Object with
+/// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. Child processes we spawn afterwards
+/// (the backend sidecar, and any process *it* spawns, like the --sync-worker
+/// re-invocation) automatically join the same job. Windows closes every
+/// handle this process owns - including the job handle - the moment the
+/// process terminates for any reason, and KILL_ON_JOB_CLOSE means that last
+/// handle closing takes the whole job down with it.
+#[cfg(windows)]
+fn enable_kill_children_on_exit() {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows::Win32::System::Threading::GetCurrentProcess;
+
+    unsafe {
+        let job: HANDLE = match CreateJobObjectW(None, None) {
+            Ok(job) => job,
+            Err(e) => {
+                eprintln!("[job] CreateJobObjectW failed: {e}");
+                return;
+            }
+        };
+
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
+        let set_ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const _,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if let Err(e) = set_ok {
+            eprintln!("[job] SetInformationJobObject failed: {e}");
+            return;
+        }
+
+        if let Err(e) = AssignProcessToJobObject(job, GetCurrentProcess()) {
+            eprintln!("[job] AssignProcessToJobObject failed: {e}");
+            return;
+        }
+
+        // `HANDLE` is a plain Copy wrapper with no Drop impl, so this handle
+        // is never explicitly closed by us - it only closes when Windows
+        // tears the whole process down, which is exactly the moment we want
+        // the sidecar killed.
+        let _ = job;
+    }
+}
+
+#[cfg(not(windows))]
+fn enable_kill_children_on_exit() {}
+
+fn main() {
+    enable_kill_children_on_exit();
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![manual_check_for_updates])
+        .manage(BackendChild(Mutex::new(None)))
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let data_dir = resolve_data_dir();
+            fs::create_dir_all(&data_dir)?;
+
+            // Splash window immediately (bundled ui-shell page); it navigates
+            // to the local server as soon as the backend reports its port.
+            // The webview profile (localStorage with the user's saved builds!)
+            // lives in the portable data dir, not %APPDATA%.
+            #[allow(unused_mut)]
+            let mut builder =
+                WebviewWindowBuilder::new(&handle, "main", WebviewUrl::App("index.html".into()))
+                    .title("EFTForge")
+                    .inner_size(1500.0, 940.0)
+                    .min_inner_size(1024.0, 700.0)
+                    .center()
+                    // No native title bar - the site's own header bar (and the
+                    // ui-shell splash page) draw the title bar instead, via
+                    // data-tauri-drag-region + custom minimize/maximize/close
+                    // buttons. See frontend/modules/window-controls.js.
+                    .decorations(false)
+                    // WebView2's native accelerator keys (F5, Ctrl+P, Ctrl+F, ...)
+                    // get disabled below via AreBrowserAcceleratorKeysEnabled, which
+                    // hands those key events to the page instead of eating them - so
+                    // re-implement refresh here to keep F5 / Ctrl+F5 working.
+                    .initialization_script(
+                        r#"window.addEventListener('keydown', function (e) {
+                            if (e.key === 'F5' || e.keyCode === 116) {
+                                e.preventDefault();
+                                location.reload();
+                            }
+                        }, true);"#,
+                    );
+            #[cfg(windows)]
+            {
+                builder = builder.data_directory(data_dir.join("webview"));
+            }
+            let window = builder.build()?;
+
+            // decorations(false) removes the native title bar, but Windows 11's
+            // DWM still rounds a borderless window's corners by default (the
+            // "no title bar" look, not the "sharp edges" look) - opt back out.
+            #[cfg(windows)]
+            {
+                use windows::Win32::Graphics::Dwm::{
+                    DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
+                };
+                if let Ok(hwnd) = window.hwnd() {
+                    let pref = DWMWCP_DONOTROUND;
+                    let result = unsafe {
+                        DwmSetWindowAttribute(
+                            hwnd,
+                            DWMWA_WINDOW_CORNER_PREFERENCE,
+                            &pref as *const _ as *const _,
+                            std::mem::size_of_val(&pref) as u32,
+                        )
+                    };
+                    if let Err(e) = result {
+                        eprintln!("[window] failed to square off corners: {e}");
+                    }
+                }
+            }
+
+            // Lock down WebView2's default browser chrome - no right-click menu,
+            // no F12/devtools, no other native browser shortcuts (Ctrl+P, Ctrl+F,
+            // Ctrl+U, Alt+Left/Right nav, etc). F5/Ctrl+F5 are restored above.
+            #[cfg(windows)]
+            {
+                let lockdown = window.with_webview(|webview| {
+                    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+                    use windows::core::Interface;
+
+                    let result: windows::core::Result<()> = (|| unsafe {
+                        let core = webview.controller().CoreWebView2()?;
+                        let settings = core.Settings()?;
+                        settings.SetAreDefaultContextMenusEnabled(false)?;
+                        settings.SetAreDevToolsEnabled(false)?;
+                        if let Ok(settings3) = settings.cast::<ICoreWebView2Settings3>() {
+                            settings3.SetAreBrowserAcceleratorKeysEnabled(false)?;
+                        }
+                        Ok(())
+                    })();
+                    if let Err(e) = result {
+                        eprintln!("[webview] failed to lock down browser chrome: {e}");
+                    }
+                });
+                if let Err(e) = lockdown {
+                    eprintln!("[webview] with_webview failed: {e}");
+                }
+            }
+
+            // Backend sidecar.
+            let resource_dir = handle.path().resource_dir()?;
+            let sidecar = handle
+                .shell()
+                .sidecar("eftforge-backend")?
+                .env("EFTFORGE_DESKTOP", "1")
+                .env("EFTFORGE_DATA_DIR", data_dir.to_string_lossy().to_string())
+                .env(
+                    "EFTFORGE_FRONTEND_DIR",
+                    resource_dir.join("frontend").to_string_lossy().to_string(),
+                )
+                .env(
+                    "EFTFORGE_RESOURCE_DIR",
+                    resource_dir.to_string_lossy().to_string(),
+                )
+                .env(
+                    "EFTFORGE_APP_VERSION",
+                    handle.package_info().version.to_string(),
+                )
+                .current_dir(data_dir.clone());
+            let (mut rx, child) = sidecar.spawn()?;
+            app.state::<BackendChild>().0.lock().unwrap().replace(child);
+
+            let spawn_time = std::time::Instant::now();
+            // The backend prints EFTFORGE_PORT before uvicorn actually binds
+            // the listening socket, so navigating on that line alone races
+            // the server startup - the webview would occasionally hit
+            // connection-refused and show WebView2's "can't reach this page"
+            // before the real page loads. Poll the port until it accepts a
+            // TCP connection before navigating, so the splash only hands off
+            // once the server is actually there to receive it.
+            //
+            // Sequencing: show the splash (green blob) for at least
+            // MIN_SPLASH_MILLIS, and once the port is actually accepting
+            // connections, call the splash's __eftforgeReady() hook - it
+            // eases the blob to the site gold over 1s - then navigate after
+            // READY_TRANSITION_MILLIS so the transition finishes on screen.
+            const MIN_SPLASH_MILLIS: u64 = 600;
+            const READY_TRANSITION_MILLIS: u64 = 1100;
+            const PORT_POLL_INTERVAL_MILLIS: u64 = 60;
+            const PORT_POLL_TIMEOUT_SECS: u64 = 20;
+
+            async fn wait_for_port(port: &str) {
+                let addr = format!("127.0.0.1:{port}");
+                let deadline = std::time::Instant::now()
+                    + std::time::Duration::from_secs(PORT_POLL_TIMEOUT_SECS);
+                loop {
+                    if tokio::net::TcpStream::connect(&addr).await.is_ok() {
+                        return;
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        // Give up waiting and navigate anyway - better to show
+                        // whatever error state the webview lands on than to
+                        // hang on the splash forever.
+                        return;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        PORT_POLL_INTERVAL_MILLIS,
+                    ))
+                    .await;
+                }
+            }
+
+            tauri::async_runtime::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        CommandEvent::Stdout(bytes) => {
+                            let line = String::from_utf8_lossy(&bytes);
+                            let line = line.trim();
+                            if let Some(port) = line.strip_prefix("EFTFORGE_PORT=") {
+                                wait_for_port(port).await;
+                                let elapsed = spawn_time.elapsed().as_millis() as u64;
+                                if elapsed < MIN_SPLASH_MILLIS {
+                                    tokio::time::sleep(std::time::Duration::from_millis(
+                                        MIN_SPLASH_MILLIS - elapsed,
+                                    ))
+                                    .await;
+                                }
+                                // Backend is genuinely reachable: play the
+                                // ready transition, then hand off.
+                                let _ = window
+                                    .eval("window.__eftforgeReady && window.__eftforgeReady()");
+                                tokio::time::sleep(std::time::Duration::from_millis(
+                                    READY_TRANSITION_MILLIS,
+                                ))
+                                .await;
+                                let _ = window.eval(&format!(
+                                    "window.location.replace('http://127.0.0.1:{port}/')"
+                                ));
+                            }
+                            println!("[backend] {line}");
+                        }
+                        CommandEvent::Stderr(bytes) => {
+                            eprintln!("[backend] {}", String::from_utf8_lossy(&bytes).trim_end());
+                        }
+                        CommandEvent::Error(err) => eprintln!("[backend] spawn error: {err}"),
+                        CommandEvent::Terminated(status) => {
+                            eprintln!("[backend] exited: {status:?}");
+                        }
+                        _ => {}
+                    }
+                }
+            });
+
+            // Update check, honoring the user's source preference.
+            let update_handle = handle.clone();
+            let source = read_update_source(&data_dir);
+            tauri::async_runtime::spawn(async move {
+                check_for_updates(update_handle, source).await;
+            });
+
+            Ok(())
+        })
+        .build(tauri::generate_context!())
+        .expect("failed to build EFTForge app")
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                if let Some(child) = app.state::<BackendChild>().0.lock().unwrap().take() {
+                    let _ = child.kill();
+                }
+            }
+        });
+}

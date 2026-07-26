@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>EFTForge</title>
+<style>
+  @font-face {
+    font-family: "Bender";
+    src: url("fonts/Bender.woff2") format("woff2");
+    font-weight: 400;
+  }
+  @font-face {
+    font-family: "Bender";
+    src: url("fonts/Bender-Bold.woff2") format("woff2");
+    font-weight: 700;
+  }
+  /* Same registered custom property the site uses for its signature
+     bottom-right color blob - registration makes the color interpolate
+     smoothly instead of snapping. Starts on the site green ("services
+     starting"); the launcher calls window.__eftforgeReady() once the local
+     backend actually accepts connections, easing it to the site gold that
+     the app's landing screen uses, then navigates. */
+  @property --blob-color {
+    syntax: '<color>';
+    inherits: true;
+    initial-value: rgba(0, 200, 180, 0.10);
+  }
+  html {
+    transition: --blob-color 1s ease;
+  }
+  html.ready {
+    --blob-color: rgba(245, 197, 66, 0.10);
+  }
+  html, body {
+    margin: 0; height: 100%;
+    color: #ccc;
+    font-family: "Bender", Arial, "Microsoft YaHei", sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-user-select: none; user-select: none;
+    overflow: hidden;
+  }
+  body {
+    /* Site background stack (minus parallax - static here): vignette on top,
+       signature blob, 30px dot grid, flat base (the site's near-black linear
+       gradient is dropped - it bands visibly on large flat areas). */
+    background:
+      radial-gradient(ellipse 100% 100% at 50% 50%, transparent 20%, rgba(0,0,0,0.72) 100%),
+      radial-gradient(ellipse 70% 70% at 85% 90%, var(--blob-color), transparent 70%),
+      radial-gradient(circle, rgba(255,255,255,0.11) 1px, transparent 1px),
+      #121212;
+    background-size: 100% 100%, 100% 100%, 30px 30px, auto;
+  }
+  .wrap { text-align: center; }
+  .logo {
+    width: 110px; height: 110px;
+    object-fit: contain;
+    opacity: 0.92;
+    pointer-events: none;
+    -webkit-user-drag: none;
+  }
+  .name {
+    margin-top: 14px;
+    font-size: 30px; font-weight: 700; letter-spacing: 2px; color: #f5c542;
+  }
+  .spinner {
+    margin: 30px auto 20px; width: 30px; height: 30px;
+    border: 3px solid #2a2a2a; border-top-color: #9a8866; border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .msg { font-size: 13px; color: #888; line-height: 1.9; letter-spacing: 0.5px; }
+  .err { display: none; margin-top: 20px; font-size: 12px; color: #c0564f; line-height: 1.7; max-width: 440px; }
+  /* The window has no native title bar (see main.rs), so the splash needs
+     its own minimal chrome: the whole page is draggable, and a small close
+     button covers the "stuck on splash and can't get rid of it" case. */
+  .splash-close {
+    position: fixed;
+    top: 0; right: 0;
+    width: 44px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: none;
+    color: #666;
+    cursor: pointer;
+  }
+  .splash-close:hover { background: #f44336; color: #fff; }
+  .splash-close svg { pointer-events: none; }
+</style>
+</head>
+<body data-tauri-drag-region>
+  <button class="splash-close" id="splash-close" aria-label="Close">
+    <svg width="10" height="10" viewBox="0 0 10 10"><line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+  </button>
+  <div class="wrap">
+    <img class="logo" src="logo.png" alt="EFTForge" draggable="false" />
+    <div class="name">EFTForge</div>
+    <div class="spinner"></div>
+    <div class="msg">正在启动本地服务...<br>Starting local services...</div>
+    <div class="err" id="err">
+      启动时间过长。请尝试重启应用；若问题持续，请在 GitHub / Gitee 提交反馈。<br>
+      Startup is taking too long. Try restarting the app; if this persists,
+      please open an issue on GitHub / Gitee.
+    </div>
+  </div>
+  <script>
+    // Called by the launcher (via eval) once the backend port actually
+    // accepts connections - transitions the blob green -> site gold; the
+    // launcher navigates away after the transition completes.
+    window.__eftforgeReady = function () {
+      document.documentElement.classList.add("ready");
+    };
+
+    // The launcher replaces this page shortly after signaling ready;
+    // if that never happens, surface a hint instead of spinning forever.
+    setTimeout(function () {
+      document.getElementById("err").style.display = "block";
+    }, 25000);
+
+    document.getElementById("splash-close").addEventListener("click", function () {
+      if (window.__TAURI__) window.__TAURI__.window.getCurrentWindow().close();
+    });
+  </script>
+</body>
+</html>
