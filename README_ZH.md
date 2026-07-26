@@ -107,6 +107,15 @@ EFTForge 是一个逃离塔科夫武器配置模拟器与社区平台。它提�
 
 ---
 
+## 桌面版
+
+EFTForge 还提供可下载的 Windows 桌面版 - 同样的工作台与属性计算，通过本地后端原生运行在你的电脑上，并可选择是否连接线上社区服务器。如果你所在地区访问我们的服务器较慢，或者你希望在网站服务临时中断时也能继续正常使用（仅社区功能暂时不可用，恢复后即可继续），桌面版会很有用。需要注意的是，无论哪种模式都仍然需要联网，因为物品数据与图片是直接从 [tarkov.dev](https://tarkov.dev) 获取的，与 EFTForge.com 是否可用无关。
+
+- **下载：** [GitHub Releases](https://github.com/SouthHorizons76/EFTForge/releases) - 如果 GitHub 访问较慢或不稳定，也可以使用 [Gitee 镜像](https://gitee.com/morph1ne/eftforge-gitee-mirror/releases)
+- **详细说明：** 架构、本地开发与构建方法见 [desktop/README.md](desktop/README.md)
+
+---
+
 ## 快速开始
 
 ### 环境要求

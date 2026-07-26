@@ -282,7 +282,7 @@ window.EFTForge.news = (function () {
 
             var media    = post.title_media;
             var isLogo   = false;
-            if (!media && !post.thumbnail && (post.tags || []).indexOf('patch-notes') !== -1) {
+            if (!media && !post.thumbnail) {
                 media  = './assets/images/EFTForge1080x1080.png';
                 isLogo = true;
             }
@@ -309,7 +309,7 @@ window.EFTForge.news = (function () {
             }
 
             return [
-                '<div class="news-post-card' + (post._dev ? ' news-post-card--dev' : '') + '" onclick="EFTForge.news.showPost(\'' + post.id + '\')">',
+                '<div class="news-post-card' + (post._dev ? ' news-post-card--dev' : '') + ((post.tags || []).indexOf('news') !== -1 ? ' news-post-card--news' : '') + '" onclick="EFTForge.news.showPost(\'' + post.id + '\')">',
                 mediaHtml,
                 '  <div class="news-card-text">',
                 '    <div class="news-card-title">' + escapeHtml(title) + '</div>',
@@ -378,7 +378,7 @@ window.EFTForge.news = (function () {
         // Build title media hero - overlays the first <h1> on top of the media
         var _titleMedia    = post.title_media;
         var _titleMediaLogo = false;
-        if (!_titleMedia && (post.tags || []).indexOf('patch-notes') !== -1) {
+        if (!_titleMedia) {
             _titleMedia     = './assets/images/EFTForge1080x1080.png';
             _titleMediaLogo = true;
         }

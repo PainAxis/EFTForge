@@ -107,6 +107,15 @@ EFTForge is a full-stack Escape from Tarkov weapon build simulator and community
 
 ---
 
+## Desktop App
+
+EFTForge is also available as a downloadable Windows app - the same workbench and stat calculations running natively on your machine via a local backend, with an optional connection to the live community servers. Useful if you're far from our hosting or have a slow connection to it, or if you just want everything to keep working when the site's services are temporarily down (community features excluded until it's back). Note that an internet connection is still required either way, since item data and images are fetched directly from [tarkov.dev](https://tarkov.dev), independent of EFTForge.com.
+
+- **Download:** [GitHub Releases](https://github.com/SouthHorizons76/EFTForge/releases) - or the [Gitee mirror](https://gitee.com/morph1ne/eftforge-gitee-mirror/releases) if GitHub is slow or blocked for you
+- **Details:** see [desktop/README.md](desktop/README.md) for architecture, local development, and build instructions
+
+---
+
 ## Getting Started
 
 ### Prerequisites

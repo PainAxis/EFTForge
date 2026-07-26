@@ -1,6 +1,15 @@
 {
   "posts": [
     {
+      "id": "2026-07-26-desktop-app-launch",
+      "title": "The Desktop App is Here!",
+      "title_zh": "EFTForge 桌面版正式上线！",
+      "date": "2026-07-26",
+      "tags": ["news", "major-update"],
+      "file": "2026-07-26-desktop-app-launch.md",
+      "file_zh": "2026-07-26-desktop-app-launch.zh.md"
+    },
+    {
       "id": "2026-07-26-v147-release",
       "title": "v1.4.7 - Build Tabs, and Moooooore Stats!",
       "title_zh": "v1.4.7 - 配置标签，舆更多更多更多属性！",
