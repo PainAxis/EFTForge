@@ -2,8 +2,8 @@
 
 Downloadable Windows app: the regular EFTForge frontend in a native WebView2
 window (Tauri 2), powered by the same FastAPI backend running locally as a
-PyInstaller sidecar exe. Works out of the box - item data ships inside the
-installer, community features connect to EFTForge.com (or run fully local).
+PyInstaller sidecar exe. Works out of the box - item data still fetched from tarkov.dev, 
+community features connect to EFTForge.com.
 
 ```
 EFTForge.exe (Tauri shell, ~5 MB)
@@ -119,5 +119,3 @@ changes on a minimum-app-version check.
   raw file or via Gitee Pages instead (mirror script would need a small tweak).
 - Gitee mirroring is a manual post-release step (see above) - GitHub Actions
   runners can't reliably upload the installer to Gitee.
-- macOS/Linux builds are possible later (the sidecar spec and scripts already
-  compute target triples) but are out of scope for v1.
