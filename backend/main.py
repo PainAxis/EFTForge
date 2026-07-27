@@ -3505,7 +3505,7 @@ def upload_avatar(
 @app.post("/profile/update")
 def update_profile(
     x_client_id:      str      = Header(None),
-    username:         str | None = Body(default=None),
+    username:         str | None = Body(default=None, max_length=30),
     avatar_url:       str | None = Body(default=None),
     db:               Session  = Depends(get_builds_db),
 ):
@@ -3577,7 +3577,7 @@ def transfer_preview(
 def transfer_account(
     x_client_id: str       = Header(None),
     old_uuid:    str       = Body(..., embed=True),
-    username:    str | None = Body(default=None),
+    username:    str | None = Body(default=None, max_length=30),
     avatar_url:  str | None = Body(default=None),
     db:          Session   = Depends(get_builds_db),
 ):
@@ -3638,11 +3638,11 @@ def publish_build(
     background_tasks: BackgroundTasks,
     x_client_id:      str        = Header(None),
     gun_id:           str        = Body(...),
-    build_name:       str        = Body(...),
+    build_name:       str        = Body(..., max_length=60),
     pairs:            List[list] = Body(...),
     stats:            dict | None = Body(default=None),
     ammo_id:          str | None  = Body(default=None),
-    author_username:  str | None  = Body(default=None),
+    author_username:  str | None  = Body(default=None, max_length=30),
     author_avatar_url: str | None = Body(default=None),
     tags:             List[str] | None = Body(default=None),
     db:               Session    = Depends(get_builds_db),
@@ -3959,7 +3959,7 @@ def admin_publish_build(
     request:         Request,
     x_admin_key:     str = Header(None),
     gun_id:          str        = Body(...),
-    build_name:      str        = Body(...),
+    build_name:      str        = Body(..., max_length=60),
     pairs:           List[list] = Body(...),
     author_id:       str | None = Body(default=None),
     stats:           dict | None = Body(default=None),
@@ -4370,8 +4370,8 @@ def post_build_comment(
     build_id:         int,
     request:          Request,
     x_client_id:      str      = Header(None),
-    content:          str      = Body(...),
-    user_display_name: str | None = Body(default=None),
+    content:          str      = Body(..., max_length=280),
+    user_display_name: str | None = Body(default=None, max_length=30),
     user_avatar_url:   str | None = Body(default=None),
     db:               Session = Depends(get_builds_db),
 ):
