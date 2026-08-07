@@ -29,8 +29,8 @@ window.EFTForge.config = {
     // Format: [{id, message, level, expires_at, dismissible}] - use string IDs like "maint-2026-05-25".
     STATIC_ANNOUNCEMENTS_URL: "/offline/announcements.json",
 
-    APP_VERSION:    "v1.4.10",
-    APP_BUILD_DATE: "2026-07-27T05:11:37.093Z", // new Date().toISOString()
+    APP_VERSION:    "v1.4.11",
+    APP_BUILD_DATE: "2026-08-07T06:14:16.690Z", // new Date().toISOString()
 
     CALIBER_DISPLAY_MAP: {
         "Caliber20x1mm":      "20x1mm disk",
@@ -39,6 +39,7 @@ window.EFTForge.config = {
         "Caliber762x54R":     "7.62x54R",
         "Caliber556x45NATO":  "5.56x45",
         "Caliber545x39":      "5.45x39",
+        "Caliber58x42":       "5.8x42",
         "Caliber9x19PARA":    "9x19",
         "Caliber9x18PM":      "9x18",
         "Caliber9x18PMM":     "9x18",
@@ -85,7 +86,7 @@ window.EFTForge.config = {
     },
 
     CALIBER_ORDER: [
-        "5.45x39", "5.56x45", "6.8x51",
+        "5.45x39", "5.56x45", "5.8x42", "6.8x51",
         "7.62x39", "7.62x51", "7.62x54R", "7.62x25 TT",
         ".300 BLK", ".308", ".338 LM", ".366 TKM", "9.3x64",
         "9x18", "9x19", "9x21", "9x39", "5.7x28", "4.6x30", ".357 Magnum",

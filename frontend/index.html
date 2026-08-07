@@ -4406,17 +4406,6 @@ body[data-mobile="true"] .gun-card.mid-build {
     -webkit-appearance: none;
 }
 
-.strength-control.locked {
-    opacity: 0.45;
-    cursor: not-allowed;
-}
-.strength-control.locked label {
-    cursor: not-allowed;
-}
-.strength-control.locked input:disabled {
-    cursor: not-allowed;
-}
-
 .input-suffix, .input-prefix {
     font-size: 13px;
     color: #888;
@@ -4541,54 +4530,6 @@ body[data-mobile="true"] .gun-card.mid-build {
 .stat-subsection-cols .stat-col {
     flex: 1;
     min-width: 0;
-}
-
-/* Deprecated overswing group */
-.deprecated-group-outer {
-    display: flex;
-    align-items: stretch;
-    margin-bottom: 4px;
-}
-
-.deprecated-group-rows {
-    flex: 0 0 auto;
-}
-
-.deprecated-group-rows > .stat-row {
-    margin-bottom: 4px;
-}
-
-.deprecated-group-bracket {
-    flex: 0 0 10px;
-    border-right: 1.5px solid #5ba8e5;
-    border-top: 1.5px solid #5ba8e5;
-    border-bottom: 1.5px solid #5ba8e5;
-    border-radius: 0 3px 3px 0;
-    margin: 1px 0 1px 8px;
-    position: relative;
-}
-
-.deprecated-group-bracket::after {
-    content: '';
-    position: absolute;
-    left: calc(100% - 1px);
-    top: 50%;
-    width: 7px;
-    height: 0;
-    border-top: 1.5px solid #5ba8e5;
-    transform: translateY(-50%);
-}
-
-.deprecated-group-note {
-    font-size: 9.5px;
-    color: #5ba8e5;
-    font-style: italic;
-    align-self: center;
-    padding-left: 4px;
-}
-
-.stat-row-deprecated > :not(.deprecated-group-note) {
-    opacity: 1;
 }
 
 /* =========================
@@ -7710,35 +7651,35 @@ var _hmt = _hmt || [];
 
 <div id="toast-container"></div>
 <!-- ***!!IMPORTANT!!*** - Cache-busting: bump ?v= on any modified files before deploying -->
-<script src="modules/config.js?v=34"></script>
-<script src="modules/state.js?v=20"></script>
-<script src="modules/lang.js?v=28"></script>
-<script src="modules/utils.js?v=22"></script>
-<script src="modules/media-viewer.js?v=9"></script>
-<script src="modules/calculations.js?v=18"></script>
+<script src="modules/config.js?v=35"></script>
+<script src="modules/state.js?v=21"></script>
+<script src="modules/lang.js?v=29"></script>
+<script src="modules/utils.js?v=23"></script>
+<script src="modules/media-viewer.js?v=10"></script>
+<script src="modules/calculations.js?v=19"></script>
 <div id="eft-tooltip"></div>
-<script src="modules/api.js?v=21"></script>
-<script src="modules/gun-list.js?v=23"></script>
-<script src="modules/stats-panel.js?v=23"></script>
-<script src="modules/tree.js?v=22"></script>
-<script src="modules/attachment-grid.js?v=22"></script>
-<script src="modules/attachment-grid-devtool.js?v=18"></script><!-- dev only: self-exits on non-localhost -->
-<script src="modules/build-preview.js?v=20"></script>
-<script src="modules/slot-selector.js?v=26"></script>
-<script src="modules/graph.js?v=11"></script>
-<script src="modules/build-manager.js?v=30"></script>
-<script src="modules/tab-manager.js?v=7"></script>
-<script src="modules/profile.js?v=9"></script>
-<script src="app.js?v=41"></script>
-<script src="lzstring.min.js?v=17"></script>
-<script src="marked.min.js?v=17"></script>
-<script src="modules/news.js?v=20"></script>
-<script src="modules/leaderboard.js?v=19"></script>
-<script src="modules/tracker.js?v=18"></script>
-<script src="modules/ammo-table.js?v=5"></script>
-<script src="modules/tracker-devtool.js?v=16"></script><!-- dev only: self-exits on non-localhost -->
-<script src="modules/desktop-settings.js?v=5"></script><!-- desktop app only: self-exits on the website -->
-<script src="modules/window-controls.js?v=2"></script><!-- desktop app only: self-exits on the website -->
+<script src="modules/api.js?v=22"></script>
+<script src="modules/gun-list.js?v=24"></script>
+<script src="modules/stats-panel.js?v=24"></script>
+<script src="modules/tree.js?v=23"></script>
+<script src="modules/attachment-grid.js?v=23"></script>
+<script src="modules/attachment-grid-devtool.js?v=19"></script><!-- dev only: self-exits on non-localhost -->
+<script src="modules/build-preview.js?v=21"></script>
+<script src="modules/slot-selector.js?v=27"></script>
+<script src="modules/graph.js?v=12"></script>
+<script src="modules/build-manager.js?v=31"></script>
+<script src="modules/tab-manager.js?v=8"></script>
+<script src="modules/profile.js?v=10"></script>
+<script src="app.js?v=42"></script>
+<script src="lzstring.min.js?v=18"></script>
+<script src="marked.min.js?v=18"></script>
+<script src="modules/news.js?v=21"></script>
+<script src="modules/leaderboard.js?v=20"></script>
+<script src="modules/tracker.js?v=19"></script>
+<script src="modules/ammo-table.js?v=6"></script>
+<script src="modules/tracker-devtool.js?v=17"></script><!-- dev only: self-exits on non-localhost -->
+<script src="modules/desktop-settings.js?v=6"></script><!-- desktop app only: self-exits on the website -->
+<script src="modules/window-controls.js?v=3"></script><!-- desktop app only: self-exits on the website -->
 <div class="beian-footer">
   <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer">粤ICP备2026028988号-1</a>
   <a href="https://beian.mps.gov.cn/#/query/webSearch?code=44197702000132" rel="noreferrer" target="_blank" class="beian-footer-gong"><img src="assets/images/备案图标.png" alt="公网安备" width="14" height="14">粤公网安备44197702000132号</a>

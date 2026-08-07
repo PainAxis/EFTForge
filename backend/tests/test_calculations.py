@@ -28,8 +28,13 @@ def _calc_eed(total_ergo: float, total_weight: float, equip_ergo_modifier: float
     return -15 * _calc_evo_weight(total_ergo, total_weight, equip_ergo_modifier)
 
 
-def _calc_arm_stamina(total_weight: float, total_ergo: float) -> float:
-    return 233.65 / (total_weight + 0.83) + 0.185 * total_ergo + 23.16
+def _calc_arm_stamina(total_weight: float, total_ergo: float, strength_level: int = 10, equip_ergo_modifier: float = 0.0) -> float:
+    b = equip_ergo_modifier
+    return (
+        (85.5 / (total_weight + 0.65))
+        + 9.15
+        + 0.06477 * total_ergo * (1 + b / 2)
+    ) / 1.04 * (1 + strength_level * 0.004)
 
 
 # ---------------------------------------------------------------------------
@@ -99,13 +104,20 @@ class TestCalcArmStamina:
         assert math.isfinite(stamina)
 
     def test_symmetry_with_frontend_formula(self):
-        # JS calcArmStamina(4.0, 50):
-        #   = 233.65 / (4.0 + 0.83) + 0.185 * 50 + 23.16
-        #   = 233.65 / 4.83 + 9.25 + 23.16
-        #   = 48.37 + 9.25 + 23.16 = 80.78
-        stamina = _calc_arm_stamina(4.0, 50)
-        expected = 233.65 / (4.0 + 0.83) + 0.185 * 50 + 23.16
+        # JS calcArmStamina(4.0, 50, 10, 0):
+        #   = ((85.5 / (4.0 + 0.65)) + 9.15 + 0.06477 * 50 * (1 + 0/2)) / 1.04 * (1 + 10 * 0.004)
+        stamina = _calc_arm_stamina(4.0, 50, 10, 0.0)
+        expected = (
+            (85.5 / (4.0 + 0.65))
+            + 9.15
+            + 0.06477 * 50 * (1 + 0.0 / 2)
+        ) / 1.04 * (1 + 10 * 0.004)
         assert abs(stamina - expected) < 0.01
+
+    def test_higher_strength_increases_stamina(self):
+        low_strength = _calc_arm_stamina(4.0, 50, strength_level=0)
+        high_strength = _calc_arm_stamina(4.0, 50, strength_level=40)
+        assert high_strength > low_strength
 
 
 # ---------------------------------------------------------------------------

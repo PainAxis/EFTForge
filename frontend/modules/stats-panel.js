@@ -829,19 +829,13 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
       <div class="stat-subsection-cols">
       <div class="stat-col">
       <div class="stat-row stat-row-weight"><span class="stat-label">${t("stats.weight")}</span><span>${totalWeight.toFixed(3)} kg</span></div>
-      <div class="deprecated-group-outer">
-        <div class="deprecated-group-rows">
-          <div class="stat-row stat-row-eed">
-            <span class="stat-label">${t("stats.eed")}<span class="stamina-info-btn${eed >= 0 && eed < 7 && EFTForge.state.currentEquipErgoModifier === 0 ? " eed-warn-active" : ""}" id="equip-ergo-info-btn" data-tooltip="${t("stats.configEquipErgoTooltip")}">i</span>:</span>
-            <span id="eed-value-span" class="${eedClass}">${eed > 0 ? "+" : ""}${eed.toFixed(1)}</span>${eed >= 0 && eed < 7 && EFTForge.state.currentEquipErgoModifier === 0 ? `<span class="eed-warning-icon" data-tooltip="${t("stats.eedWarnTooltip")}">⚠</span>` : ""}
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">${t("stats.overswing")}</span>
-            <span id="overswing-value-span" class="${overswingClass}">${data.overswing ? t("stats.yes") : t("stats.no")}</span>
-          </div>
-        </div>
-        <div class="deprecated-group-bracket"></div>
-        <span class="deprecated-group-note">${t("stats.overswingDeprecated")}</span>
+      <div class="stat-row stat-row-eed">
+        <span class="stat-label">${t("stats.eed")}<span class="stamina-info-btn${eed >= 0 && eed < 7 && EFTForge.state.currentEquipErgoModifier === 0 ? " eed-warn-active" : ""}" id="equip-ergo-info-btn" data-tooltip="${t("stats.configEquipErgoTooltip")}">i</span>:</span>
+        <span id="eed-value-span" class="${eedClass}">${eed > 0 ? "+" : ""}${eed.toFixed(1)}</span>${eed >= 0 && eed < 7 && EFTForge.state.currentEquipErgoModifier === 0 ? `<span class="eed-warning-icon" data-tooltip="${t("stats.eedWarnTooltip")}">⚠</span>` : ""}
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">${t("stats.overswing")}</span>
+        <span id="overswing-value-span" class="${overswingClass}">${data.overswing ? t("stats.yes") : t("stats.no")}</span>
       </div>
       </div>
       <div class="stat-col">
@@ -919,12 +913,12 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
           panel.id = "stamina-panel";
           panel.innerHTML = `
               <span class="beta-badge">${t("stats.beta")}</span>
-                <div class="stamina-disclaimer">${t("stats.staminaDisclaimer")} <a href="https://www.desmos.com/calculator/ym4itohyaf" target="_blank" rel="noopener" style="color:#aad4f5;">${t("stats.staminaFormulaLink")}</a></div>
-              <div class="strength-control locked" data-tooltip="${t("stats.strengthLockedTooltip")}">
-                  <label>${t("stats.strengthLv")}</label>
+                <div class="stamina-disclaimer">${t("stats.staminaDisclaimer").replace("\n", "<br>")}</div>
+              <div class="strength-control">
+                  <label style="color:#eee;">${t("stats.strengthLv")}</label>
                   <div class="strength-input-row">
-                      <input type="range" id="strength-slider" min="0" max="51" step="1" value="51" disabled />
-                      <input type="number" id="strength-input" min="0" max="51" value="51" disabled />
+                      <input type="range" id="strength-slider" min="0" max="51" step="1" value="${EFTForge.state.currentStrengthLevel}" />
+                      <input type="number" id="strength-input" min="0" max="51" value="${EFTForge.state.currentStrengthLevel}" />
                   </div>
               </div>
           `;
@@ -1017,7 +1011,7 @@ function wireStrengthControls() {
         numInput.value = EFTForge.state.currentStrengthLevel;
 
         // Recalculate arm stamina inline without triggering a DOM rebuild
-        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo);
+        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo, EFTForge.state.currentStrengthLevel, EFTForge.state.currentEquipErgoModifier);
 
         const staminaSpan = document.querySelector("#stamina-info-btn")?.closest(".stat-row")?.lastElementChild;
         if (staminaSpan) staminaSpan.textContent = armStamina.toFixed(1) + "s";
@@ -1026,7 +1020,7 @@ function wireStrengthControls() {
     slider.addEventListener("change", () => {
         // Update the display directly instead of triggering a full rebuild
         localStorage.setItem("eftforge_strength_level", EFTForge.state.currentStrengthLevel);
-        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo);
+        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo, EFTForge.state.currentStrengthLevel, EFTForge.state.currentEquipErgoModifier);
 
         const staminaSpan = document.querySelector("#stamina-info-btn")?.closest(".stat-row")?.lastElementChild;
         if (staminaSpan) staminaSpan.textContent = armStamina.toFixed(1) + "s";
@@ -1052,7 +1046,7 @@ function wireStrengthControls() {
         numInput.value = val;
         slider.value = val;
 
-        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo);
+        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo, EFTForge.state.currentStrengthLevel, EFTForge.state.currentEquipErgoModifier);
 
         const staminaSpan = document.querySelector("#stamina-info-btn")?.closest(".stat-row")?.lastElementChild;
         if (staminaSpan) staminaSpan.textContent = armStamina.toFixed(1) + "s";
@@ -1101,7 +1095,7 @@ function wireEquipErgoControls() {
             overswingSpan.textContent = overswing ? t("stats.yes") : t("stats.no");
         }
 
-        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo);
+        const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo, EFTForge.state.currentStrengthLevel, EFTForge.state.currentEquipErgoModifier);
         const staminaSpan = document.querySelector("#stamina-info-btn")?.closest(".stat-row")?.lastElementChild;
         if (staminaSpan) staminaSpan.textContent = armStamina.toFixed(1) + "s";
     }

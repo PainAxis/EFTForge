@@ -514,7 +514,7 @@ window.EFTForge.ammoTable = (function () {
     var _CALIBER_TYPE_LABELS = ['ammo.calType.rifle', 'ammo.calType.pistol', 'ammo.calType.shotgun', 'ammo.calType.special'];
 
     var _CALIBER_TYPE = {
-        'Caliber545x39': 0, 'Caliber556x45NATO': 0, 'Caliber68x51': 0,
+        'Caliber545x39': 0, 'Caliber556x45NATO': 0, 'Caliber58x42': 0, 'Caliber68x51': 0,
         'Caliber762x39': 0, 'Caliber762x51': 0, 'Caliber762x54R': 0,
         'Caliber762x35': 0, 'Caliber784x49': 0, 'Caliber86x70': 0,
         'Caliber366TKM': 0, 'Caliber93x64': 0, 'Caliber9x39': 0,

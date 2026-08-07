@@ -1,7 +1,11 @@
 window.EFTForge = window.EFTForge || {};
 
-function calcArmStamina(weight, ergo) {
-    return 233.65 / (weight + 0.83) + 0.185 * ergo + 23.16;
+function calcArmStamina(weight, ergo, strengthLevel, b = 0) {
+    return (
+        (85.5 / (weight + 0.65))
+        + 9.15
+        + 0.06477 * ergo * (1 + b / 2)
+    ) / 1.04 * (1 + strengthLevel * 0.004);
 }
 
 /**
