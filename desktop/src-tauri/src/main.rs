@@ -422,15 +422,52 @@ fn main() {
                     .decorations(false)
                     // WebView2's native accelerator keys (F5, Ctrl+P, Ctrl+F, ...)
                     // get disabled below via AreBrowserAcceleratorKeysEnabled, which
-                    // hands those key events to the page instead of eating them - so
-                    // re-implement refresh here to keep F5 / Ctrl+F5 working.
+                    // hands those key events to the page instead of eating them.
+                    // Re-implement the ones we want: F5/Ctrl+Shift+R reload and
+                    // Ctrl+Scroll page zoom.
                     .initialization_script(
-                        r#"window.addEventListener('keydown', function (e) {
-                            if (e.key === 'F5' || e.keyCode === 116) {
-                                e.preventDefault();
-                                location.reload();
+                        r#"(function() {
+                            window.addEventListener('keydown', function(e) {
+                                if (e.key === 'F5' || e.keyCode === 116) {
+                                    e.preventDefault();
+                                    location.reload();
+                                } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'R' || e.key === 'r')) {
+                                    e.preventDefault();
+                                    location.reload();
+                                }
+                            }, true);
+                            var ZOOM_LEVELS = [0.25,0.33,0.5,0.67,0.75,0.8,0.9,1.0,1.1,1.25,1.5,1.75,2.0,2.5,3.0,4.0,5.0];
+                            var _zi = 7; // index of 1.0
+                            var _zoomEl = null;
+                            var _zoomTimer = null;
+                            function _showZoom(z) {
+                                if (!_zoomEl) {
+                                    _zoomEl = document.createElement('div');
+                                    _zoomEl.style.cssText = 'position:fixed;bottom:20px;right:20px;' +
+                                        'z-index:2147483647;background:rgba(0,0,0,0.65);color:#fff;' +
+                                        'font:600 13px/1.4 system-ui,sans-serif;padding:5px 12px;' +
+                                        'border-radius:4px;pointer-events:none;opacity:0;' +
+                                        'transition:opacity 0.15s ease;';
+                                    (document.body || document.documentElement).appendChild(_zoomEl);
+                                }
+                                _zoomEl.textContent = Math.round(z * 100) + '%';
+                                _zoomEl.style.zoom = 1 / z;
+                                _zoomEl.style.opacity = '1';
+                                clearTimeout(_zoomTimer);
+                                _zoomTimer = setTimeout(function() {
+                                    if (_zoomEl) _zoomEl.style.opacity = '0';
+                                }, 1500);
                             }
-                        }, true);"#,
+                            window.addEventListener('wheel', function(e) {
+                                if (!e.ctrlKey || e.defaultPrevented) return;
+                                e.preventDefault();
+                                if (e.deltaY < 0 && _zi < ZOOM_LEVELS.length - 1) _zi++;
+                                else if (e.deltaY > 0 && _zi > 0) _zi--;
+                                var z = ZOOM_LEVELS[_zi];
+                                document.documentElement.style.zoom = z;
+                                _showZoom(z);
+                            }, { passive: false });
+                        })();"#,
                     );
             #[cfg(windows)]
             {

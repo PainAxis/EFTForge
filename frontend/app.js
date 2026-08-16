@@ -42,6 +42,7 @@ function renderFilteredGunList(forceReset = false) {
 
 init();
 mobileWarning();
+largeScreenHint();
 initTarkovClock();
 initHeaderExpand();
 initHeaderFades();
@@ -707,6 +708,17 @@ function initTarkovClock() {
 /* ===========================
    MOBILE WARNING
 =========================== */
+
+function largeScreenHint() {
+    if (screen.width <= 1920) return;
+    try { if (localStorage.getItem("eftforge_zoom_hint")) return; } catch {}
+    const { t } = EFTForge.lang;
+    showToast(t("toast.largeScreenTitle"), t("toast.largeScreenMsg"), 0, "#4a90d9", [
+        { label: t("tab.manyTabsDismiss"), onClick: () => {
+            try { localStorage.setItem("eftforge_zoom_hint", "1"); } catch {}
+        }},
+    ]);
+}
 
 function mobileWarning() {
     if (!isMobileLayout()) return;
