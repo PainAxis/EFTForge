@@ -2,7 +2,9 @@ window.EFTForge = window.EFTForge || {};
 
 /* ============================================================
    STAT TRACKER MODULE
-   Displays stat changes in a 3-column layout: BUFFS / NERFS / MIXED.
+   Displays stat changes in a 4-column layout: NEW / BUFFS / NERFS / MIXED.
+   NEW covers weapons, attachments, and ammo the db picked up that weren't
+   present in the previous sync (see backend _build_new_item_logs).
    Supports search and weapon/attachment category filtering.
    Data window: last 7 days. Badge shows total combined items.
    Each column renders incrementally via IntersectionObserver so
@@ -17,6 +19,10 @@ window.EFTForge.tracker = (function () {
     var _searchTimer = null;
     var _WINDOW_DAYS = 7;
     var _PAGE_SIZE   = 40;   // items rendered per IntersectionObserver trigger
+
+    // Matches backend sync_tarkov_dev._NEW_ITEM_STAT - flags a row as "brand new
+    // item" rather than a stat diff.
+    var _NEW_ITEM_STAT = 'new_item';
 
     // Per-column incremental render state
     var _colObservers = {};  // type -> IntersectionObserver
@@ -145,6 +151,9 @@ window.EFTForge.tracker = (function () {
     =========================== */
 
     function _classify(combinedEntry) {
+        if (combinedEntry.stats.length === 1 && combinedEntry.stats[0].stat_name === _NEW_ITEM_STAT) {
+            return 'new';
+        }
         var hasBuff = false, hasNerf = false;
         for (var i = 0; i < combinedEntry.stats.length; i++) {
             var s = combinedEntry.stats[i];
@@ -193,6 +202,7 @@ window.EFTForge.tracker = (function () {
             'tracker-filter-weapons':    'tracker.filter.weapons',
             'tracker-filter-attachments':'tracker.filter.attachments',
             'tracker-filter-ammo':       'tracker.filter.ammo',
+            'tracker-col-label-new':     'tracker.col.new',
             'tracker-col-label-buff':    'tracker.col.buffs',
             'tracker-col-label-nerf':    'tracker.col.nerfs',
             'tracker-col-label-mixed':   'tracker.col.mixed',
@@ -209,7 +219,7 @@ window.EFTForge.tracker = (function () {
         if (hint)    hint.style.display = 'none';
         if (columns) columns.style.display = '';
         var msg = EFTForge.lang.t('tracker.loading');
-        ['buff', 'nerf', 'mixed'].forEach(function (col) {
+        ['new', 'buff', 'nerf', 'mixed'].forEach(function (col) {
             _destroyColumnObserver(col);
             var el = document.getElementById('tracker-body-' + col);
             if (el) el.innerHTML = '<div class="tracker-empty">' + _esc(msg) + '</div>';
@@ -220,7 +230,7 @@ window.EFTForge.tracker = (function () {
 
     function _showError() {
         var msg = EFTForge.lang.t('tracker.loadError');
-        ['buff', 'nerf', 'mixed'].forEach(function (col) {
+        ['new', 'buff', 'nerf', 'mixed'].forEach(function (col) {
             _destroyColumnObserver(col);
             var el = document.getElementById('tracker-body-' + col);
             if (el) el.innerHTML = '<div class="tracker-empty">' + _esc(msg) + '</div>';
@@ -269,7 +279,7 @@ window.EFTForge.tracker = (function () {
                 hint.style.display = '';
             }
             if (columns) columns.style.display = 'none';
-            ['buff', 'nerf', 'mixed'].forEach(function (col) { _destroyColumnObserver(col); });
+            ['new', 'buff', 'nerf', 'mixed'].forEach(function (col) { _destroyColumnObserver(col); });
             return;
         }
         if (hint)    hint.style.display = 'none';
@@ -277,10 +287,12 @@ window.EFTForge.tracker = (function () {
 
         var filtered = _applyFilters(items);
 
+        var news  = filtered.filter(function (i) { return _classify(i) === 'new';   });
         var buffs = filtered.filter(function (i) { return _classify(i) === 'buff';  });
         var nerfs = filtered.filter(function (i) { return _classify(i) === 'nerf';  });
         var mixed = filtered.filter(function (i) { return _classify(i) === 'mixed'; });
 
+        _renderColumn('new',   news,   lang);
         _renderColumn('buff',  buffs,  lang);
         _renderColumn('nerf',  nerfs,  lang);
         _renderColumn('mixed', mixed,  lang);
@@ -289,6 +301,7 @@ window.EFTForge.tracker = (function () {
             var el = document.getElementById(id);
             if (el) el.textContent = val;
         };
+        setCount('tracker-count-new',   news.length);
         setCount('tracker-count-buff',  buffs.length);
         setCount('tracker-count-nerf',  nerfs.length);
         setCount('tracker-count-mixed', mixed.length);
@@ -337,33 +350,40 @@ window.EFTForge.tracker = (function () {
             : '<div class="tracker-item-icon tracker-item-icon-placeholder"></div>';
 
         var t = EFTForge.lang.t;
+        var isNew = entry.stats.length === 1 && entry.stats[0].stat_name === _NEW_ITEM_STAT;
+        var newBadgeHtml = isNew ? '<span class="tracker-new-badge">+</span>' : '';
         var statsHtml = '';
-        entry.stats.forEach(function (s) {
-            var statLabel   = t('tracker.statLabel.' + s.stat_name) || s.stat_name;
-            var lowerBetter = !!_LOWER_IS_BETTER[s.stat_name];
-            var improved    = (s.old_value != null && s.new_value != null)
-                              ? (lowerBetter ? s.new_value < s.old_value : s.new_value > s.old_value)
-                              : false;
-            var changeClass = improved ? 'tracker-stat-up' : 'tracker-stat-down';
-            var oldStr      = _fmtValForStat(s.stat_name, s.old_value);
-            var newStr      = _fmtValForStat(s.stat_name, s.new_value);
-            var pctStr      = _fmtPct(s.old_value, s.new_value);
-            statsHtml += (
-                '<div class="tracker-stat-row">' +
-                '<span class="tracker-stat-label">' + _esc(statLabel) + '</span>' +
-                '<span class="tracker-stat-change ' + changeClass + '">' +
-                _esc(oldStr) + ' → ' + _esc(newStr) +
-                '<span class="tracker-stat-pct">(' + _esc(pctStr) + ')</span>' +
-                '</span>' +
-                '</div>'
-            );
-        });
+        if (!isNew) {
+            entry.stats.forEach(function (s) {
+                var statLabel   = t('tracker.statLabel.' + s.stat_name) || s.stat_name;
+                var lowerBetter = !!_LOWER_IS_BETTER[s.stat_name];
+                var improved    = (s.old_value != null && s.new_value != null)
+                                  ? (lowerBetter ? s.new_value < s.old_value : s.new_value > s.old_value)
+                                  : false;
+                var changeClass = improved ? 'tracker-stat-up' : 'tracker-stat-down';
+                var oldStr      = _fmtValForStat(s.stat_name, s.old_value);
+                var newStr      = _fmtValForStat(s.stat_name, s.new_value);
+                var pctStr      = _fmtPct(s.old_value, s.new_value);
+                statsHtml += (
+                    '<div class="tracker-stat-row">' +
+                    '<span class="tracker-stat-label">' + _esc(statLabel) + '</span>' +
+                    '<span class="tracker-stat-change ' + changeClass + '">' +
+                    _esc(oldStr) + ' → ' + _esc(newStr) +
+                    '<span class="tracker-stat-pct">(' + _esc(pctStr) + ')</span>' +
+                    '</span>' +
+                    '</div>'
+                );
+            });
+        }
 
         return (
             '<div class="tracker-entry" style="--tr-i:' + animIdx + '">' +
             iconHtml +
             '<div class="tracker-entry-info">' +
-            '<div class="tracker-item-name">' + _esc(name) + '</div>' +
+            '<div class="tracker-item-name">' +
+            '<span class="tracker-item-name-wrap"><span class="marquee-text">' + _esc(name) + '</span></span>' +
+            newBadgeHtml +
+            '</div>' +
             statsHtml +
             '</div>' +
             '</div>'
@@ -401,6 +421,12 @@ window.EFTForge.tracker = (function () {
             body.insertAdjacentHTML('beforeend', html);
         }
 
+        // Re-scan the whole body for marquee targets - cheap at this page size, and
+        // simpler than diffing which nodes are new. Tear down the previous scope first
+        // so hovering doesn't double-attach listeners to already-rendered entries.
+        if (state.marqueeDispose) state.marqueeDispose();
+        state.marqueeDispose = EFTForge.utils._initMarqueeText(body, { hoverOnly: true, hoverTarget: '.tracker-entry' });
+
         state.cursor = end;
 
         if (end < flat.length) {
@@ -427,6 +453,7 @@ window.EFTForge.tracker = (function () {
         if (!body) return;
 
         _destroyColumnObserver(type);
+        if (_colState[type]?.marqueeDispose) _colState[type].marqueeDispose();
 
         if (!items.length) {
             body.innerHTML = '<div class="tracker-empty">-</div>';
@@ -478,10 +505,17 @@ window.EFTForge.tracker = (function () {
         if (statName === 'center_of_impact') {
             return parseFloat((v * 34.36).toFixed(2)) + ' MOA';
         }
-        if (statName === 'recoil_modifier' || statName === 'accuracy_modifier') {
+        if (statName === 'recoil_modifier') {
+            // Stored as a fraction (e.g. -0.05) - scale to percent for display.
             var pv   = v * 100;
             var sign = pv >= 0 ? '+' : '';
             return sign + parseFloat(pv.toFixed(1)) + '%';
+        }
+        if (statName === 'accuracy_modifier') {
+            // Unlike recoil_modifier, already stored in whole-percent scale
+            // (see sync_tarkov_dev.py's `round(acc * 100, 4)`) - no further scaling needed.
+            var aSign = v >= 0 ? '+' : '';
+            return aSign + parseFloat(v.toFixed(1)) + '%';
         }
         if (statName === 'heat_factor' || statName === 'cooling_factor' || statName === 'durability_burn_factor') {
             var fv    = (v - 1) * 100;

@@ -60,12 +60,18 @@
     var _ATTACHMENT_STATS  = ['ergonomics_modifier', 'recoil_modifier', 'accuracy_modifier', 'weight'];
     var _WEAPON_STATS      = ['center_of_impact'];
 
+    // Matches backend sync_tarkov_dev._NEW_ITEM_STAT
+    var _NEW_ITEM_STAT = 'new_item';
+
     var _STAT_RANGES = {
-        ergonomics_modifier: { min: -15,  max: 20,   step: 1,     decimals: 0 },
-        recoil_modifier:     { min: -15,  max: 10,   step: 1,     decimals: 0 },
-        accuracy_modifier:   { min: -15,  max: 15,   step: 1,     decimals: 0 },
-        weight:              { min: 0.05, max: 1.8,  step: 0.05,  decimals: 2 },
-        center_of_impact:    { min: 0.2,  max: 1.5,  step: 0.025, decimals: 3 },
+        ergonomics_modifier: { min: -15,   max: 20,   step: 1,     decimals: 0 },
+        // Fraction, not whole percent (e.g. -0.05 = -5%) - matches real recoil_modifier
+        // storage. tracker.js's formatter scales this by 100 for display.
+        recoil_modifier:     { min: -0.15, max: 0.10, step: 0.01,  decimals: 2 },
+        // Already whole-percent scale (e.g. 7 = +7%) - matches real accuracy_modifier storage.
+        accuracy_modifier:   { min: -15,   max: 15,   step: 1,     decimals: 0 },
+        weight:              { min: 0.05,  max: 1.8,  step: 0.05,  decimals: 2 },
+        center_of_impact:    { min: 0.2,   max: 1.5,  step: 0.025, decimals: 3 },
     };
 
     // ============================================================
@@ -114,6 +120,19 @@
         };
     }
 
+    function _makeNewItemEntry(item, date) {
+        return {
+            item_id:      'dev_' + Math.random().toString(36).slice(2, 9),
+            item_name:    item.name,
+            item_name_zh: item.name_zh,
+            icon_link:    null,
+            stat_name:    _NEW_ITEM_STAT,
+            old_value:    null,
+            new_value:    null,
+            detected_at:  date,
+        };
+    }
+
     function injectNewBatch() {
         var entries = [];
         var numDates = 3 + Math.floor(Math.random() * 3);
@@ -126,6 +145,11 @@
                     ? _makeEntry(_pick(_FAKE_WEAPONS),     _WEAPON_STATS,     date)
                     : _makeEntry(_pick(_FAKE_ATTACHMENTS), _ATTACHMENT_STATS, date)
                 );
+            }
+            var newCount = Math.floor(Math.random() * 3);
+            for (var n = 0; n < newCount; n++) {
+                var pool = Math.random() < 0.25 ? _FAKE_WEAPONS : _FAKE_ATTACHMENTS;
+                entries.push(_makeNewItemEntry(_pick(pool), date));
             }
         }
 

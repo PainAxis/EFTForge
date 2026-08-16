@@ -6390,6 +6390,7 @@ button.build-tag-chip.active {
   letter-spacing: 2px;
   border-bottom: 1px solid;
 }
+.tracker-col-new .tracker-col-header  { background: #0d1420; color: #64b5f6; border-bottom-color: #17294d; }
 .tracker-col-buff .tracker-col-header { background: #0d1a0d; color: #81c784; border-bottom-color: #173317; }
 .tracker-col-nerf .tracker-col-header { background: #1a0d0d; color: #ef9a9a; border-bottom-color: #331717; }
 .tracker-col-mixed .tracker-col-header { background: #1a1700; color: #f5c542; border-bottom-color: #333000; }
@@ -6473,13 +6474,20 @@ button.build-tag-chip.active {
   min-width: 0;
 }
 .tracker-item-name {
+  display: flex;
+  align-items: center;
   font-size: 12px;
   color: #ddd;
   font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   margin-bottom: 2px;
+}
+.tracker-item-name-wrap {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.tracker-item-name-wrap .marquee-text {
+  white-space: nowrap;
 }
 .tracker-stat-row {
   display: flex;
@@ -6507,6 +6515,21 @@ button.build-tag-chip.active {
   font-size: 10px;
   font-weight: 700;
   opacity: 0.8;
+}
+.tracker-new-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: rgba(100, 181, 246, 0.15);
+  color: #64b5f6;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
 }
 
 @media (max-width: 640px) {
@@ -7634,6 +7657,10 @@ var _hmt = _hmt || [];
   </div>
   <div id="tracker-no-change-hint" class="tracker-no-change-hint" style="display:none;"></div>
   <div class="tracker-columns" id="tracker-columns">
+    <div class="tracker-col tracker-col-new">
+      <div class="tracker-col-header"><span id="tracker-col-label-new">NEW</span><span class="tracker-col-count" id="tracker-count-new"></span></div>
+      <div class="tracker-col-body" id="tracker-body-new"><div class="tracker-empty">Loading...</div></div>
+    </div>
     <div class="tracker-col tracker-col-buff">
       <div class="tracker-col-header"><span id="tracker-col-label-buff">BUFFS</span><span class="tracker-col-count" id="tracker-count-buff"></span></div>
       <div class="tracker-col-body" id="tracker-body-buff"><div class="tracker-empty">Loading...</div></div>
@@ -7653,7 +7680,7 @@ var _hmt = _hmt || [];
 <!-- ***!!IMPORTANT!!*** - Cache-busting: bump ?v= on any modified files before deploying -->
 <script src="modules/config.js?v=35"></script>
 <script src="modules/state.js?v=21"></script>
-<script src="modules/lang.js?v=29"></script>
+<script src="modules/lang.js?v=30"></script>
 <script src="modules/utils.js?v=23"></script>
 <script src="modules/media-viewer.js?v=10"></script>
 <script src="modules/calculations.js?v=19"></script>
@@ -7675,9 +7702,9 @@ var _hmt = _hmt || [];
 <script src="marked.min.js?v=18"></script>
 <script src="modules/news.js?v=21"></script>
 <script src="modules/leaderboard.js?v=20"></script>
-<script src="modules/tracker.js?v=19"></script>
+<script src="modules/tracker.js?v=23"></script>
 <script src="modules/ammo-table.js?v=6"></script>
-<script src="modules/tracker-devtool.js?v=17"></script><!-- dev only: self-exits on non-localhost -->
+<script src="modules/tracker-devtool.js?v=19"></script><!-- dev only: self-exits on non-localhost -->
 <script src="modules/desktop-settings.js?v=6"></script><!-- desktop app only: self-exits on the website -->
 <script src="modules/window-controls.js?v=3"></script><!-- desktop app only: self-exits on the website -->
 <div class="beian-footer">

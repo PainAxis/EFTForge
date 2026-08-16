@@ -102,6 +102,10 @@ def _floats_differ(a, b) -> bool:
 
 _NOT_YET_TRACKED = object()  # sentinel: distinguishes "stat wasn't tracked in the old snapshot" from "stat was tracked and its value was null"
 
+# stat_name used to flag a changelog row as "brand new item" rather than a stat
+# diff - old_value/new_value are left null and the frontend renders it distinctly.
+_NEW_ITEM_STAT = "new_item"
+
 
 def _build_change_logs(db, snapshot: dict, sync_source: str, sync_time: datetime) -> list:
     """Compare current DB state against pre-wipe snapshot, return change log rows."""
@@ -139,6 +143,39 @@ def _build_change_logs(db, snapshot: dict, sync_source: str, sync_time: datetime
                     sync_source=sync_source,
                 ))
 
+    return logs
+
+
+def _build_new_item_logs(db, snapshot: dict, sync_source: str, sync_time: datetime) -> list:
+    """Flag items that exist now but weren't in the pre-sync snapshot as brand new
+    additions (new weapon, attachment, or ammo added to the game/DB), so the tracker
+    can surface them even though there's no prior value to diff against.
+
+    Skipped entirely when snapshot is empty (first-ever sync / snapshot file missing)
+    so that run doesn't log every single item in the DB as "new".
+    """
+    if not snapshot:
+        return []
+
+    attachment_ids = {
+        row[0] for row in db.query(SlotAllowedItem.allowed_item_id).distinct().all()
+    }
+
+    logs = []
+    for item in db.query(Item).all():
+        if item.id in snapshot:
+            continue
+        if not (item.is_weapon or item.is_ammo or item.id in attachment_ids):
+            continue
+        logs.append(StatChangeLog(
+            item_id=item.id,
+            item_name=item.name,
+            stat_name=_NEW_ITEM_STAT,
+            old_value=None,
+            new_value=None,
+            detected_at=sync_time,
+            sync_source=sync_source,
+        ))
     return logs
 
 
@@ -842,8 +879,10 @@ def sync_items(sync_source: str = "scheduled"):
     db.commit()
     logger.info("Trader prices synced (%d items).", len(updates))
 
-    # Diff new stats against the pre-sync snapshot and persist any changes
+    # Diff new stats against the pre-sync snapshot and persist any changes,
+    # plus flag items that are entirely new since the last sync.
     change_logs = _build_change_logs(db, pre_sync_snapshot, sync_source, sync_time)
+    change_logs += _build_new_item_logs(db, pre_sync_snapshot, sync_source, sync_time)
     if change_logs:
         changelog_db.bulk_save_objects(change_logs)
         changelog_db.commit()
