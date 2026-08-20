@@ -66,10 +66,24 @@ def _sync_to_scratch():
     subprocess.run([sys.executable, "sync_tarkov_dev.py"], check=True, env=env)
 
 
+def _table_columns(conn, schema, table):
+    return [row[1] for row in conn.execute(f"PRAGMA {schema}.table_info({table})")]
+
+
 def _copy_scratch_into_live():
     """Replaces the live tables' rows with the scratch DB's in one transaction,
     so any query running against tarkov.db sees either the full old data or
-    the full new data - never a table that's been cleared but not yet refilled."""
+    the full new data - never a table that's been cleared but not yet refilled.
+
+    Copies by explicit column NAME, not "SELECT *" position - the live table's
+    columns are in ALTER-TABLE-append order (i.e. always growing at the end),
+    which does not necessarily match the current model's declaration order in
+    scratch, so a positional copy can silently shuffle values into the wrong
+    columns. Only columns present in both tables are copied; a column that
+    exists solely in scratch (freshly added to the model, not yet migrated
+    into the live schema) is skipped for this run and picked up once main.py's
+    startup migration adds it to the live table.
+    """
     conn = sqlite3.connect(DB_FILE, timeout=10)
     try:
         conn.execute("ATTACH DATABASE ? AS scratch", (SCRATCH_DB,))
@@ -77,7 +91,10 @@ def _copy_scratch_into_live():
         for table in _SYNC_TABLES:
             conn.execute(f"DELETE FROM {table}")
         for table in reversed(_SYNC_TABLES):
-            conn.execute(f"INSERT INTO {table} SELECT * FROM scratch.{table}")
+            live_cols = _table_columns(conn, "main", table)
+            scratch_cols = set(_table_columns(conn, "scratch", table))
+            cols = ", ".join(c for c in live_cols if c in scratch_cols)
+            conn.execute(f"INSERT INTO {table} ({cols}) SELECT {cols} FROM scratch.{table}")
         conn.commit()
     except Exception:
         conn.rollback()

@@ -626,7 +626,7 @@ function applyAttachmentSort() {
   if (EFTForge.state.purchasableOnly) {
       itemsToRender = itemsToRender.filter(entry => {
           const item = entry.item;
-          if (!item.trader_vendor || item.trader_price_rub == null) return true;
+          if (!item.trader_vendor || item.trader_price_rub == null) return false;
           const requiredLevel = item.trader_min_level ?? 1;
           const userLevel = EFTForge.state.traderLevels[item.trader_vendor] ?? 4;
           return userLevel >= requiredLevel;
@@ -1982,7 +1982,7 @@ function applyComboSort() {
     const dir    = sortDir === "asc" ? 1 : -1;
 
     const isBuyable = item => {
-        if (!item.trader_vendor || item.trader_price_rub == null) return true;
+        if (!item.trader_vendor || item.trader_price_rub == null) return false;
         return (EFTForge.state.traderLevels[item.trader_vendor] ?? 4) >= (item.trader_min_level ?? 1);
     };
 
