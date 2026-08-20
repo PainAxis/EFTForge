@@ -141,7 +141,7 @@
     /* ---------------- modal ---------------- */
 
     async function showPanel() {
-        const overlay = _createModalOverlay("desktop-settings-modal", t("dt.title"), { maxWidth: "500px" });
+        const overlay = _createModalOverlay("desktop-settings-modal", t("stg.title"), { maxWidth: "500px" });
         if (!overlay) return;
         if (_syncPollTimer) { clearInterval(_syncPollTimer); _syncPollTimer = null; }
 
@@ -241,11 +241,21 @@
 
             <hr class="modal-divider">
 
+            <div class="modal-section" style="gap:6px;">
+                <div class="modal-label">${t("perf.section")}</div>
+                <div class="hidden-stats-grid" id="dt-perf-body"></div>
+            </div>
+
+            <hr class="modal-divider">
+
             <div style="font-size:11px; color:#555; line-height:1.7; word-break:break-all;">
                 ${t("dt.appVersion")}${escapeHtml(EFTForge.config.APP_VERSION)}<br>
                 ${t("dt.dataDir")}${escapeHtml(info.data_dir || "?")}
             </div>
         `;
+
+        // --- performance metrics: 1s refresh, only while this modal is open ---
+        EFTForge.perfMetrics.mount(body.querySelector("#dt-perf-body"), body.closest(".modal-overlay"));
 
         // --- community mode ---
         // Picking a radio only stages the choice in the UI - it is NOT sent to

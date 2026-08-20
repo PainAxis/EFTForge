@@ -17,6 +17,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use sysinfo::{Pid, ProcessesToUpdate, System};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -281,6 +282,109 @@ fn exit_app(handle: tauri::AppHandle) {
     handle.exit(0);
 }
 
+/// Held across get_perf_metrics calls so per-process CPU% (which sysinfo
+/// derives from the delta since the *previous* refresh of that pid) is
+/// meaningful from the very first poll instead of reading 0 until a second
+/// call happens to land - the settings modal polls this every second, so in
+/// practice consecutive calls are already spaced far enough apart for
+/// sysinfo's own MINIMUM_CPU_UPDATE_INTERVAL either way, but a fresh
+/// System per call would still throw away that history for no reason.
+struct PerfState(Mutex<System>);
+
+#[derive(serde::Serialize)]
+struct ProcMetrics {
+    mem_mb: f64,
+    cpu_pct: f32,
+    uptime_secs: u64,
+}
+
+#[derive(serde::Serialize)]
+struct PerfMetrics {
+    app: ProcMetrics,
+    // None when the sidecar isn't tracked yet (still starting) or has died -
+    // the frontend shows that as an explicit "not running" state rather than
+    // silently dropping the row, since a sidecar that's supposed to be there
+    // but isn't is itself worth surfacing.
+    backend: Option<ProcMetrics>,
+    sys_used_mem_mb: f64,
+    sys_total_mem_mb: f64,
+}
+
+/// WebView2 (like any Chromium embed) is multi-process - the browser/GPU/
+/// renderer/network/crashpad processes that do the actual work of running
+/// the page all live under this one as children (and grandchildren), not as
+/// this process itself. Reading just root's own PID massively undercounts
+/// "what the app is using" - this walks the full descendant tree so the
+/// reported number matches what Task Manager's grouped app entry covers.
+/// Same logic applies to the backend: its --sync-worker re-invocation
+/// (see create_sidecar_job's docs above) runs as a child process too.
+fn tree_pids(sys: &System, root: Pid) -> Vec<Pid> {
+    let mut children_of: std::collections::HashMap<Pid, Vec<Pid>> = std::collections::HashMap::new();
+    for (pid, process) in sys.processes() {
+        if let Some(parent) = process.parent() {
+            children_of.entry(parent).or_default().push(*pid);
+        }
+    }
+
+    let mut result = vec![root];
+    let mut stack = vec![root];
+    while let Some(pid) = stack.pop() {
+        if let Some(children) = children_of.get(&pid) {
+            for &child in children {
+                result.push(child);
+                stack.push(child);
+            }
+        }
+    }
+    result
+}
+
+/// Sums memory and CPU% across root's whole process tree; uptime stays
+/// root's own (summing uptimes across a tree is meaningless - root is the
+/// one that's been alive since the app/sidecar actually started).
+fn tree_metrics(sys: &System, root: Pid) -> Option<ProcMetrics> {
+    let root_process = sys.process(root)?;
+    let uptime_secs = root_process.run_time();
+
+    let mut mem_mb = 0.0;
+    let mut cpu_pct = 0.0f32;
+    for pid in tree_pids(sys, root) {
+        if let Some(p) = sys.process(pid) {
+            mem_mb += p.memory() as f64 / 1_048_576.0;
+            cpu_pct += p.cpu_usage();
+        }
+    }
+
+    Some(ProcMetrics { mem_mb, cpu_pct, uptime_secs })
+}
+
+/// Real OS-level memory/CPU for this app's whole process tree (the Tauri
+/// shell plus every WebView2 child it spawns) and the eftforge-backend
+/// sidecar's tree, plus whole-machine RAM, shown live in the settings
+/// modal's Performance section (frontend/modules/perf-metrics.js). Browser
+/// APIs like performance.memory only see the JS heap, not the actual
+/// process(es) or the machine - this is what the website build can't get,
+/// and the reason this is a Tauri command instead of just JS on both sides.
+#[tauri::command]
+fn get_perf_metrics(perf: tauri::State<PerfState>, backend: tauri::State<BackendChild>) -> PerfMetrics {
+    let app_pid = Pid::from_u32(std::process::id());
+    let backend_pid = backend.0.lock().unwrap().as_ref().map(|c| Pid::from_u32(c.pid()));
+
+    let mut sys = perf.0.lock().unwrap();
+    // Need the full process table (not just our known pids) to walk parent
+    // links and find the WebView2/sync-worker children - refresh_processes
+    // can no longer target just app_pid/backend_pid like before.
+    sys.refresh_processes(ProcessesToUpdate::All, true);
+    sys.refresh_memory();
+
+    PerfMetrics {
+        app: tree_metrics(&sys, app_pid).unwrap_or(ProcMetrics { mem_mb: 0.0, cpu_pct: 0.0, uptime_secs: 0 }),
+        backend: backend_pid.and_then(|bp| tree_metrics(&sys, bp)),
+        sys_used_mem_mb: sys.used_memory() as f64 / 1_048_576.0,
+        sys_total_mem_mb: sys.total_memory() as f64 / 1_048_576.0,
+    }
+}
+
 /// Ties the sidecar's lifetime to this process at the OS level, so it cannot
 /// be orphaned no matter how this process ends - normal exit, a crash, or a
 /// forced kill from Task Manager/taskkill. The RunEvent::Exit handler below
@@ -396,9 +500,11 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             manual_check_for_updates,
             close_to_tray,
-            exit_app
+            exit_app,
+            get_perf_metrics
         ])
         .manage(BackendChild(Mutex::new(None)))
+        .manage(PerfState(Mutex::new(System::new())))
         .setup(|app| {
             let handle = app.handle().clone();
             let data_dir = resolve_data_dir();

@@ -845,6 +845,11 @@ function _initSwipeObserver() {
 function showAboutDialog() {
     if (document.getElementById("about-dialog")) return;
 
+    // Desktop already has its own Performance section in the desktop
+    // settings modal (desktop-settings.js) - only show it here on the
+    // website, which has no separate settings modal of its own anymore.
+    const _showPerf = !(EFTForge.config && EFTForge.config.IS_DESKTOP);
+
     const overlay = document.createElement("div");
     overlay.id = "about-dialog";
     overlay.className = "modal-overlay";
@@ -896,6 +901,15 @@ function showAboutDialog() {
                     </p>
                 </div>
 
+                ${_showPerf ? `
+                <hr class="modal-divider" style="margin:0;" />
+
+                <div class="modal-section" style="gap:6px;">
+                    <div class="modal-label">${t("perf.section")}</div>
+                    <div class="hidden-stats-grid" id="about-perf-body"></div>
+                </div>
+                ` : ""}
+
                 <hr class="modal-divider" style="margin:0;" />
 
                 <div style="display:flex; flex-direction:column; align-items:center; gap:12px;">
@@ -926,6 +940,7 @@ function showAboutDialog() {
     `;
 
     document.body.appendChild(overlay);
+    if (_showPerf) EFTForge.perfMetrics.mount(document.getElementById("about-perf-body"), overlay);
     document.getElementById("about-modal-close").addEventListener("click", () => overlay.remove());
     let _mdOnBackdrop = false;
     overlay.addEventListener("mousedown", e => { _mdOnBackdrop = e.target === overlay; });

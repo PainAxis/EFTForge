@@ -14,6 +14,7 @@ fn main() {
                 "close_to_tray",
                 "exit_app",
                 "manual_check_for_updates",
+                "get_perf_metrics",
             ]),
         ),
     )
