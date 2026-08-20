@@ -74,6 +74,11 @@ app.add_middleware(
     allow_headers=["Content-Type", "X-Admin-Key", "X-Client-ID"],
 )
 
+if DESKTOP_MODE:
+    # Picked up by the Tauri launcher and forwarded to the splash screen -
+    # see backend/desktop_main.py and ui-shell/index.html.
+    print("EFTFORGE_STATUS=preparing_database", flush=True)
+
 Base.metadata.create_all(bind=engine)
 RatingsBase.metadata.create_all(bind=ratings_engine)
 BuildsBase.metadata.create_all(bind=builds_engine)
@@ -216,6 +221,9 @@ def _migrate_slots_db():
             conn.execute(text("ALTER TABLE slots ADD COLUMN slot_game_name TEXT"))
             conn.commit()
 
+
+if DESKTOP_MODE:
+    print("EFTFORGE_STATUS=applying_updates", flush=True)
 
 _migrate_builds_db()
 _migrate_items_db()

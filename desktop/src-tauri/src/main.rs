@@ -789,7 +789,19 @@ fn main() {
                         CommandEvent::Stdout(bytes) => {
                             let line = String::from_utf8_lossy(&bytes);
                             let line = line.trim();
+                            if let Some(status) = line.strip_prefix("EFTFORGE_STATUS=") {
+                                // Forward known startup stages to the splash so it
+                                // shows more than a static "starting..." message.
+                                if let Ok(payload) = serde_json::to_string(status) {
+                                    let _ = window.eval(&format!(
+                                        "window.__eftforgeStatus && window.__eftforgeStatus({payload})"
+                                    ));
+                                }
+                            }
                             if let Some(port) = line.strip_prefix("EFTFORGE_PORT=") {
+                                let _ = window.eval(
+                                    "window.__eftforgeStatus && window.__eftforgeStatus('connecting')",
+                                );
                                 wait_for_port(port).await;
                                 let elapsed = spawn_time.elapsed().as_millis() as u64;
                                 if elapsed < MIN_SPLASH_MILLIS {
@@ -800,6 +812,9 @@ fn main() {
                                 }
                                 // Backend is genuinely reachable: play the
                                 // ready transition, then hand off.
+                                let _ = window.eval(
+                                    "window.__eftforgeStatus && window.__eftforgeStatus('ready')",
+                                );
                                 let _ = window
                                     .eval("window.__eftforgeReady && window.__eftforgeReady()");
                                 tokio::time::sleep(std::time::Duration::from_millis(

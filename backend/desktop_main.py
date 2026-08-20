@@ -66,11 +66,13 @@ def _seed_data_dir(data_dir: str) -> None:
     if os.path.exists(snapshot):
         import shutil
         print(f"First run - seeding item database into {data_dir}", flush=True)
+        print("EFTFORGE_STATUS=seed_db", flush=True)
         shutil.copyfile(snapshot, live_db)
     else:
         # No snapshot bundled: the automatic startup sync in desktop.py will
         # fetch everything from tarkov.dev instead.
         print("No bundled item database snapshot - will sync from tarkov.dev.", flush=True)
+        print("EFTFORGE_STATUS=first_sync", flush=True)
 
 
 def main() -> None:
@@ -87,9 +89,17 @@ def main() -> None:
     # The Tauri launcher blocks on this line to learn where to point the window.
     print(f"EFTFORGE_PORT={port}", flush=True)
 
+    # EFTFORGE_STATUS=<code> lines are picked up by the Tauri launcher and
+    # forwarded to the splash screen's __eftforgeStatus() hook (see
+    # ui-shell/index.html) so the user sees what's actually happening during
+    # the gap between the port being printed and the socket actually binding.
+    # Importing main triggers its module-level DB setup, which prints its own
+    # preparing_database / applying_updates markers partway through.
+    print("EFTFORGE_STATUS=loading_modules", flush=True)
     import uvicorn
     import main as app_module
 
+    print("EFTFORGE_STATUS=starting_server", flush=True)
     uvicorn.run(app_module.app, host="127.0.0.1", port=port, log_level="info")
 
 
