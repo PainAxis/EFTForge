@@ -17,6 +17,13 @@ let _tabIdCounter = 0;
 let _tabSwitchInFlight = false;
 const _tabHistory = new Map(); // tabId -> { buildHistory, buildFuture } (session-only, not persisted)
 
+// Set right before whatever call chain ends in renderTabBar() so that render
+// knows which chip is brand new and should play the entrance animation - every
+// other chip in the strip is just getting torn down and rebuilt as usual.
+// renderTabBar() consumes (and clears) this on its very next call regardless
+// of which path set it, so it can never survive to animate the wrong chip.
+let _enteringTabId = null;
+
 // Once per page load, nudge users toward closing tabs once the strip gets
 // large - fires on whatever action first crosses the threshold (new tab,
 // duplicate, or a restore-from-storage that's already past it), not on
@@ -244,6 +251,7 @@ async function createTabForGun(gun, card = null) {
         }
 
         _persistTabs();
+        _enteringTabId = id;
         renderTabBar();
         _scrollTabIntoView(id);
         _maybeWarnManyTabs();
@@ -286,6 +294,7 @@ async function createTabFromPayload(payload, buildName = null, communityBuild = 
 
         tab.pairs = collectSlotPairs(EFTForge.state.buildTree);
         _persistTabs();
+        _enteringTabId = id;
         renderTabBar();
         _scrollTabIntoView(id);
         _maybeWarnManyTabs();
@@ -395,13 +404,47 @@ function _trackXCloseClick(e) {
     }
 }
 
+// Shrinks a chip to nothing before it's actually removed from state, so
+// closing a tab reads as a deliberate collapse instead of an instant snap.
+// Width starts from a locked px value (transitions can't animate from "auto"),
+// and only compositor/layout-cheap properties run on a single small element,
+// so this stays light even with a full strip of tabs open.
+function _animateChipClose(chip) {
+    return new Promise((resolve) => {
+        const rect = chip.getBoundingClientRect();
+        chip.style.width = rect.width + "px";
+        void chip.offsetWidth; // force reflow so the locked width applies before the transition starts
+        chip.classList.add("tab-chip-closing");
+
+        let settled = false;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            resolve();
+        };
+        chip.addEventListener("transitionend", finish, { once: true });
+        setTimeout(finish, 200); // fallback in case the chip gets detached mid-transition
+    });
+}
+
 async function closeTab(tabId) {
     const idx = EFTForge.state.tabs.findIndex(t => t.id === tabId);
     if (idx === -1) return;
-    const wasActive = EFTForge.state.activeTabId === tabId;
-    const gunId = EFTForge.state.tabs[idx].gunId;
 
-    EFTForge.state.tabs.splice(idx, 1);
+    const chip = _isDesktopTabs() ? document.querySelector(`.tab-chip[data-tab-id="${CSS.escape(tabId)}"]`) : null;
+    if (chip) {
+        if (chip.classList.contains("tab-chip-closing")) return;
+        await _animateChipClose(chip);
+    }
+
+    // The tab may already be gone if something else closed it while this one
+    // was mid-animation.
+    const idx2 = EFTForge.state.tabs.findIndex(t => t.id === tabId);
+    if (idx2 === -1) return;
+    const wasActive = EFTForge.state.activeTabId === tabId;
+    const gunId = EFTForge.state.tabs[idx2].gunId;
+
+    EFTForge.state.tabs.splice(idx2, 1);
     _tabHistory.delete(tabId);
     _evictUnusedGunInitCache(gunId);
 
@@ -419,7 +462,7 @@ async function closeTab(tabId) {
         return;
     }
 
-    const nextIdx = Math.min(idx, EFTForge.state.tabs.length - 1);
+    const nextIdx = Math.min(idx2, EFTForge.state.tabs.length - 1);
     await switchToTab(EFTForge.state.tabs[nextIdx].id);
 }
 
@@ -449,6 +492,7 @@ async function duplicateTab(tabId) {
     }
     _tabHistory.set(clone.id, { buildHistory: [], buildFuture: [] });
     _persistTabs();
+    _enteringTabId = clone.id;
     await switchToTab(clone.id);
     _maybeWarnManyTabs();
 }
@@ -1187,6 +1231,36 @@ function _syncTabBarSpacer() {
     if (spacer) spacer.classList.toggle("with-tab-bar", EFTForge.state.tabs.length > 0);
 }
 
+// #tab-bar is `display: none` while no tabs are open, and display can't be
+// transitioned - so showing it means flipping to `display: block` first and
+// letting a follow-up class drive the actual opacity/transform fade, while
+// hiding it fades out first and only flips back to `display: none` once that
+// transition has actually finished (or after a timed fallback).
+let _tabBarHideTimer = null;
+
+function _setTabBarVisible(visible) {
+    const bar = document.getElementById("tab-bar");
+    if (!bar) return;
+
+    if (visible) {
+        clearTimeout(_tabBarHideTimer);
+        _tabBarHideTimer = null;
+        if (!bar.classList.contains("has-tabs")) {
+            bar.classList.add("has-tabs");
+            void bar.offsetHeight; // force reflow so display:block lands before the fade-in starts
+        }
+        bar.classList.add("tab-bar-visible");
+    } else {
+        if (!bar.classList.contains("has-tabs")) return;
+        bar.classList.remove("tab-bar-visible");
+        clearTimeout(_tabBarHideTimer);
+        _tabBarHideTimer = setTimeout(() => {
+            bar.classList.remove("has-tabs");
+            _tabBarHideTimer = null;
+        }, 180);
+    }
+}
+
 // Fade opacity ramps smoothly over this many px of scroll near each edge,
 // instead of snapping straight to fully visible.
 const TAB_BAR_FADE_DISTANCE = 40;
@@ -1249,12 +1323,17 @@ function _focusAdjacentChip(tabId) {
 }
 
 function renderTabBar() {
+    // Consumed unconditionally (even on an early return below) so a stale id
+    // can never carry over and animate the wrong chip on some later render.
+    const enteringTabId = _enteringTabId;
+    _enteringTabId = null;
+
     if (!_isDesktopTabs()) return;
     const bar = document.getElementById("tab-bar");
     const scroll = document.getElementById("tab-bar-scroll");
     if (!bar || !scroll) return;
 
-    bar.classList.toggle("has-tabs", EFTForge.state.tabs.length > 0);
+    _setTabBarVisible(EFTForge.state.tabs.length > 0);
     _syncTabBarSpacer();
 
     // Tear down only OUR marquees. _clearMarqueeTimers() is a page-wide reset:
@@ -1295,7 +1374,16 @@ function renderTabBar() {
         const chip = document.createElement("div");
         chip.className = "tab-chip"
             + (isActive ? " active" : "")
-            + (tab.pinned ? " pinned" : "");
+            + (tab.pinned ? " pinned" : "")
+            + (tab.id === enteringTabId ? " tab-chip-enter" : "");
+        if (tab.id === enteringTabId) {
+            // fill-mode: both holds the animation's final transform on the element
+            // indefinitely once it's done playing, and a CSS animation's value for
+            // a property always wins over an inline style set for that same
+            // property - so without this, dragging a just-created chip would have
+            // its drag transform silently overridden and the chip would look stuck.
+            chip.addEventListener("animationend", () => chip.classList.remove("tab-chip-enter"), { once: true });
+        }
         chip.dataset.tabId = tab.id;
         chip.tabIndex = 0;
         chip.setAttribute("role", "tab");
