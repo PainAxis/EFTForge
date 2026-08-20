@@ -458,13 +458,29 @@ fn main() {
                                     if (_zoomEl) _zoomEl.style.opacity = '0';
                                 }, 1500);
                             }
+                            function _applyZoom(z) {
+                                // Prefer WebView2's native page zoom: like the
+                                // browser's own Ctrl+scroll, it shrinks the CSS-px
+                                // viewport so vh/dvh units reflow, which keeps
+                                // max-height:90vh modals inside the screen. CSS
+                                // `zoom` (the fallback) only visually scales and
+                                // leaves vh at its unzoomed value, so zoomed-in
+                                // modals overflow top and bottom.
+                                try {
+                                    if (window.__TAURI__ && window.__TAURI__.webview) {
+                                        window.__TAURI__.webview.getCurrentWebview().setZoom(z);
+                                        return;
+                                    }
+                                } catch (err) {}
+                                document.documentElement.style.zoom = z;
+                            }
                             window.addEventListener('wheel', function(e) {
                                 if (!e.ctrlKey || e.defaultPrevented) return;
                                 e.preventDefault();
                                 if (e.deltaY < 0 && _zi < ZOOM_LEVELS.length - 1) _zi++;
                                 else if (e.deltaY > 0 && _zi > 0) _zi--;
                                 var z = ZOOM_LEVELS[_zi];
-                                document.documentElement.style.zoom = z;
+                                _applyZoom(z);
                                 _showZoom(z);
                             }, { passive: false });
                         })();"#,

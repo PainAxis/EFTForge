@@ -15,6 +15,7 @@
     "core:window:allow-is-maximized",
     "core:window:allow-close",
     "core:window:allow-start-dragging",
+    "core:webview:allow-set-webview-zoom",
     "allow-close-to-tray",
     "allow-exit-app",
     "allow-manual-check-for-updates"
