@@ -74,6 +74,7 @@ window._SLOT_PLACEHOLDER_MAP = _SLOT_PLACEHOLDER_MAP;
 // ============================================================
 
 window._AG_OVERRIDES = {
+    "648ae44056c6310a830fc293@648ae3e356c6310a830fc291": { col: 9, vrow: 3, flexible: true },
     "69f9ecc5df2c2358a9041860@69f9ecc5df2c2358a904185c": { col: 9, vrow: -1 },
     "6a15ae3e81a4baf60b09bc37@6a15ae3e81a4baf60b09bc33": { col: 9, vrow: -1 },
     "6a3ce9c28ce058e3a2059b18@6a3ce9c28ce058e3a2059b15": { col: 9, vrow: -1 },
@@ -2111,6 +2112,3 @@ window.flashGunCellInGrid = flashGunCellInGrid;
 // Exported for the dev-tools grid overlap scanner in app.js
 window.collectAllVisibleSlots = collectAllVisibleSlots;
 window.computeGridPositions   = computeGridPositions;
-
-// ============================================================
-// TEMPORARILY DISABLED - Flash animations

@@ -170,6 +170,15 @@ let _rafPending = false;
 let _gunResizeObserver = null;
 let _hoveredTiltCard = null;
 
+// Neither #weapon-selector's nor .left-panel's scrollTop is reliably kept by
+// the browser across a display:none round-trip, so both are saved/restored
+// explicitly here instead of relying on that. Which one actually carries the
+// scroll depends on layout: desktop/mobile-landscape scroll #weapon-selector
+// itself, mobile-portrait scrolls .left-panel as a single column (see the
+// "MOBILE LAYOUT" CSS comment in index.html) - so both need tracking.
+let _gunGridScrollTop = 0;
+let _gunGridPanelScrollTop = 0;
+
 function _updateGunCardRects() {
   for (const entry of _cachedGunCards) {
     entry.rect = entry.card.getBoundingClientRect();
@@ -339,12 +348,15 @@ function returnToGunSelection() {
 
     const container = document.getElementById("main-container");
     container.classList.add("no-gun");
-    _syncHeaderScrollOnly();
 
     document.getElementById("left-build-area").style.display = "none";
 
     const weaponSelector = document.getElementById("weapon-selector");
     weaponSelector.style.removeProperty("display");
+    weaponSelector.scrollTop = _gunGridScrollTop;
+    const leftPanel = document.querySelector(".left-panel");
+    if (leftPanel) leftPanel.scrollTop = _gunGridPanelScrollTop;
+    _syncHeaderScrollOnly();
     weaponSelector.classList.add("panel-enter");
     weaponSelector.addEventListener("animationend", () => weaponSelector.classList.remove("panel-enter"), { once: true });
 
@@ -560,12 +572,21 @@ async function selectGun(gun, liElement, { skipTreeRender = false } = {}) {
   EFTForge.state.currentGun = gun;
   EFTForge.state.currentEquipErgoModifier = 0;
 
+    // Capture the gun grid's scroll position before anything below touches the
+    // "no-gun" class - removing it immediately reflows .left-panel to its
+    // narrow dual-panel width (different grid column count), so reading
+    // scrollTop after that point captures the wrong layout's offset.
+    const weaponSelectorEl = document.getElementById("weapon-selector");
+    const leftPanelEl = document.querySelector(".left-panel");
+    _gunGridScrollTop = weaponSelectorEl.scrollTop;
+    _gunGridPanelScrollTop = leftPanelEl ? leftPanelEl.scrollTop : 0;
+
     // Switch layout from full selector mode to dual panel mode
     const container = document.getElementById("main-container");
         container.classList.remove("no-gun");
         _syncHeaderExpand();
         // Switch left panel to build mode
-        document.getElementById("weapon-selector").style.display = "none";
+        weaponSelectorEl.style.display = "none";
 
         const buildArea = document.getElementById("left-build-area");
         buildArea.style.display = (isMobileLayout() && window.matchMedia("(orientation: landscape)").matches) ? "grid" : "flex";
