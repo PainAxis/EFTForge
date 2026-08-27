@@ -133,8 +133,6 @@ function _toastIcon(color) {
     }
 }
 
-// actions: optional array of { label, onClick } - if provided, toast stays until an action is clicked
-// pass duration = 0 to keep the toast open indefinitely (requires actions to dismiss it)
 function _hexToRgba(hex, alpha) {
     const r = parseInt(hex.slice(1, 3), 16);
     const g = parseInt(hex.slice(3, 5), 16);
@@ -154,52 +152,37 @@ function _updateBlobColor() {
     }
 }
 
-function showToast(title, message, duration = 3000, color = "#e74c3c", actions = null, dismissible = true) {
-    const container = document.getElementById("toast-container");
-
-    const toast = document.createElement("div");
-    toast.className = "toast";
-    toast.dataset.blobColor = _hexToRgba(color, 0.12);
-    toast.style.setProperty("--toast-accent", color);
-
-    const iconColEl = document.createElement("div");
-    iconColEl.className = "toast-icon-col";
-    iconColEl.innerHTML = _toastIcon(color);
-    toast.appendChild(iconColEl);
-
-    const contentEl = document.createElement("div");
-    contentEl.className = "toast-content";
-
-    const titleEl = document.createElement("div");
-    titleEl.className = "toast-title";
-    if (title.endsWith("...")) {
-        titleEl.textContent = title.slice(0, -3);
+function _setToastText(el, text) {
+    el.textContent = "";
+    if (text.endsWith("...")) {
+        el.textContent = text.slice(0, -3);
         for (let i = 0; i < 3; i++) {
             const dot = document.createElement("span");
             dot.className = "toast-dot";
             dot.textContent = ".";
-            titleEl.appendChild(dot);
+            el.appendChild(dot);
         }
     } else {
-        titleEl.textContent = title;
+        el.textContent = text;
     }
-    contentEl.appendChild(titleEl);
+}
 
-    const bodyEl = document.createElement("div");
-    bodyEl.className = "toast-body";
-    if (message.endsWith("...")) {
-        bodyEl.textContent = message.slice(0, -3);
-        for (let i = 0; i < 3; i++) {
-            const dot = document.createElement("span");
-            dot.className = "toast-dot";
-            dot.textContent = ".";
-            bodyEl.appendChild(dot);
-        }
-    } else {
-        bodyEl.textContent = message;
+// Tracks toasts currently on screen, keyed by the caller-chosen "category" string
+// passed to replaceToast(). Lets a later call in the same flow (e.g. "prices fetched")
+// update the still-open toast from an earlier call ("fetching prices...") in place
+// instead of stacking a second toast on top of it.
+const _toastByCategory = new Map();
+const _toastState = new WeakMap();
+
+const _TOAST_FADE_MS = 180;
+const _TOAST_REFILL_MS = 300;   // progress bar refill-then-drain transition
+const _TOAST_WIDTH_MS = 300;    // must match the "width" duration in the .toast CSS transition
+
+function _swapToastActions(state, actions) {
+    if (state.actionsEl) {
+        state.actionsEl.remove();
+        state.actionsEl = null;
     }
-    contentEl.appendChild(bodyEl);
-
     if (actions && actions.length > 0) {
         const actionsEl = document.createElement("div");
         actionsEl.className = "toast-actions";
@@ -208,15 +191,141 @@ function showToast(title, message, duration = 3000, color = "#e74c3c", actions =
             btn.className = "toast-action-btn";
             btn.textContent = label;
             btn.addEventListener("click", () => {
-                dismiss();
+                state.dismiss();
                 onClick();
             });
             actionsEl.appendChild(btn);
         });
-        contentEl.appendChild(actionsEl);
+        state.contentEl.appendChild(actionsEl);
+        state.actionsEl = actionsEl;
+    }
+}
+
+// (Re)applies title/message/color/actions/duration to an already-built toast and
+// (re)starts its dismiss timer and progress bar. Shared by showToast (initial render,
+// isReplace = false: content is set immediately) and replaceToast (in-place update of
+// an existing toast, isReplace = true: title/message/icon cross-fade and the progress
+// bar visibly refills before it starts draining again).
+function _applyToastContent(toast, state, title, message, duration, color, actions, isReplace = false) {
+    toast.dataset.blobColor = _hexToRgba(color, 0.12);
+    toast.style.setProperty("--toast-accent", color); // border/icon color transition off @property --toast-accent
+
+    const newIcon = _toastIcon(color);
+    const swapText = () => {
+        state.iconColEl.innerHTML = newIcon;
+        _setToastText(state.titleEl, title);
+        _setToastText(state.bodyEl, message);
+        _swapToastActions(state, actions);
+    };
+
+    const contentChanged = state.iconColEl.innerHTML !== newIcon || state.titleEl.textContent !== title || state.bodyEl.textContent !== message;
+    if (isReplace && contentChanged) {
+        // Different title/message can wrap to a different box size (min/max-width in CSS
+        // clamps it to 260-320px) - pin the current rendered width first so the swap below
+        // can animate to the new size instead of the box snapping to it.
+        const oldWidth = toast.getBoundingClientRect().width;
+        toast.style.width = oldWidth + "px";
+
+        state.contentEl.classList.add("toast-fade-swap");
+        state.iconColEl.classList.add("toast-fade-swap");
+        setTimeout(() => {
+            swapText();
+            toast.style.width = "";
+            const newWidth = toast.getBoundingClientRect().width;
+            toast.style.width = oldWidth + "px";
+            void toast.offsetWidth; // force reflow so the width transition below starts from oldWidth
+            toast.style.width = newWidth + "px";
+
+            state.contentEl.classList.remove("toast-fade-swap");
+            state.iconColEl.classList.remove("toast-fade-swap");
+            setTimeout(() => { toast.style.width = ""; }, _TOAST_WIDTH_MS);
+        }, _TOAST_FADE_MS);
+    } else {
+        swapText();
     }
 
+    if (state.timerId) {
+        clearTimeout(state.timerId);
+        state.timerId = null;
+    }
+
+    const startDrain = () => {
+        state.progressEl.style.transition = "none";
+        state.progressEl.style.transform = "";
+        state.progressEl.style.animationName = "none";
+        state.progressEl.style.animationDuration = duration + "ms";
+        void state.progressEl.offsetWidth; // force reflow so the drain animation restarts from full
+        state.progressEl.style.animationName = "toast-progress-drain";
+        state.timerId = setTimeout(state.dismiss, duration);
+    };
+
+    if (duration > 0) {
+        state.progressEl.style.display = "";
+        if (isReplace) {
+            // Freeze the bar at whatever width its old drain animation had reached, then
+            // visibly transition it back to full before the new countdown starts.
+            const frozenTransform = getComputedStyle(state.progressEl).transform;
+            state.progressEl.style.animationName = "none";
+            state.progressEl.style.transition = "none";
+            state.progressEl.style.transform = frozenTransform;
+            void state.progressEl.offsetWidth;
+            state.progressEl.style.transition = `transform ${_TOAST_REFILL_MS}ms ease`;
+            state.progressEl.style.transform = "scaleX(1)";
+            state.timerId = setTimeout(startDrain, _TOAST_REFILL_MS);
+        } else {
+            startDrain();
+        }
+    } else {
+        state.progressEl.style.transition = "none";
+        state.progressEl.style.animationName = "none";
+        state.progressEl.style.display = "none";
+    }
+
+    if (toast.classList.contains("show")) _updateBlobColor();
+}
+
+// actions: optional array of { label, onClick } - if provided, toast stays until an action is clicked
+// pass duration = 0 to keep the toast open indefinitely (requires actions to dismiss it)
+// category: optional string - used internally by replaceToast() to find this toast again later
+function showToast(title, message, duration = 3000, color = "#e74c3c", actions = null, dismissible = true, category = null) {
+    const container = document.getElementById("toast-container");
+
+    const toast = document.createElement("div");
+    toast.className = "toast";
+
+    const iconColEl = document.createElement("div");
+    iconColEl.className = "toast-icon-col";
+    toast.appendChild(iconColEl);
+
+    const contentEl = document.createElement("div");
+    contentEl.className = "toast-content";
+
+    const titleEl = document.createElement("div");
+    titleEl.className = "toast-title";
+    contentEl.appendChild(titleEl);
+
+    const bodyEl = document.createElement("div");
+    bodyEl.className = "toast-body";
+    contentEl.appendChild(bodyEl);
+
     toast.appendChild(contentEl);
+
+    const progressEl = document.createElement("div");
+    progressEl.className = "toast-progress";
+    toast.appendChild(progressEl);
+
+    const state = { titleEl, bodyEl, contentEl, iconColEl, progressEl, actionsEl: null, timerId: null };
+    state.dismiss = () => {
+        toast.classList.remove("show");
+        state.progressEl.style.display = "none";
+        if (state.timerId) clearTimeout(state.timerId);
+        if (category && _toastByCategory.get(category) === toast) _toastByCategory.delete(category);
+        setTimeout(() => {
+            if (toast.isConnected) container.removeChild(toast);
+            _updateBlobColor();
+        }, 250);
+    };
+    _toastState.set(toast, state);
 
     if (dismissible) {
         toast.classList.add("dismissible");
@@ -225,37 +334,38 @@ function showToast(title, message, duration = 3000, color = "#e74c3c", actions =
         hint.textContent = "×";
         toast.appendChild(hint);
         toast.addEventListener("click", (e) => {
-            if (!e.target.closest(".toast-action-btn")) dismiss();
+            if (!e.target.closest(".toast-action-btn")) state.dismiss();
         });
     }
 
-    let progressEl = null;
-    if (duration > 0) {
-        progressEl = document.createElement("div");
-        progressEl.className = "toast-progress";
-        progressEl.style.animationDuration = duration + "ms";
-        toast.appendChild(progressEl);
-    }
-
     container.appendChild(toast);
+    _applyToastContent(toast, state, title, message, duration, color, actions);
+
+    if (category) {
+        toast.dataset.toastCategory = category;
+        _toastByCategory.set(category, toast);
+    }
 
     setTimeout(() => {
         toast.classList.add("show");
-        if (progressEl) progressEl.style.animationName = "toast-progress-drain";
         _updateBlobColor();
     }, 10);
 
-    function dismiss() {
-        toast.classList.remove("show");
-        if (progressEl) progressEl.style.display = "none";
-        setTimeout(() => {
-            if (toast.isConnected) container.removeChild(toast);
-            _updateBlobColor();
-        }, 250);
-    }
-
-    if (duration > 0) setTimeout(dismiss, duration);
     return toast;
+}
+
+// Like showToast, but toasts sharing the same "category" are condensed into one: if a
+// toast from a previous replaceToast(category, ...) call is still on screen, its content
+// cross-fades in place (title/message/icon fade, accent color and progress bar transition)
+// instead of stacking a new toast on top of it. Use this for multi-step flows reported via
+// separate toast calls (e.g. "fetching flea prices..." followed by "flea prices updated").
+function replaceToast(category, title, message, duration = 3000, color = "#e74c3c", actions = null, dismissible = true) {
+    const existing = _toastByCategory.get(category);
+    if (existing && existing.isConnected) {
+        _applyToastContent(existing, _toastState.get(existing), title, message, duration, color, actions, true);
+        return existing;
+    }
+    return showToast(title, message, duration, color, actions, dismissible, category);
 }
 
 function setToastStatus(toastEl, text) {
@@ -515,6 +625,7 @@ EFTForge.utils.escapeHtml          = escapeHtml;
 EFTForge.utils.startPanelLoading   = startPanelLoading;
 EFTForge.utils.stopPanelLoading    = stopPanelLoading;
 EFTForge.utils.showToast           = showToast;
+EFTForge.utils.replaceToast        = replaceToast;
 EFTForge.utils.updateBlobColor     = _updateBlobColor;
 EFTForge.utils._createModalOverlay = _createModalOverlay;
 EFTForge.utils._clearMarqueeTimers = _clearMarqueeTimers;

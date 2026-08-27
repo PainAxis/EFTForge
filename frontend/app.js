@@ -91,13 +91,13 @@ async function init() {
               const missing = ids.filter(id => !(id in EFTForge.state.fleaCachePvp));
               if (missing.length === 0) return;
               const { t: _t } = EFTForge.lang;
-              showToast(_t("stats.fleaMarket"), `${_t("stats.fleaFetching")} ${missing.length} ${_t("stats.fleaFetchingItems")}`, 4000, "#f5a623");
+              replaceToast("flea-fetch", _t("stats.fleaMarket"), `${_t("stats.fleaFetching")} ${missing.length} ${_t("stats.fleaFetchingItems")}`, 4000, "#f5a623");
               const CHUNK = 300;
               for (let i = 0; i < missing.length; i += CHUNK) {
                 await new Promise(resolve => setTimeout(resolve, 0));
                 await ensureFleaPrices(missing.slice(i, i + CHUNK));
               }
-              showToast(_t("stats.fleaMarket"), _t("stats.fleaCached"), 3000, "#4caf50");
+              replaceToast("flea-fetch", _t("stats.fleaMarket"), _t("stats.fleaCached"), 3000, "#4caf50");
             })
             .catch(err => console.warn("Could not fetch item IDs for flea cache:", err));
       }

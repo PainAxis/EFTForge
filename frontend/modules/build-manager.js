@@ -100,7 +100,7 @@ async function resetBuild() {
     await refreshBuildStats();
     flashTree("reset");
     const { t: _t } = EFTForge.lang;
-    showToast(_t("toast.resetTitle"), _t("toast.resetMsg"), 2500, "#4CAF50");
+    replaceToast("build-reset-strip", _t("toast.resetTitle"), _t("toast.resetMsg"), 2500, "#4CAF50");
 }
 
 async function stripBuild() {
@@ -127,7 +127,7 @@ async function stripBuild() {
     await refreshBuildStats();
     flashTree("strip");
     const { t: _t2 } = EFTForge.lang;
-    showToast(_t2("toast.strippedTitle"), _t2("toast.strippedMsg"), 2500, "#f5a623");
+    replaceToast("build-reset-strip", _t2("toast.strippedTitle"), _t2("toast.strippedMsg"), 2500, "#f5a623");
 }
 
 /* ===========================
@@ -1565,7 +1565,9 @@ function _applyPublicBuildsFilter() {
 
         const gunObj    = (EFTForge.state.allGuns || []).find(g => g.id === b.gun_id);
         const gunImgSrc = gunObj ? (gunObj.image_512_link || gunObj.icon_link || "") : "";
-        const cardImgSrc = b.card_image_url || gunImgSrc;
+        // card_image_url is gitee-hosted like avatars - proxy it the same way so it
+        // doesn't hotlink gitee directly (slow/unreliable) while the avatar loads fast.
+        const cardImgSrc = proxyAvatarUrl(b.card_image_url) || gunImgSrc;
 
         const s        = b.stats || {};
         const hasStats = b.stats !== null && b.stats !== undefined;
@@ -1591,7 +1593,7 @@ function _applyPublicBuildsFilter() {
             <div class="cb-card${b.is_featured ? " featured" : ""}">
                 ${featuredLabel}
                 <div class="cb-gun-area">
-                    ${cardImgSrc ? `<img class="cb-gun-img" src="${escapeHtml(cardImgSrc)}" alt="" referrerpolicy="no-referrer" data-fallback="${escapeHtml(gunImgSrc)}" onerror="this.onerror=null; this.src=this.dataset.fallback;" />` : ""}
+                    ${cardImgSrc ? `<img class="cb-gun-img" src="${escapeHtml(cardImgSrc)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-fallback="${escapeHtml(gunImgSrc)}" onerror="this.onerror=null; this.src=this.dataset.fallback;" />` : ""}
                 </div>
                 <div class="cb-card-body">
                     <div class="cb-build-name">
@@ -1599,7 +1601,7 @@ function _applyPublicBuildsFilter() {
                     </div>
                     <div class="cb-publish-date">${fmtDate}</div>
                     <div class="cb-author">
-                        <img src="${escapeHtml(avatarSrc)}" class="cb-avatar" onerror="this.src='./assets/images/tarkovcitizen.jpg';this.onerror=null;" />
+                        <img src="${escapeHtml(avatarSrc)}" class="cb-avatar" loading="lazy" onerror="this.src='./assets/images/tarkovcitizen.jpg';this.onerror=null;" />
                         <span class="cb-author-name"><span class="marquee-text">${escapeHtml(authorName)}</span></span>
                     </div>
                     <div class="cb-load-count">${b.load_count ?? 0} ${t("cb.loads")}</div>
@@ -1985,7 +1987,9 @@ function _applyMyCommunityFilter() {
         const gunObj     = gunById(b.gun_id);
         const gunName    = (gunObj && (gunObj.short_name || gunObj.name)) || b.gun_name || "";
         const gunImgSrc  = gunObj ? (gunObj.image_512_link || gunObj.icon_link || "") : "";
-        const cardImgSrc = b.card_image_url || gunImgSrc;
+        // card_image_url is gitee-hosted like avatars - proxy it the same way so it
+        // doesn't hotlink gitee directly (slow/unreliable) while the avatar loads fast.
+        const cardImgSrc = proxyAvatarUrl(b.card_image_url) || gunImgSrc;
 
         const s        = b.stats || {};
         const hasStats = b.stats !== null && b.stats !== undefined;
@@ -2010,7 +2014,7 @@ function _applyMyCommunityFilter() {
             <div class="cb-card${b.is_featured ? " featured" : ""}">
                 ${featuredLabel}
                 <div class="cb-gun-area">
-                    ${cardImgSrc ? `<img class="cb-gun-img" src="${escapeHtml(cardImgSrc)}" alt="" referrerpolicy="no-referrer" data-fallback="${escapeHtml(gunImgSrc)}" onerror="this.onerror=null; this.src=this.dataset.fallback;" />` : ""}
+                    ${cardImgSrc ? `<img class="cb-gun-img" src="${escapeHtml(cardImgSrc)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-fallback="${escapeHtml(gunImgSrc)}" onerror="this.onerror=null; this.src=this.dataset.fallback;" />` : ""}
                 </div>
                 <div class="cb-card-body">
                     <div class="cb-build-name"><span class="marquee-text">${escapeHtml(b.build_name)}</span></div>

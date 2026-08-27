@@ -91,13 +91,13 @@ async function refetchFleaPrices() {
     try {
         const { t: _t } = EFTForge.lang;
         const ids = await fetch(`${EFTForge.config.API_BASE}/items/ids`).then(r => r.json());
-        showToast(_t("stats.fleaMarket"), `${_t("stats.fleaFetching")} ${ids.length} ${_t("stats.fleaFetchingItems")}`, 4000, "#f5a623");
+        replaceToast("flea-fetch", _t("stats.fleaMarket"), `${_t("stats.fleaFetching")} ${ids.length} ${_t("stats.fleaFetchingItems")}`, 4000, "#f5a623");
         const CHUNK = 300;
         for (let i = 0; i < ids.length; i += CHUNK) {
             await new Promise(resolve => setTimeout(resolve, 0));
             await ensureFleaPrices(ids.slice(i, i + CHUNK));
         }
-        showToast(_t("stats.fleaMarket"), _t("stats.fleaUpdated"), 3000, "#4caf50");
+        replaceToast("flea-fetch", _t("stats.fleaMarket"), _t("stats.fleaUpdated"), 3000, "#4caf50");
         if (EFTForge.state.priceView) renderPriceOverview();
     } catch (_) {
     } finally {
@@ -912,7 +912,6 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
           panel.className = "stamina-panel";
           panel.id = "stamina-panel";
           panel.innerHTML = `
-              <span class="beta-badge">${t("stats.beta")}</span>
                 <div class="stamina-disclaimer">${t("stats.staminaDisclaimer").replace(/\n/g, "<br>")}</div>
               <div class="strength-control">
                   <label style="color:#eee;">${t("stats.strengthLv")}</label>

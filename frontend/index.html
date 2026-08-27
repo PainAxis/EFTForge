@@ -2975,6 +2975,14 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
    TOAST NOTIFICATIONS
 ========================= */
 
+/* Registering --toast-accent as a typed <color> is what lets replaceToast() cross-fade
+   the accent color (border + icon) instead of snapping to the new color instantly. */
+@property --toast-accent {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #f44336;
+}
+
 #toast-container {
   position: fixed;
   bottom: 24px;
@@ -3001,7 +3009,7 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
   font-size: 13px;
   opacity: 0;
   transform: translateY(6px);
-  transition: opacity 0.22s ease, transform 0.22s ease;
+  transition: opacity 0.22s ease, transform 0.22s ease, border-top-color 0.4s ease, width 0.3s ease;
   overflow: hidden;
 }
 
@@ -3033,12 +3041,20 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
   flex-shrink: 0;
   width: 48px;
   color: var(--toast-accent, #f44336);
+  transition: opacity 0.18s ease, color 0.4s ease;
 }
 
 .toast-content {
   flex: 1;
   padding: 10px 0 12px 0;
   min-width: 0;
+  transition: opacity 0.18s ease;
+}
+
+/* Applied briefly by replaceToast() while swapping title/message/icon text so the
+   change reads as a cross-fade instead of an instant cut. */
+.toast-fade-swap {
+  opacity: 0;
 }
 
 .toast-title {
@@ -4334,20 +4350,6 @@ body[data-mobile="true"] .gun-card.mid-build {
 /* =========================
    ARM STAMINA SECTION
 ========================= */
-
-.beta-badge {
-    font-size: 10px;
-    font-weight: 700;
-    color: #f5c542;
-    border: 1px solid #f5c542;
-    border-radius: 3px;
-    padding: 1px 5px;
-    margin-left: 0;
-    letter-spacing: 1px;
-    vertical-align: middle;
-    opacity: 0.85;
-    display: inline-block;
-}
 
 .stamina-info-btn {
     display: inline-flex;
@@ -6070,12 +6072,6 @@ button.build-tag-chip.active {
   position: relative;
   width: 148px;
   flex-shrink: 0;
-}
-
-#lb-category-select-custom .beta-badge {
-  font-size: 8px;
-  padding: 0px 3px;
-  letter-spacing: 0.5px;
 }
 
 #lb-period-select,

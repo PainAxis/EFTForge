@@ -20,7 +20,6 @@ window.EFTForge.leaderboard = (function () {
     var _category  = 'all';
     var _gunFilter = 'all';
     var _cache     = {};  // keyed by "mode:period:sort"
-    var _categoryBadgeObserver = null;
 
     var _clearMarqueeTimers = EFTForge.utils._clearMarqueeTimers;
     var _initMarqueeText    = EFTForge.utils._initMarqueeText;
@@ -133,7 +132,6 @@ window.EFTForge.leaderboard = (function () {
             _category = 'all';
         }
         _refreshCustomSelect('lb-category-select', catOptions, _category);
-        _attachCategoryBadge();
 
         // gun filter row - only visible for builds
         var gunRow = document.getElementById('lb-gun-row');
@@ -237,7 +235,9 @@ window.EFTForge.leaderboard = (function () {
                 var rankClass = entry.rank === 1 ? ' lb-rank-gold' : entry.rank === 2 ? ' lb-rank-silver' : entry.rank === 3 ? ' lb-rank-bronze' : '';
                 var gunObj    = allGuns.find(function (g) { return g.id === entry.gun_id; });
                 var gunName   = (gunObj && gunObj.name) || entry.gun_name || entry.gun_id;
-                var imgSrc    = entry.card_image_url || (gunObj && (gunObj.image_512_link || gunObj.icon_link)) || '';
+                // card_image_url is gitee-hosted like avatars - proxy it the same way so it
+                // doesn't hotlink gitee directly (slow/unreliable) while the avatar loads fast.
+                var imgSrc    = proxyAvatarUrl(entry.card_image_url) || (gunObj && (gunObj.image_512_link || gunObj.icon_link)) || '';
                 var imgHtml   = imgSrc
                     ? '<img class="lb-build-img" src="' + _escHtml(imgSrc) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
                     : '<div class="lb-build-img-placeholder"></div>';
@@ -466,29 +466,6 @@ window.EFTForge.leaderboard = (function () {
         input.addEventListener('focus', function () {
             if (_gunFilter !== 'all') input.value = '';
         });
-    }
-
-    function _attachCategoryBadge() {
-        if (_categoryBadgeObserver) {
-            _categoryBadgeObserver.disconnect();
-            _categoryBadgeObserver = null;
-        }
-        var wrapper = document.getElementById('lb-category-select-custom');
-        if (!wrapper) return;
-        var trigger = wrapper.querySelector('.custom-select-trigger');
-        if (!trigger) return;
-        function _addBadge() {
-            if (!trigger.querySelector('.beta-badge')) {
-                var badge = document.createElement('span');
-                badge.className = 'beta-badge';
-                badge.style.cssText = 'margin-left:6px; flex-shrink:0;';
-                badge.textContent = 'BETA';
-                trigger.appendChild(badge);
-            }
-        }
-        _addBadge();
-        _categoryBadgeObserver = new MutationObserver(_addBadge);
-        _categoryBadgeObserver.observe(trigger, { childList: true });
     }
 
     function _refreshCustomSelect(id, options, currentValue) {
