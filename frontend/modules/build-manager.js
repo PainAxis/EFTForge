@@ -45,7 +45,7 @@ async function updateGunBuildsBadge(gunId) {
 
     const _applyBadge = (community) => {
         const total = savedCount + (community ?? 0);
-        btn.dataset.badge = total > 0 ? (total > 99 ? "99+" : String(total)) : "";
+        btn.dataset.badge = total > 0 ? String(total) : "";
     };
 
     // Apply immediately with whatever we have cached

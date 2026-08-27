@@ -1,8 +1,8 @@
 window.EFTForge = window.EFTForge || {};
 
 window.EFTForge.state = {
-    // Language
-    lang: localStorage.getItem("eftforge_lang") || "zh",
+    // Language - saved preference wins; first-time visitors get zh only if their browser reports a zh locale
+    lang: localStorage.getItem("eftforge_lang") || (navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en"),
 
     // Traders (id -> { name, normalizedName, imageLink, image4xLink })
     traders:        {},
