@@ -44,6 +44,7 @@
     "_lang": "readonly",
     "_pairsKey": "readonly",
     "_refreshComboHighlights": "readonly",
+    "_reprocessOpenSlot": "readonly",
     "_restoreNormalPlaceholder": "readonly",
     "_showPublishLockedToast": "readonly",
     "_sleep": "readonly",
