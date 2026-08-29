@@ -1,0 +1,28 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: 26.3.1
+    hooks:
+      - id: black
+        files: ^backend/
+        exclude: ^backend/venv/
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.3.0
+    hooks:
+      - id: flake8
+        files: ^backend/
+        exclude: ^backend/venv/
+
+  # mypy is intentionally not a pre-commit hook: it currently has ~70
+  # pre-existing findings (see ci.yml) that need incremental review, not
+  # a blanket fix. Blocking every commit on those would just train people
+  # to reach for --no-verify. It still runs in CI as a non-blocking check.
+
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint (frontend)
+        entry: npm --prefix frontend run lint
+        language: system
+        files: ^frontend/.*\.js$
+        pass_filenames: false

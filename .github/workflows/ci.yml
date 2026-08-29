@@ -41,6 +41,13 @@ jobs:
       - name: black --check
         run: python -m black backend --exclude venv --check
 
+      - name: mypy
+        # Non-blocking: 77 pre-existing findings (mostly SQLAlchemy nullable
+        # columns used without a None check) need reviewing incrementally,
+        # not fixed as a drive-by. Remove continue-on-error once clean.
+        continue-on-error: true
+        run: python -m mypy backend
+
       - name: pytest
         working-directory: backend
         run: python -m pytest tests/ -v

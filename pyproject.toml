@@ -1,2 +1,7 @@
 [tool.black]
 line-length = 120
+
+[tool.mypy]
+plugins = ["sqlalchemy.ext.mypy.plugin"]
+ignore_missing_imports = true
+exclude = ["venv"]
