@@ -602,6 +602,128 @@ async function openSlotSelector(parentNode, slot) {
   }).catch(() => {});
 }
 
+// Silently refetches candidate stats for the slot currently open in the attachment
+// table, without tearing down the DOM (search text, scroll position, etc. survive).
+// Needed after the build changes elsewhere while the table stays open: a candidate's
+// simErgo/simRecoilV/simRecoilH/simWeight/simEED were computed against the installed-ids
+// snapshot at fetch time, so removing an attachment elsewhere (e.g. resolving a conflict)
+// leaves those simulated values stale even after the conflict flag itself is cleared.
+let _reprocessOpenSlotGen = 0;
+async function _reprocessOpenSlot() {
+    const myGen = ++_reprocessOpenSlotGen;
+    const parentNode = EFTForge.state.lastParentNode;
+    const slot = EFTForge.state.lastSlot;
+    if (!parentNode || !slot || !EFTForge.state.currentGun) return;
+
+    const items = EFTForge.state.lastProcessedItems.map(e => e.item);
+    if (!items.length) return;
+
+    const baseAttachmentIds = collectAttachmentIds(EFTForge.state.buildTree);
+    let slotEmptiedIds;
+    if (parentNode.children[slot.id]) {
+        const installedNode = parentNode.children[slot.id];
+        const idsToRemove = new Set([
+            installedNode.item.id,
+            ...collectAttachmentIds(installedNode)
+        ]);
+        slotEmptiedIds = baseAttachmentIds.filter(id => !idsToRemove.has(id));
+    } else {
+        slotEmptiedIds = baseAttachmentIds;
+    }
+
+    const cacheKey = `${slot.id}__${slotEmptiedIds.slice().sort().join(",")}`;
+
+    if (EFTForge.state.processedCache[cacheKey]) {
+        if (myGen !== _reprocessOpenSlotGen) return;
+        EFTForge.state.lastProcessedItems = EFTForge.state.processedCache[cacheKey];
+        applyAttachmentSort();
+        return;
+    }
+
+    let removedSubtreeWeight = 0;
+    if (parentNode.children[slot.id]) {
+        const removedNode = parentNode.children[slot.id];
+        const collectWeights = (node) => {
+            removedSubtreeWeight += node.item.weight ?? 0;
+            for (const sid in node.children) collectWeights(node.children[sid]);
+        };
+        collectWeights(removedNode);
+    }
+
+    const { t } = EFTForge.lang;
+    let batchResult;
+    try {
+        batchResult = await withTimeout(batchProcessCandidates({
+            base_item_id: EFTForge.state.currentGun.id,
+            installed_ids: slotEmptiedIds,
+            slot_id: slot.id,
+            candidate_ids: items.map(i => i.id),
+            lang: _lang(),
+            strength_level: EFTForge.state.currentStrengthLevel ?? 10,
+            equip_ergo_modifier: EFTForge.state.currentEquipErgoModifier ?? 0,
+        }), 30000);
+    } catch (err) {
+        console.error("Failed to reprocess attachments:", err);
+        return;
+    }
+
+    // Bail if the user navigated to a different slot, or a newer reprocess/open superseded
+    // this one, while the request was in flight - avoids an older response clobbering fresher data
+    if (EFTForge.state.lastParentNode !== parentNode || EFTForge.state.lastSlot !== slot) return;
+    if (myGen !== _reprocessOpenSlotGen) return;
+
+    const baseData = batchResult.base;
+    const baseEED = parseFloat(baseData.evo_ergo_delta ?? 0);
+    const baseRecoilV = baseData.recoil_vertical ?? null;
+    const baseRecoilH = baseData.recoil_horizontal ?? null;
+    const baseErgo = parseFloat(baseData.total_ergo ?? 0);
+    const baseAccuracyMoa = baseData.accuracy_moa ?? null;
+    const currentBuildBaseWeight = parseFloat(baseData.total_weight ?? 0) + removedSubtreeWeight;
+
+    const candidateResultMap = new Map(batchResult.candidates.map(r => [r.item_id, r]));
+
+    const processedItems = items.map(item => {
+        const r = candidateResultMap.get(item.id);
+        if (!r) return null;
+
+        const hasConflict = !r.valid;
+        const conflictName = r.reason_key
+            ? t(r.reason_key) + (r.reason_name ?? "")
+            : null;
+        const contribution = parseFloat(r.evo_ergo_delta ?? 0) - baseEED;
+        const recoilPercent = parseFloat(item.recoil_modifier ?? 0) * 100;
+
+        return {
+            item,
+            sortName: item.name.toLowerCase(),
+            contribution,
+            recoilPercent,
+            ergoModifier: parseFloat(item.ergonomics_modifier ?? 0),
+            hasConflict,
+            conflictName,
+            conflictingItemId: r.conflicting_item_id ?? null,
+            conflictingSlotId: r.conflicting_slot_id ?? null,
+            simErgo: parseFloat(r.total_ergo ?? 0),
+            simRecoilV: r.recoil_vertical ?? null,
+            simRecoilH: r.recoil_horizontal ?? null,
+            simAccuracyMoa: r.accuracy_moa ?? null,
+            simWeight: parseFloat(r.total_weight ?? 0),
+            simEED: parseFloat(r.evo_ergo_delta ?? 0),
+            baseErgo,
+            baseRecoilV,
+            baseRecoilH,
+            baseAccuracyMoa,
+            baseWeight: currentBuildBaseWeight,
+            baseEED,
+        };
+    }).filter(Boolean);
+
+    cacheSet(EFTForge.state.processedCache, cacheKey, processedItems);
+    EFTForge.state.lastProcessedItems = processedItems;
+
+    applyAttachmentSort();
+}
+
 function applyAttachmentSearch(query) {
     EFTForge.state.currentSearchQuery = query.toLowerCase();
     applyAttachmentSort();

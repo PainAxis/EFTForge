@@ -530,23 +530,26 @@ function removeAttachment(parentNode, slotId, keepTableOpen = false) {
         applyAttachmentSort();
     }
 
-    // If the table is still open for a different slot, clear stale conflict
-    // states caused by the removed attachment(s) and re-render the rows.
+    // If the table is still open (same slot with keepTableOpen, or a different slot
+    // entirely), clear stale conflict states for instant feedback, then silently refetch
+    // stats in the background - simErgo/simRecoilV/simRecoilH/simWeight/simEED were
+    // computed against the pre-removal installed-ids snapshot and are now stale after
+    // *any* attachment removal (not just one that resolves a conflict), so the hover
+    // delta bars need fresh numbers or they won't match what actually gets installed.
     if (EFTForge.state.lastParentNode && EFTForge.state.lastSlot && EFTForge.state.lastProcessedItems.length > 0) {
         const removedItemIds = new Set([...removedNodes].map(n => n.item.id));
 
-        let didClear = false;
         for (const entry of EFTForge.state.lastProcessedItems) {
             if (entry.hasConflict && removedItemIds.has(entry.conflictingItemId)) {
                 entry.hasConflict = false;
                 entry.conflictName = null;
                 entry.conflictingItemId = null;
                 entry.conflictingSlotId = null;
-                didClear = true;
             }
         }
 
-        if (didClear) applyAttachmentSort();
+        applyAttachmentSort();
+        if (typeof _reprocessOpenSlot === "function") _reprocessOpenSlot();
 
         // Same for combo mode: clear stale conflict on combo entries whose
         // conflicting item was just removed, then update highlights in place.
