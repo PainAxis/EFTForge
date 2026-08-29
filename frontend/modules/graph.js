@@ -792,7 +792,6 @@ function _buildGraphSVG(container, { fromLerp = false } = {}) {
             const { e, ox, oy, xStr, yStr, cls, shortName } = p;
             const x  = ox, y = oy - ih / 2 - ICON_GAP;
             const ix = (x - iw / 2).toFixed(1), iy = (y - ih / 2).toFixed(1);
-            const iconBottomY = oy - ICON_GAP;
 
             let tipAttr;
             if (isMulti) {

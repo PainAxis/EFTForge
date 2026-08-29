@@ -1,5 +1,8 @@
 window.EFTForge = window.EFTForge || {};
 
+/* exported updateSlotIcon, flashTree, flashConflictInTree, flashConflictSlotInTree, installAttachment,
+   collectAttachmentIds, undoBuildAction, redoBuildAction -- called from other modules or index.html attributes */
+
 let _publishLockedToastTs = 0;
 function _showPublishLockedToast() {
     const now = Date.now();
@@ -275,22 +278,6 @@ async function renderNode(node, depth, parentElement) {
             await renderNode(installed, depth + 1, childContainer);
         }
     }
-}
-
-function findNodeInTree(treeNode, targetParentNode, targetSlotId) {
-
-    // Walk the build tree to find the installed node that sits at
-    // targetParentNode[targetSlotId], and return it
-    if (treeNode === targetParentNode) {
-        return treeNode.children[targetSlotId] || null;
-    }
-
-    for (const slotId in treeNode.children) {
-        const result = findNodeInTree(treeNode.children[slotId], targetParentNode, targetSlotId);
-        if (result) return result;
-    }
-
-    return null;
 }
 
 function findSlotElement(parentNode, slotId) {

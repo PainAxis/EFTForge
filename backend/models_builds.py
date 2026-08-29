@@ -11,35 +11,41 @@ def _utcnow():
 class PublicBuildAuthor(BuildsBase):
     __tablename__ = "public_build_authors"
 
-    id              = Column(String, primary_key=True)   # admin-assigned slug, e.g. "shroud"
-    display_name    = Column(String, nullable=False)
+    id = Column(String, primary_key=True)  # admin-assigned slug, e.g. "shroud"
+    display_name = Column(String, nullable=False)
     display_name_zh = Column(String, nullable=True)
-    avatar_url      = Column(String, nullable=True)
+    avatar_url = Column(String, nullable=True)
 
 
 class PublicBuild(BuildsBase):
     __tablename__ = "public_builds"
 
-    id             = Column(Integer, primary_key=True, autoincrement=True)
-    gun_id         = Column(String, nullable=False)
-    gun_name       = Column(String, nullable=False)
-    build_name     = Column(String, nullable=False)      # sanitized, max 60 chars
-    pairs_json     = Column(Text, nullable=False)        # JSON [[slot_id, item_id], ...]
-    ip_hash        = Column(String, nullable=False)      # client_id_hash; named ip_hash for DB compat; never exposed
-    ip_snapshot    = Column(String, nullable=True)       # raw client IP at publish time, for admin forensics only
-    author_id      = Column(String, ForeignKey("public_build_authors.id"), nullable=True)
-    published_at   = Column(DateTime, nullable=False, default=_utcnow)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    gun_id = Column(String, nullable=False)
+    gun_name = Column(String, nullable=False)
+    build_name = Column(String, nullable=False)  # sanitized, max 60 chars
+    pairs_json = Column(Text, nullable=False)  # JSON [[slot_id, item_id], ...]
+    ip_hash = Column(String, nullable=False)  # client_id_hash; named ip_hash for DB compat; never exposed
+    ip_snapshot = Column(String, nullable=True)  # raw client IP at publish time, for admin forensics only
+    author_id = Column(String, ForeignKey("public_build_authors.id"), nullable=True)
+    published_at = Column(DateTime, nullable=False, default=_utcnow)
     is_admin_build = Column(Boolean, nullable=False, default=False)
-    is_featured    = Column(Boolean, nullable=False, default=False)  # any build can be featured by admin regardless of who published it
-    is_rotating    = Column(Boolean, nullable=False, default=False)  # true when this build was promoted by the rotate-featured endpoint
-    stats_json     = Column(Text, nullable=True)         # JSON {ergo,recoil_v,recoil_h,weight,eed,overswing,arm_stam}
-    total_price_rub = Column(Integer, nullable=True)     # sum of all item trader_price_rub at publish time
-    load_count        = Column(Integer, nullable=False, default=0)  # how many times any user has loaded this build
-    card_image_url    = Column(String, nullable=True)      # optional custom card image (e.g. GitHub raw URL); overrides the default gun image
-    ammo_id           = Column(String, nullable=True)      # selected ammo at save/publish time; restored on load
+    is_featured = Column(
+        Boolean, nullable=False, default=False
+    )  # any build can be featured by admin regardless of who published it
+    is_rotating = Column(
+        Boolean, nullable=False, default=False
+    )  # true when this build was promoted by the rotate-featured endpoint
+    stats_json = Column(Text, nullable=True)  # JSON {ergo,recoil_v,recoil_h,weight,eed,overswing,arm_stam}
+    total_price_rub = Column(Integer, nullable=True)  # sum of all item trader_price_rub at publish time
+    load_count = Column(Integer, nullable=False, default=0)  # how many times any user has loaded this build
+    card_image_url = Column(
+        String, nullable=True
+    )  # optional custom card image (e.g. GitHub raw URL); overrides the default gun image
+    ammo_id = Column(String, nullable=True)  # selected ammo at save/publish time; restored on load
     user_display_name = Column(String(30), nullable=True)  # self-reported username at publish time
-    user_avatar_url   = Column(String(500), nullable=True) # self-reported avatar URL (Gitee-hosted)
-    tags_json         = Column(Text, nullable=True)        # JSON list of tag keys e.g. ["meta","pve"]
+    user_avatar_url = Column(String(500), nullable=True)  # self-reported avatar URL (Gitee-hosted)
+    tags_json = Column(Text, nullable=True)  # JSON list of tag keys e.g. ["meta","pve"]
 
     __table_args__ = (
         Index("ix_public_builds_gun_id", "gun_id"),
@@ -50,45 +56,43 @@ class PublicBuild(BuildsBase):
 class IPBan(BuildsBase):
     __tablename__ = "ip_bans"
 
-    ip_hash      = Column(String, primary_key=True)   # stores client_id_hash
-    banned_at    = Column(DateTime, nullable=False, default=_utcnow)
-    banned_until = Column(DateTime, nullable=True)    # None = permanent
-    reason       = Column(String, nullable=True)
+    ip_hash = Column(String, primary_key=True)  # stores client_id_hash
+    banned_at = Column(DateTime, nullable=False, default=_utcnow)
+    banned_until = Column(DateTime, nullable=True)  # None = permanent
+    reason = Column(String, nullable=True)
 
 
 class PendingNotification(BuildsBase):
     __tablename__ = "pending_notifications"
 
-    id         = Column(Integer, primary_key=True, autoincrement=True)
-    ip_hash    = Column(String, nullable=False)   # client_id_hash of the recipient
-    type       = Column(String, nullable=False)   # "ban" | "unlist"
-    data_json  = Column(Text, nullable=False)     # JSON payload
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ip_hash = Column(String, nullable=False)  # client_id_hash of the recipient
+    type = Column(String, nullable=False)  # "ban" | "unlist"
+    data_json = Column(Text, nullable=False)  # JSON payload
     created_at = Column(DateTime, nullable=False, default=_utcnow)
-    delivered  = Column(Boolean, nullable=False, default=False)
+    delivered = Column(Boolean, nullable=False, default=False)
 
-    __table_args__ = (
-        Index("ix_pending_notifications_ip_hash", "ip_hash"),
-    )
+    __table_args__ = (Index("ix_pending_notifications_ip_hash", "ip_hash"),)
 
 
 class ServerAnnouncement(BuildsBase):
     __tablename__ = "server_announcements"
 
-    id          = Column(Integer, primary_key=True, autoincrement=True)
-    message     = Column(String, nullable=False)
-    level       = Column(String, nullable=False, default="info")  # "info" | "warning" | "error"
-    created_at  = Column(DateTime, nullable=False, default=_utcnow)
-    expires_at  = Column(DateTime, nullable=True)    # None = never expires
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    message = Column(String, nullable=False)
+    level = Column(String, nullable=False, default="info")  # "info" | "warning" | "error"
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    expires_at = Column(DateTime, nullable=True)  # None = never expires
     dismissible = Column(Boolean, nullable=False, default=True)  # False = toast cannot be click-dismissed
 
 
 class BuildVote(BuildsBase):
     __tablename__ = "build_votes"
 
-    id         = Column(Integer, primary_key=True, autoincrement=True)
-    build_id   = Column(Integer, nullable=False)
-    ip_hash    = Column(String, nullable=False)  # HMAC-SHA256 hex, never raw IP
-    vote       = Column(String, nullable=False)  # "like" or "dislike"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    build_id = Column(Integer, nullable=False)
+    ip_hash = Column(String, nullable=False)  # HMAC-SHA256 hex, never raw IP
+    vote = Column(String, nullable=False)  # "like" or "dislike"
     created_at = Column(DateTime, nullable=False, default=_utcnow)
 
     __table_args__ = (
@@ -101,23 +105,23 @@ class BuildVote(BuildsBase):
 class BuildRating(BuildsBase):
     __tablename__ = "build_ratings"
 
-    build_id      = Column(Integer, primary_key=True)
-    like_count    = Column(Integer, nullable=False, default=0)
+    build_id = Column(Integer, primary_key=True)
+    like_count = Column(Integer, nullable=False, default=0)
     dislike_count = Column(Integer, nullable=False, default=0)
-    last_updated  = Column(DateTime, nullable=False, default=_utcnow)
+    last_updated = Column(DateTime, nullable=False, default=_utcnow)
 
 
 class BuildComment(BuildsBase):
     __tablename__ = "build_comments"
 
-    id                = Column(Integer, primary_key=True, autoincrement=True)
-    build_id          = Column(Integer, nullable=False)
-    ip_hash           = Column(String, nullable=False)
-    content           = Column(String(280), nullable=False)
-    created_at        = Column(DateTime, nullable=False, default=_utcnow)
-    is_deleted        = Column(Boolean, nullable=False, default=False)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    build_id = Column(Integer, nullable=False)
+    ip_hash = Column(String, nullable=False)
+    content = Column(String(280), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    is_deleted = Column(Boolean, nullable=False, default=False)
     user_display_name = Column(String(30), nullable=True)
-    user_avatar_url   = Column(String(500), nullable=True)
+    user_avatar_url = Column(String(500), nullable=True)
 
     __table_args__ = (
         Index("ix_build_comments_build_id", "build_id"),

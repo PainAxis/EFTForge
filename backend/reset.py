@@ -140,12 +140,20 @@ def start_server_prod():
     """Production server: no --reload, multi-worker via Gunicorn + Uvicorn workers."""
     print("Starting server (production)...")
     workers = str(os.cpu_count() or 2)
-    subprocess.run([
-        sys.executable, "-m", "gunicorn", "main:app",
-        "-w", workers,
-        "-k", "uvicorn.workers.UvicornWorker",
-        "--bind", "0.0.0.0:8000",
-    ])
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "gunicorn",
+            "main:app",
+            "-w",
+            workers,
+            "-k",
+            "uvicorn.workers.UvicornWorker",
+            "--bind",
+            "0.0.0.0:8000",
+        ]
+    )
 
 
 if __name__ == "__main__":

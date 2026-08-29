@@ -31,14 +31,31 @@ from database_ratings import ratings_engine, RatingsSessionLocal, RatingsBase
 from models_ratings import AttachmentVote, AttachmentRating  # noqa: F401 - registers tables
 
 from database_builds import builds_engine, BuildsSessionLocal, BuildsBase
-from models_builds import PublicBuild, PublicBuildAuthor, IPBan, PendingNotification, ServerAnnouncement, BuildVote, BuildRating, BuildComment  # noqa: F401 - registers tables
+from models_builds import (
+    PublicBuild,
+    PublicBuildAuthor,
+    IPBan,
+    PendingNotification,
+    ServerAnnouncement,
+    BuildVote,
+    BuildRating,
+    BuildComment,
+)  # noqa: F401 - registers tables
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import CORS_ORIGINS, IP_HASH_SECRET, ADMIN_API_KEY, ENABLE_API_DOCS, TRUSTED_PROXY_IPS, RUNTIME_DIR, DESKTOP_MODE
+from config import (
+    CORS_ORIGINS,
+    IP_HASH_SECRET,
+    ADMIN_API_KEY,
+    ENABLE_API_DOCS,
+    TRUSTED_PROXY_IPS,
+    RUNTIME_DIR,
+    DESKTOP_MODE,
+)
 
-_docs_url    = "/docs"    if ENABLE_API_DOCS else None
-_redoc_url   = "/redoc"   if ENABLE_API_DOCS else None
+_docs_url = "/docs" if ENABLE_API_DOCS else None
+_redoc_url = "/redoc" if ENABLE_API_DOCS else None
 _openapi_url = "/openapi.json" if ENABLE_API_DOCS else None
 
 app = FastAPI(title="EFTForge API", docs_url=_docs_url, redoc_url=_redoc_url, openapi_url=_openapi_url)
@@ -49,21 +66,23 @@ SERVER_START_TIME = int(time.time())
 
 # Validation constants
 STRENGTH_LEVEL_MIN = 0
-STRENGTH_LEVEL_MAX = 51   # 0 = no skill, 51 = elite
-EQUIP_ERGO_MIN = -1.0     # negative = armor/rig ergonomics penalty
-EQUIP_ERGO_MAX = 1.0      # positive = ergonomics bonus
+STRENGTH_LEVEL_MAX = 51  # 0 = no skill, 51 = elite
+EQUIP_ERGO_MIN = -1.0  # negative = armor/rig ergonomics penalty
+EQUIP_ERGO_MAX = 1.0  # positive = ergonomics bonus
 
 # Request complexity caps - generous for real clients, block abuse of the
 # CPU-heavy calculation endpoints with arbitrarily large payloads.
 MAX_INSTALLED_IDS = 300
 MAX_CANDIDATE_IDS = 2000
-MAX_COMBO_BATCH   = 5000
-MAX_IMAGE_ITEMS   = 150
+MAX_COMBO_BATCH = 5000
+MAX_IMAGE_ITEMS = 150
 MAX_STATS_JSON_CHARS = 2000
+
 
 def _cap_list(name: str, value: list, limit: int) -> None:
     if len(value) > limit:
         raise HTTPException(status_code=422, detail=f"{name} exceeds maximum length of {limit}")
+
 
 app.add_middleware(GZIPMiddleware, minimum_size=500)
 app.add_middleware(
@@ -213,7 +232,6 @@ def _migrate_items_db():
             conn.commit()
 
 
-
 def _migrate_slots_db():
     with engine.connect() as conn:
         existing = {row[1] for row in conn.execute(text("PRAGMA table_info(slots)"))}
@@ -234,8 +252,10 @@ _migrate_slots_db()
 # Language helpers
 # ---------------------------------------------------
 
+
 def _item_name(item, lang: str) -> str:
     return (item.name_zh or item.name) if lang == "zh" else item.name
+
 
 def _item_short_name(item, lang: str) -> str:
     return (item.short_name_zh or item.short_name) if lang == "zh" else item.short_name
@@ -245,12 +265,14 @@ def _item_short_name(item, lang: str) -> str:
 # Database
 # ---------------------------------------------------
 
+
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
 
 def get_ratings_db():
     db = RatingsSessionLocal()
@@ -259,12 +281,14 @@ def get_ratings_db():
     finally:
         db.close()
 
+
 def get_builds_db():
     db = BuildsSessionLocal()
     try:
         yield db
     finally:
         db.close()
+
 
 def get_changelog_db():
     db = ChangelogSessionLocal()
@@ -278,11 +302,13 @@ def get_changelog_db():
 # Ratings helpers
 # ---------------------------------------------------
 
-_ITEM_ID_RE = re.compile(r'^[0-9a-f]{24}$')
+_ITEM_ID_RE = re.compile(r"^[0-9a-f]{24}$")
+
 
 def _validate_item_id(item_id: str) -> None:
     if not _ITEM_ID_RE.match(item_id):
         raise HTTPException(status_code=400, detail="Invalid item_id format")
+
 
 def _get_client_ip(request: Request) -> str:
     """Return the real client IP. Forwarding headers are only trusted when the
@@ -297,21 +323,25 @@ def _get_client_ip(request: Request) -> str:
             return xri.strip()
     return direct_ip
 
+
 # Admin brute-force lockout: ip -> (fail_count, lockout_until_monotonic, last_failure_monotonic)
 _admin_failures: dict[str, tuple[int, float, float]] = {}
 _ADMIN_MAX_FAILURES = 5
 _ADMIN_LOCKOUT_SECONDS = 600  # 10 minutes
 
+
 def _evict_expired_admin_failures(now: float) -> None:
     """Remove expired lockouts and idle below-threshold entries so the dict
     cannot grow without bound under failed-auth probes from many IPs."""
     expired = [
-        ip for ip, (_, lockout_until, last_fail) in _admin_failures.items()
+        ip
+        for ip, (_, lockout_until, last_fail) in _admin_failures.items()
         if (lockout_until > 0 and lockout_until < now)
         or (lockout_until == 0 and now - last_fail > _ADMIN_LOCKOUT_SECONDS)
     ]
     for ip in expired:
         del _admin_failures[ip]
+
 
 # Community builds kill switch.
 # Persisted via a sentinel file so it survives server restarts.
@@ -330,12 +360,13 @@ _IMGGEN_DISABLED_LOCK_FILE = os.path.join(RUNTIME_DIR, "imggen_disabled.lock")
 # in connected mode the community proxy forwards it to prod first. The frontend
 # already renders a disabled preview toggle off /build-image/busy's flag.
 _imggen_disabled: bool = os.path.exists(_IMGGEN_DISABLED_LOCK_FILE) or DESKTOP_MODE
-_SYNC_INTERVAL_HYPERACTIVE_SECS = 1800   # 30 minutes
+_SYNC_INTERVAL_HYPERACTIVE_SECS = 1800  # 30 minutes
 _sync_running: bool = False
 _last_sync_at: float | None = None
 _sync_trigger: asyncio.Event = asyncio.Event()
 # Written before the subprocess starts and removed after - visible to all gunicorn workers.
 _SYNC_IN_PROGRESS_FILE = os.path.join(RUNTIME_DIR, "sync_in_progress.lock")
+
 
 def _require_admin(request: Request, x_admin_key: str = Header(None)) -> None:
     if not ADMIN_API_KEY:
@@ -364,9 +395,8 @@ def _require_admin(request: Request, x_admin_key: str = Header(None)) -> None:
 # ---------------------------------------------------
 
 # UUID v4 format: 8-4-4-4-12 hex, version nibble = 4, variant bits = 8|9|a|b
-_CLIENT_ID_RE = re.compile(
-    r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-)
+_CLIENT_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+
 
 def _get_client_id_hash(x_client_id: str | None) -> str:
     """Validate the X-Client-ID header and return its HMAC-SHA256 hash.
@@ -378,6 +408,7 @@ def _get_client_id_hash(x_client_id: str | None) -> str:
         x_client_id.strip().lower().encode(),
         hashlib.sha256,
     ).hexdigest()
+
 
 def _get_optional_client_id_hash(x_client_id: str | None) -> str | None:
     """Return the client_id_hash if the header is present and valid, else None."""
@@ -395,6 +426,7 @@ def _get_optional_client_id_hash(x_client_id: str | None) -> str | None:
 
 _logger = logging.getLogger(__name__)
 
+
 def _safe_json_loads(s: str | None):
     """Parse a JSON string; return None and log on corruption instead of raising."""
     if not s:
@@ -404,6 +436,7 @@ def _safe_json_loads(s: str | None):
     except (json.JSONDecodeError, ValueError):
         _logger.error("Corrupted JSON in build record: %.60r", s)
         return None
+
 
 # publish rate limit: client_id_hash -> monotonic time of last successful publish
 _publish_last: dict[str, float] = {}
@@ -425,11 +458,13 @@ _AVATAR_COOLDOWN = 90.0
 _username_last: dict[str, float] = {}
 _USERNAME_COOLDOWN = 60.0
 
-_HTML_TAG_RE = re.compile(r'<[^>]+>')
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
 
 def _sanitize_build_name(raw: str) -> str:
     """Strip HTML tags and collapse whitespace."""
     return " ".join(_HTML_TAG_RE.sub("", raw).split())
+
 
 def _check_client_ban(client_id_hash: str, db: Session) -> None:
     """Raise 403 if the client is currently banned from publishing."""
@@ -438,6 +473,7 @@ def _check_client_ban(client_id_hash: str, db: Session) -> None:
         return
     if ban.banned_until is None or ban.banned_until > datetime.now(timezone.utc).replace(tzinfo=None):
         raise HTTPException(status_code=403, detail="You are banned from publishing.")
+
 
 def _validate_pairs(pairs: list, db_main: Session) -> None:
     """Validate that pairs has at least one attachment and all item IDs exist."""
@@ -454,8 +490,10 @@ def _validate_pairs(pairs: list, db_main: Session) -> None:
 # Shared calculation helpers (no DB access)
 # ---------------------------------------------------
 
-def _compute_stats(base_item, current_ids: list, items_map: dict,
-                   strength_level: int = 10, equip_ergo_modifier: float = 0.0) -> dict:
+
+def _compute_stats(
+    base_item, current_ids: list, items_map: dict, strength_level: int = 10, equip_ergo_modifier: float = 0.0
+) -> dict:
     """Compute build stats from pre-loaded items. No DB queries."""
     factory_ids = base_item.factory_attachment_ids.split(",") if base_item.factory_attachment_ids else []
     factory_set = set(factory_ids)
@@ -470,8 +508,16 @@ def _compute_stats(base_item, current_ids: list, items_map: dict,
     if factory_intact:
         total_ergo = factory_ergo
         total_weight = factory_weight
-        total_recoil_v = base_item.factory_recoil_vertical if base_item.factory_recoil_vertical is not None else base_item.recoil_vertical
-        total_recoil_h = base_item.factory_recoil_horizontal if base_item.factory_recoil_horizontal is not None else base_item.recoil_horizontal
+        total_recoil_v = (
+            base_item.factory_recoil_vertical
+            if base_item.factory_recoil_vertical is not None
+            else base_item.recoil_vertical
+        )
+        total_recoil_h = (
+            base_item.factory_recoil_horizontal
+            if base_item.factory_recoil_horizontal is not None
+            else base_item.recoil_horizontal
+        )
     else:
         total_ergo = receiver_ergo
         total_weight = receiver_weight
@@ -519,15 +565,15 @@ def _compute_stats(base_item, current_ids: list, items_map: dict,
 
     b = equip_ergo_modifier
     E = total_ergo * (1 + b)
-    KG = 0.0007556 * (E ** 2) + 0.02736 * E + 2.9159
+    KG = 0.0007556 * (E**2) + 0.02736 * E + 2.9159
     evo_weight = total_weight - KG
     eed = -15 * evo_weight
 
     arm_stamina = (
-        (85.5 / (total_weight + 0.65))
-        + 9.15
-        + 0.06477 * total_ergo * (1 + b / 2)
-    ) / 1.04 * (1 + strength_level * 0.004)
+        ((85.5 / (total_weight + 0.65)) + 9.15 + 0.06477 * total_ergo * (1 + b / 2))
+        / 1.04
+        * (1 + strength_level * 0.004)
+    )
 
     # Effective sighting range: max scope sighting range installed, else weapon base
     effective_sighting_range = base_item.sighting_range
@@ -581,9 +627,15 @@ def _dedup_by_stats(combos: list) -> list:
     return result
 
 
-def _check_conflicts(candidate, candidate_id: str, installed_set: set,
-                     installed_items_map: dict, slots_by_item: dict,
-                     slot_id: str, lang: str) -> dict:
+def _check_conflicts(
+    candidate,
+    candidate_id: str,
+    installed_set: set,
+    installed_items_map: dict,
+    slots_by_item: dict,
+    slot_id: str,
+    lang: str,
+) -> dict:
     """Run all four conflict checks using pre-loaded data. No DB queries."""
     # Item ↔ item
     if candidate.conflicting_item_ids:
@@ -592,9 +644,13 @@ def _check_conflicts(candidate, candidate_id: str, installed_set: set,
         if overlap:
             conflicting = installed_items_map.get(list(overlap)[0])
             if conflicting:
-                return {"valid": False, "reason_key": "conflict.incompatibleWith",
-                        "reason_name": _item_name(conflicting, lang),
-                        "conflicting_item_id": conflicting.id, "conflicting_slot_id": None}
+                return {
+                    "valid": False,
+                    "reason_key": "conflict.incompatibleWith",
+                    "reason_name": _item_name(conflicting, lang),
+                    "conflicting_item_id": conflicting.id,
+                    "conflicting_slot_id": None,
+                }
 
     # Slot ↔ slot
     if candidate.conflicting_slot_ids:
@@ -602,33 +658,51 @@ def _check_conflicts(candidate, candidate_id: str, installed_set: set,
         for iid in installed_set:
             for s in slots_by_item.get(iid, []):
                 if s.id in conflict_slots:
-                    return {"valid": False, "reason_key": "conflict.slot",
-                            "reason_name": s.slot_name,
-                            "conflicting_item_id": None, "conflicting_slot_id": s.id}
+                    return {
+                        "valid": False,
+                        "reason_key": "conflict.slot",
+                        "reason_name": s.slot_name,
+                        "conflicting_item_id": None,
+                        "conflicting_slot_id": s.id,
+                    }
 
     # Reverse item ↔ item
     for inst_item in installed_items_map.values():
         if inst_item.conflicting_item_ids:
             if candidate_id in set(inst_item.conflicting_item_ids.split(",")):
-                return {"valid": False, "reason_key": "conflict.incompatibleWith",
-                        "reason_name": _item_name(inst_item, lang),
-                        "conflicting_item_id": inst_item.id, "conflicting_slot_id": None}
+                return {
+                    "valid": False,
+                    "reason_key": "conflict.incompatibleWith",
+                    "reason_name": _item_name(inst_item, lang),
+                    "conflicting_item_id": inst_item.id,
+                    "conflicting_slot_id": None,
+                }
 
     # Reverse slot
     for inst_item in installed_items_map.values():
         if inst_item.conflicting_slot_ids:
             if slot_id in set(inst_item.conflicting_slot_ids.split(",")):
-                return {"valid": False, "reason_key": "conflict.blockedBy",
-                        "reason_name": _item_name(inst_item, lang),
-                        "conflicting_item_id": inst_item.id, "conflicting_slot_id": None}
+                return {
+                    "valid": False,
+                    "reason_key": "conflict.blockedBy",
+                    "reason_name": _item_name(inst_item, lang),
+                    "conflicting_item_id": inst_item.id,
+                    "conflicting_slot_id": None,
+                }
 
-    return {"valid": True, "reason_key": None, "reason_name": None,
-            "conflicting_item_id": None, "conflicting_slot_id": None}
+    return {
+        "valid": True,
+        "reason_key": None,
+        "reason_name": None,
+        "conflicting_item_id": None,
+        "conflicting_slot_id": None,
+    }
 
 
 # ---------------------------------------------------
 # Health check
 # ---------------------------------------------------
+
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health_check(request: Request, db: Session = Depends(get_db)):
@@ -687,16 +761,20 @@ _PROXY_MAX_BYTES = 20 * 1024 * 1024  # 20 MB cap per proxied asset
 # Identifying user agent so upstreams can tell what
 # the traffic is instead of seeing a generic python-requests default.
 import requests as _requests
+
 _http_session = _requests.Session()
 _http_session.headers["User-Agent"] = "EFTForge (+https://eftforge.com; +https://github.com/SouthHorizons76/EFTForge)"
+
 
 def _proxy_host_allowed(netloc: str) -> bool:
     # Exact match or subdomain of an allowed host (e.g. foruda.gitee.com for gitee.com avatars)
     return netloc in _PROXY_ALLOWED_HOSTS or any(netloc.endswith("." + h) for h in _PROXY_ALLOWED_HOSTS)
 
+
 @app.get("/proxy-asset")
 def proxy_asset(url: str, request: Request):
     from urllib.parse import urlparse
+
     parsed = urlparse(url)
     if not _proxy_host_allowed(parsed.netloc) or parsed.scheme != "https":
         raise HTTPException(status_code=400, detail="URL not in proxy allowlist")
@@ -754,20 +832,22 @@ def proxy_asset(url: str, request: Request):
         },
     )
 
+
 # ---------------------------------------------------
 # Traders
 # ---------------------------------------------------
+
 
 @app.get("/traders")
 def get_traders(db: Session = Depends(get_db)):
     traders = db.query(Trader).all()
     return [
         {
-            "id":             t.id,
-            "name":           t.name,
+            "id": t.id,
+            "name": t.name,
             "normalizedName": t.normalized_name,
-            "imageLink":      t.image_link,
-            "image4xLink":    t.image_4x_link,
+            "imageLink": t.image_link,
+            "image4xLink": t.image_4x_link,
         }
         for t in traders
     ]
@@ -775,6 +855,7 @@ def get_traders(db: Session = Depends(get_db)):
 
 # Weapons
 # ---------------------------------------------------
+
 
 @app.get("/guns")
 def get_guns(lang: str = "en", db: Session = Depends(get_db)):
@@ -789,131 +870,146 @@ def get_guns(lang: str = "en", db: Session = Depends(get_db)):
         else:
             factory_ids = []
 
-        result.append({
-            "id": gun.id,
-            "name": _item_name(gun, lang),
-            "short_name": _item_short_name(gun, lang),
-            "base_ergo": gun.factory_ergonomics or gun.base_ergonomics or 0,
-            "weight": gun.weight or 0,
-            "icon_link": gun.icon_link,
-            "preset_icon_link": gun.preset_icon_link,
-            "image_512_link": gun.image_512_link,
-            "bare_image_512_link": gun.bare_image_512_link,
-            "factory_attachment_ids": factory_ids,
-            "caliber": gun.caliber,
-            "weapon_category": gun.weapon_category,
-            "recoil_vertical": gun.recoil_vertical,
-            "recoil_horizontal": gun.recoil_horizontal,
-            "sighting_range": gun.sighting_range,
-            "center_of_impact": gun.center_of_impact,
-            "camera_snap": gun.camera_snap,
-            "deviation_curve": gun.deviation_curve,
-            "deviation_max": gun.deviation_max,
-            "recoil_angle": gun.recoil_angle,
-            "camera_recoil": gun.camera_recoil,
-            "convergence": gun.convergence,
-            "recoil_dispersion": gun.recoil_dispersion,
-            "aim_sensitivity": gun.aim_sensitivity,
-            "cam_angle_step": gun.cam_angle_step,
-            "mount_cam_snap": gun.mount_cam_snap,
-            "mount_h_rec": gun.mount_h_rec,
-            "mount_v_rec": gun.mount_v_rec,
-            "mount_breath": gun.mount_breath,
-            "rec_hand_rot": gun.rec_hand_rot,
-            "rec_force_back": gun.rec_force_back,
-            "rec_force_up": gun.rec_force_up,
-            "rec_return_speed": gun.rec_return_speed,
-            "trader_price":     gun.trader_price,
-            "trader_price_rub": gun.trader_price_rub,
-            "trader_currency":  gun.trader_currency,
-            "trader_vendor":    gun.trader_vendor,
-            "trader_min_level": gun.trader_min_level,
-        })
+        result.append(
+            {
+                "id": gun.id,
+                "name": _item_name(gun, lang),
+                "short_name": _item_short_name(gun, lang),
+                "base_ergo": gun.factory_ergonomics or gun.base_ergonomics or 0,
+                "weight": gun.weight or 0,
+                "icon_link": gun.icon_link,
+                "preset_icon_link": gun.preset_icon_link,
+                "image_512_link": gun.image_512_link,
+                "bare_image_512_link": gun.bare_image_512_link,
+                "factory_attachment_ids": factory_ids,
+                "caliber": gun.caliber,
+                "weapon_category": gun.weapon_category,
+                "recoil_vertical": gun.recoil_vertical,
+                "recoil_horizontal": gun.recoil_horizontal,
+                "sighting_range": gun.sighting_range,
+                "center_of_impact": gun.center_of_impact,
+                "camera_snap": gun.camera_snap,
+                "deviation_curve": gun.deviation_curve,
+                "deviation_max": gun.deviation_max,
+                "recoil_angle": gun.recoil_angle,
+                "camera_recoil": gun.camera_recoil,
+                "convergence": gun.convergence,
+                "recoil_dispersion": gun.recoil_dispersion,
+                "aim_sensitivity": gun.aim_sensitivity,
+                "cam_angle_step": gun.cam_angle_step,
+                "mount_cam_snap": gun.mount_cam_snap,
+                "mount_h_rec": gun.mount_h_rec,
+                "mount_v_rec": gun.mount_v_rec,
+                "mount_breath": gun.mount_breath,
+                "rec_hand_rot": gun.rec_hand_rot,
+                "rec_force_back": gun.rec_force_back,
+                "rec_force_up": gun.rec_force_up,
+                "rec_return_speed": gun.rec_return_speed,
+                "trader_price": gun.trader_price,
+                "trader_price_rub": gun.trader_price_rub,
+                "trader_currency": gun.trader_currency,
+                "trader_vendor": gun.trader_vendor,
+                "trader_min_level": gun.trader_min_level,
+            }
+        )
 
     return result
+
 
 @app.get("/graph/searchable-items")
 def get_graph_searchable_items(db: Session = Depends(get_db)):
     from sqlalchemy import exists as sa_exists
-    guns = db.query(Item).filter(
-        Item.is_weapon == True,
-        Item.caliber != "Caliber26x75",
-        ~Item.name.ilike("%rocket%"),
-        ~Item.name.ilike("%rshg%"),
-    ).order_by(Item.weapon_category, Item.name).all()
-    attachments = db.query(Item).filter(
-        Item.is_weapon == False,
-        Item.is_ammo == False,
-        sa_exists().where(SlotAllowedItem.allowed_item_id == Item.id),
-    ).order_by(Item.name).all()
+
+    guns = (
+        db.query(Item)
+        .filter(
+            Item.is_weapon == True,
+            Item.caliber != "Caliber26x75",
+            ~Item.name.ilike("%rocket%"),
+            ~Item.name.ilike("%rshg%"),
+        )
+        .order_by(Item.weapon_category, Item.name)
+        .all()
+    )
+    attachments = (
+        db.query(Item)
+        .filter(
+            Item.is_weapon == False,
+            Item.is_ammo == False,
+            sa_exists().where(SlotAllowedItem.allowed_item_id == Item.id),
+        )
+        .order_by(Item.name)
+        .all()
+    )
     return {
         "guns": [
             {
-                "id":                        g.id,
-                "name":                      g.name,
-                "short_name":                g.short_name,
-                "name_zh":                   g.name_zh,
-                "short_name_zh":             g.short_name_zh,
-                "weapon_category":           g.weapon_category,
-                "base_ergonomics":           g.base_ergonomics,
-                "factory_ergonomics":        g.factory_ergonomics,
-                "recoil_vertical":           g.recoil_vertical,
-                "recoil_horizontal":         g.recoil_horizontal,
-                "factory_recoil_vertical":   g.factory_recoil_vertical,
+                "id": g.id,
+                "name": g.name,
+                "short_name": g.short_name,
+                "name_zh": g.name_zh,
+                "short_name_zh": g.short_name_zh,
+                "weapon_category": g.weapon_category,
+                "base_ergonomics": g.base_ergonomics,
+                "factory_ergonomics": g.factory_ergonomics,
+                "recoil_vertical": g.recoil_vertical,
+                "recoil_horizontal": g.recoil_horizontal,
+                "factory_recoil_vertical": g.factory_recoil_vertical,
                 "factory_recoil_horizontal": g.factory_recoil_horizontal,
-                "icon_link":                 g.icon_link,
-                "base_image_link":           g.base_image_link,
-                "image_512_link":            g.image_512_link,
-                "bare_image_512_link":       g.bare_image_512_link,
+                "icon_link": g.icon_link,
+                "base_image_link": g.base_image_link,
+                "image_512_link": g.image_512_link,
+                "bare_image_512_link": g.bare_image_512_link,
             }
             for g in guns
         ],
         "attachments": [
             {
-                "id":                  a.id,
-                "name":                a.name,
-                "short_name":          a.short_name,
-                "name_zh":             a.name_zh,
-                "short_name_zh":       a.short_name_zh,
+                "id": a.id,
+                "name": a.name,
+                "short_name": a.short_name,
+                "name_zh": a.name_zh,
+                "short_name_zh": a.short_name_zh,
                 "ergonomics_modifier": a.ergonomics_modifier,
-                "recoil_modifier":     a.recoil_modifier,
-                "icon_link":           a.icon_link,
-                "base_image_link":     a.base_image_link,
+                "recoil_modifier": a.recoil_modifier,
+                "icon_link": a.icon_link,
+                "base_image_link": a.base_image_link,
             }
             for a in attachments
         ],
     }
 
+
 def _ammo_dto(a, lang: str) -> dict:
     return {
-        "id":                   a.id,
-        "name":                 _item_name(a, lang),
-        "short_name":           _item_short_name(a, lang),
-        "icon_link":            a.icon_link,
-        "weight":               a.weight,
-        "caliber":              a.caliber,
-        "ammo_type":            a.ammo_type,
-        "damage":               a.ammo_damage,
-        "penetration_power":    a.penetration_power,
-        "penetration_chance":   a.penetration_chance,
+        "id": a.id,
+        "name": _item_name(a, lang),
+        "short_name": _item_short_name(a, lang),
+        "icon_link": a.icon_link,
+        "weight": a.weight,
+        "caliber": a.caliber,
+        "ammo_type": a.ammo_type,
+        "damage": a.ammo_damage,
+        "penetration_power": a.penetration_power,
+        "penetration_chance": a.penetration_chance,
         "penetration_power_deviation": a.penetration_power_deviation,
-        "armor_damage":         a.armor_damage,
-        "velocity":             a.velocity,
-        "tracer":               a.tracer,
-        "tracer_color":         a.tracer_color,
-        "projectile_count":     a.projectile_count,
+        "armor_damage": a.armor_damage,
+        "velocity": a.velocity,
+        "tracer": a.tracer,
+        "tracer_color": a.tracer_color,
+        "projectile_count": a.projectile_count,
         "fragmentation_chance": a.fragmentation_chance,
-        "ricochet_chance":      a.ricochet_chance,
-        "stack_max_size":       a.stack_max_size,
-        "accuracy_modifier":    a.ammo_accuracy_modifier,
-        "recoil_modifier":      a.ammo_recoil_modifier,
-        "light_bleed_delta":    a.light_bleed_delta,
-        "heavy_bleed_delta":    a.heavy_bleed_delta,
-        "trader_price":         a.trader_price,
-        "trader_price_rub":     a.trader_price_rub,
-        "trader_currency":      a.trader_currency,
-        "trader_vendor":        a.trader_vendor,
-        "trader_min_level":     a.trader_min_level,
+        "ricochet_chance": a.ricochet_chance,
+        "stack_max_size": a.stack_max_size,
+        "accuracy_modifier": a.ammo_accuracy_modifier,
+        "recoil_modifier": a.ammo_recoil_modifier,
+        "light_bleed_delta": a.light_bleed_delta,
+        "heavy_bleed_delta": a.heavy_bleed_delta,
+        "trader_price": a.trader_price,
+        "trader_price_rub": a.trader_price_rub,
+        "trader_currency": a.trader_currency,
+        "trader_vendor": a.trader_vendor,
+        "trader_min_level": a.trader_min_level,
     }
 
 
@@ -939,25 +1035,26 @@ def get_all_ammo(lang: str = "en", db: Session = Depends(get_db)):
 
 @app.get("/ammo/{caliber}")
 def get_ammo_for_caliber(caliber: str, lang: str = "en", db: Session = Depends(get_db)):
-    ammo = db.query(Item).filter(
-        Item.is_ammo == True,
-        Item.caliber == caliber
-    ).order_by(Item.weight.asc()).all()
+    ammo = db.query(Item).filter(Item.is_ammo == True, Item.caliber == caliber).order_by(Item.weight.asc()).all()
 
     return [_ammo_dto(a, lang) for a in ammo]
+
 
 # ---------------------------------------------------
 # Item IDs (for client-side flea price prefetch)
 # ---------------------------------------------------
+
 
 @app.get("/items/ids")
 def get_item_ids(db: Session = Depends(get_db)):
     ids = db.query(Item.id).all()
     return [row[0] for row in ids]
 
+
 # ---------------------------------------------------
 # Slots
 # ---------------------------------------------------
+
 
 @app.get("/items/{item_id}/slots")
 def get_item_slots(item_id: str, db: Session = Depends(get_db)):
@@ -991,11 +1088,10 @@ def get_item_slots(item_id: str, db: Session = Depends(get_db)):
 # Allowed Items
 # ---------------------------------------------------
 
+
 @app.get("/slots/{slot_id}/allowed-items")
 def get_allowed_items(slot_id: str, lang: str = "en", db: Session = Depends(get_db)):
-    allowed = db.query(SlotAllowedItem).filter(
-        SlotAllowedItem.slot_id == slot_id
-    ).all()
+    allowed = db.query(SlotAllowedItem).filter(SlotAllowedItem.slot_id == slot_id).all()
 
     ids = [a.allowed_item_id for a in allowed]
 
@@ -1025,21 +1121,23 @@ def get_allowed_items(slot_id: str, lang: str = "en", db: Session = Depends(get_
             "magazine_capacity": item.magazine_capacity,
             "caliber": item.caliber,
             "is_weapon": item.is_weapon,
-            "trader_price":     item.trader_price,
+            "trader_price": item.trader_price,
             "trader_price_rub": item.trader_price_rub,
-            "trader_currency":  item.trader_currency,
-            "trader_vendor":    item.trader_vendor,
+            "trader_currency": item.trader_currency,
+            "trader_vendor": item.trader_vendor,
             "trader_min_level": item.trader_min_level,
-            "task_unlock_id":      item.task_unlock_id,
-            "task_unlock_name":    item.task_unlock_name,
+            "task_unlock_id": item.task_unlock_id,
+            "task_unlock_name": item.task_unlock_name,
             "task_unlock_name_zh": item.task_unlock_name_zh,
         }
         for item in items
     ]
 
+
 # ---------------------------------------------------
 # Batch endpoints for build reconstruction
 # ---------------------------------------------------
+
 
 @app.post("/slots/allowed-items/batch")
 def get_allowed_items_batch(
@@ -1049,50 +1147,49 @@ def get_allowed_items_batch(
 ):
     if not slot_ids:
         return {}
-    allowed_rows = db.query(SlotAllowedItem).filter(
-        SlotAllowedItem.slot_id.in_(slot_ids)
-    ).all()
+    allowed_rows = db.query(SlotAllowedItem).filter(SlotAllowedItem.slot_id.in_(slot_ids)).all()
     all_item_ids = list({row.allowed_item_id for row in allowed_rows})
-    items_by_id = {
-        item.id: item
-        for item in db.query(Item).filter(Item.id.in_(all_item_ids)).all()
-    } if all_item_ids else {}
+    items_by_id = (
+        {item.id: item for item in db.query(Item).filter(Item.id.in_(all_item_ids)).all()} if all_item_ids else {}
+    )
     result = {sid: [] for sid in slot_ids}
     for row in allowed_rows:
         item = items_by_id.get(row.allowed_item_id)
         if item:
-            result[row.slot_id].append({
-                "id": item.id,
-                "name": _item_name(item, lang),
-                "short_name": _item_short_name(item, lang),
-                "weight": item.weight,
-                "ergonomics_modifier": item.ergonomics_modifier,
-                "recoil_modifier": item.recoil_modifier,
-                "accuracy_modifier": item.accuracy_modifier,
-                "center_of_impact": item.center_of_impact,
-                "deviation_curve": item.deviation_curve,
-                "deviation_max": item.deviation_max,
-                "sighting_range": item.sighting_range,
-                "heat_factor": item.heat_factor,
-                "cooling_factor": item.cooling_factor,
-                "durability_burn_factor": item.durability_burn_factor,
-                "velocity_modifier": item.velocity_modifier,
-                "icon_link": item.icon_link,
-                "base_image_link": item.base_image_link,
-                "conflicting_item_ids": item.conflicting_item_ids,
-                "conflicting_slot_ids": item.conflicting_slot_ids,
-                "magazine_capacity": item.magazine_capacity,
-                "caliber": item.caliber,
-                "is_weapon": item.is_weapon,
-                "trader_price":     item.trader_price,
-                "trader_price_rub": item.trader_price_rub,
-                "trader_currency":  item.trader_currency,
-                "trader_vendor":    item.trader_vendor,
-                "trader_min_level": item.trader_min_level,
-                "task_unlock_id":      item.task_unlock_id,
-                "task_unlock_name":    item.task_unlock_name,
-                "task_unlock_name_zh": item.task_unlock_name_zh,
-            })
+            result[row.slot_id].append(
+                {
+                    "id": item.id,
+                    "name": _item_name(item, lang),
+                    "short_name": _item_short_name(item, lang),
+                    "weight": item.weight,
+                    "ergonomics_modifier": item.ergonomics_modifier,
+                    "recoil_modifier": item.recoil_modifier,
+                    "accuracy_modifier": item.accuracy_modifier,
+                    "center_of_impact": item.center_of_impact,
+                    "deviation_curve": item.deviation_curve,
+                    "deviation_max": item.deviation_max,
+                    "sighting_range": item.sighting_range,
+                    "heat_factor": item.heat_factor,
+                    "cooling_factor": item.cooling_factor,
+                    "durability_burn_factor": item.durability_burn_factor,
+                    "velocity_modifier": item.velocity_modifier,
+                    "icon_link": item.icon_link,
+                    "base_image_link": item.base_image_link,
+                    "conflicting_item_ids": item.conflicting_item_ids,
+                    "conflicting_slot_ids": item.conflicting_slot_ids,
+                    "magazine_capacity": item.magazine_capacity,
+                    "caliber": item.caliber,
+                    "is_weapon": item.is_weapon,
+                    "trader_price": item.trader_price,
+                    "trader_price_rub": item.trader_price_rub,
+                    "trader_currency": item.trader_currency,
+                    "trader_vendor": item.trader_vendor,
+                    "trader_min_level": item.trader_min_level,
+                    "task_unlock_id": item.task_unlock_id,
+                    "task_unlock_name": item.task_unlock_name,
+                    "task_unlock_name_zh": item.task_unlock_name_zh,
+                }
+            )
     return result
 
 
@@ -1115,19 +1212,22 @@ def get_item_slots_batch(
         )
     result = {iid: [] for iid in item_ids}
     for s in slots:
-        result[s.parent_item_id].append({
-            "id": s.id,
-            "parent_item_id": s.parent_item_id,
-            "slot_name": s.slot_name,
-            "slot_game_name": s.slot_game_name,
-            "has_allowed_items": counts.get(s.id, 0) > 0,
-        })
+        result[s.parent_item_id].append(
+            {
+                "id": s.id,
+                "parent_item_id": s.parent_item_id,
+                "slot_name": s.slot_name,
+                "slot_game_name": s.slot_game_name,
+                "has_allowed_items": counts.get(s.id, 0) > 0,
+            }
+        )
     return result
 
 
 # ---------------------------------------------------
 # Build Compatibility Validation
 # ---------------------------------------------------
+
 
 @app.post("/build/validate")
 def validate_attachment(
@@ -1153,17 +1253,14 @@ def validate_attachment(
     # SLOT LEGALITY CHECK
     # -------------------------------------------------
 
-    allowed = db.query(SlotAllowedItem).filter(
-        SlotAllowedItem.slot_id == slot_id,
-        SlotAllowedItem.allowed_item_id == candidate_id
-    ).first()
+    allowed = (
+        db.query(SlotAllowedItem)
+        .filter(SlotAllowedItem.slot_id == slot_id, SlotAllowedItem.allowed_item_id == candidate_id)
+        .first()
+    )
 
     if not allowed:
-        return {
-            "valid": False,
-            "reason": "Item not allowed in this slot",
-            "type": "slot_not_allowed"
-        }
+        return {"valid": False, "reason": "Item not allowed in this slot", "type": "slot_not_allowed"}
 
     # -------------------------------------------------
     # BATCH-LOAD all installed items and their slots (2 queries total)
@@ -1175,15 +1272,12 @@ def validate_attachment(
     installed_items = db.query(Item).filter(Item.id.in_(installed_set)).all()
     installed_map = {item.id: item for item in installed_items}
 
-    all_installed_slots = db.query(Slot).filter(
-        Slot.parent_item_id.in_(installed_set)
-    ).all()
+    all_installed_slots = db.query(Slot).filter(Slot.parent_item_id.in_(installed_set)).all()
     slots_by_item: dict[str, list] = {item_id: [] for item_id in installed_set}
     for s in all_installed_slots:
         slots_by_item[s.parent_item_id].append(s)
 
-    result = _check_conflicts(candidate, candidate_id, installed_set,
-                              installed_map, slots_by_item, slot_id, lang)
+    result = _check_conflicts(candidate, candidate_id, installed_set, installed_map, slots_by_item, slot_id, lang)
     if not result["valid"]:
         return result
 
@@ -1193,6 +1287,7 @@ def validate_attachment(
 # ---------------------------------------------------
 # Calculation Engine
 # ---------------------------------------------------
+
 
 @app.post("/build/calculate")
 def calculate_build(
@@ -1207,10 +1302,14 @@ def calculate_build(
 ):
 
     if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
-        raise HTTPException(status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}")
+        raise HTTPException(
+            status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}"
+        )
 
     if not (EQUIP_ERGO_MIN <= equip_ergo_modifier <= EQUIP_ERGO_MAX):
-        raise HTTPException(status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}")
+        raise HTTPException(
+            status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}"
+        )
 
     base_item = db.query(Item).filter(Item.id == base_item_id).first()
     if not base_item:
@@ -1219,10 +1318,7 @@ def calculate_build(
     current_ids = attachment_ids or []
     items_map = {}
     if current_ids:
-        items_map = {
-            item.id: item
-            for item in db.query(Item).filter(Item.id.in_(current_ids)).all()
-        }
+        items_map = {item.id: item for item in db.query(Item).filter(Item.id.in_(current_ids)).all()}
 
     stats = _compute_stats(base_item, current_ids, items_map, strength_level, equip_ergo_modifier)
 
@@ -1249,14 +1345,14 @@ def calculate_build(
             if ammo.heat_factor is not None:
                 stats["heat_factor"] = round(stats["heat_factor"] * ammo.heat_factor, 4)
             if ammo.durability_burn_factor is not None:
-                stats["durability_burn_factor"] = round(stats["durability_burn_factor"] * ammo.durability_burn_factor, 4)
+                stats["durability_burn_factor"] = round(
+                    stats["durability_burn_factor"] * ammo.durability_burn_factor, 4
+                )
             if ammo.velocity is not None:
                 stats["muzzle_velocity"] = round(ammo.velocity * (1 + stats["velocity_modifier_pct"] / 100))
             for att in items_map.values():
                 if att.magazine_capacity:
-                    stats["total_weight"] = round(
-                        stats["total_weight"] + (ammo.weight or 0) * att.magazine_capacity, 3
-                    )
+                    stats["total_weight"] = round(stats["total_weight"] + (ammo.weight or 0) * att.magazine_capacity, 3)
             ammo_weight_added = True
 
     # UBGL grenade ammo weight - one round per UBGL installed.
@@ -1265,31 +1361,24 @@ def calculate_build(
     if assume_full_mag and selected_ubgl_ammo_id:
         grenade = db.query(Item).filter(Item.id == selected_ubgl_ammo_id).first()
         if grenade and grenade.is_ammo and grenade.caliber:
-            ubgl_count = sum(
-                1 for att in items_map.values()
-                if att.caliber == grenade.caliber and not att.is_ammo
-            )
+            ubgl_count = sum(1 for att in items_map.values() if att.caliber == grenade.caliber and not att.is_ammo)
             if ubgl_count:
-                stats["total_weight"] = round(
-                    stats["total_weight"] + (grenade.weight or 0) * ubgl_count, 3
-                )
+                stats["total_weight"] = round(stats["total_weight"] + (grenade.weight or 0) * ubgl_count, 3)
                 ammo_weight_added = True
 
     if ammo_weight_added:
         # Recompute EED, overswing, and arm stamina with the ammo-adjusted weight
         b = equip_ergo_modifier
         E = stats["total_ergo"] * (1 + b)
-        KG = 0.0007556 * (E ** 2) + 0.02736 * E + 2.9159
+        KG = 0.0007556 * (E**2) + 0.02736 * E + 2.9159
         evo_weight = stats["total_weight"] - KG
         stats["evo_ergo_delta"] = round(-15 * evo_weight, 2)
         stats["overswing"] = evo_weight > 0
         stats["arm_stamina"] = round(
-            (
-                (85.5 / (stats["total_weight"] + 0.65))
-                + 9.15
-                + 0.06477 * stats["total_ergo"] * (1 + b / 2)
-            ) / 1.04 * (1 + strength_level * 0.004),
-            1
+            ((85.5 / (stats["total_weight"] + 0.65)) + 9.15 + 0.06477 * stats["total_ergo"] * (1 + b / 2))
+            / 1.04
+            * (1 + strength_level * 0.004),
+            1,
         )
 
     return stats
@@ -1298,6 +1387,7 @@ def calculate_build(
 # ---------------------------------------------------
 # Batch Process (validation + calculation for all candidates in one request)
 # ---------------------------------------------------
+
 
 @app.post("/build/batch-process")
 def batch_process(
@@ -1311,10 +1401,14 @@ def batch_process(
     db: Session = Depends(get_db),
 ):
     if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
-        raise HTTPException(status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}")
+        raise HTTPException(
+            status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}"
+        )
 
     if not (EQUIP_ERGO_MIN <= equip_ergo_modifier <= EQUIP_ERGO_MAX):
-        raise HTTPException(status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}")
+        raise HTTPException(
+            status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}"
+        )
 
     _cap_list("installed_ids", installed_ids, MAX_INSTALLED_IDS)
     _cap_list("candidate_ids", candidate_ids, MAX_CANDIDATE_IDS)
@@ -1325,28 +1419,24 @@ def batch_process(
 
     # 1. Batch-load all items needed (installed + candidates) - 1 query
     all_needed_ids = set(installed_ids) | set(candidate_ids)
-    items_map = {
-        item.id: item
-        for item in db.query(Item).filter(Item.id.in_(all_needed_ids)).all()
-    }
+    items_map = {item.id: item for item in db.query(Item).filter(Item.id.in_(all_needed_ids)).all()}
 
     # 2. Validation setup: installed items + their slots - 1 query each
     installed_set = set(installed_ids) | {base_item_id}
     installed_items_map = {iid: items_map[iid] for iid in installed_ids if iid in items_map}
     installed_items_map[base_item_id] = base_item
 
-    all_installed_slots = db.query(Slot).filter(
-        Slot.parent_item_id.in_(installed_set)
-    ).all()
+    all_installed_slots = db.query(Slot).filter(Slot.parent_item_id.in_(installed_set)).all()
     slots_by_item: dict[str, list] = {iid: [] for iid in installed_set}
     for s in all_installed_slots:
         slots_by_item[s.parent_item_id].append(s)
 
     # 3. Which candidates are allowed in this slot - 1 query
-    allowed_records = db.query(SlotAllowedItem).filter(
-        SlotAllowedItem.slot_id == slot_id,
-        SlotAllowedItem.allowed_item_id.in_(candidate_ids)
-    ).all()
+    allowed_records = (
+        db.query(SlotAllowedItem)
+        .filter(SlotAllowedItem.slot_id == slot_id, SlotAllowedItem.allowed_item_id.in_(candidate_ids))
+        .all()
+    )
     allowed_set = {r.allowed_item_id for r in allowed_records}
 
     # 4. Baseline stats (installed_ids, no candidate) - no DB
@@ -1360,24 +1450,33 @@ def batch_process(
             continue
 
         if candidate_id not in allowed_set:
-            validation = {"valid": False, "reason_key": None, "reason_name": None,
-                          "conflicting_item_id": None, "conflicting_slot_id": None}
+            validation = {
+                "valid": False,
+                "reason_key": None,
+                "reason_name": None,
+                "conflicting_item_id": None,
+                "conflicting_slot_id": None,
+            }
         else:
-            validation = _check_conflicts(candidate, candidate_id, installed_set,
-                                          installed_items_map, slots_by_item, slot_id, lang)
+            validation = _check_conflicts(
+                candidate, candidate_id, installed_set, installed_items_map, slots_by_item, slot_id, lang
+            )
 
-        sim_stats = _compute_stats(base_item, list(installed_ids) + [candidate_id],
-                                   items_map, strength_level, equip_ergo_modifier)
-        results.append({
-            "item_id":          candidate_id,
-            "trader_price":     candidate.trader_price,
-            "trader_price_rub": candidate.trader_price_rub,
-            "trader_currency":  candidate.trader_currency,
-            "trader_vendor":    candidate.trader_vendor,
-            "trader_min_level": candidate.trader_min_level,
-            **validation,
-            **sim_stats,
-        })
+        sim_stats = _compute_stats(
+            base_item, list(installed_ids) + [candidate_id], items_map, strength_level, equip_ergo_modifier
+        )
+        results.append(
+            {
+                "item_id": candidate_id,
+                "trader_price": candidate.trader_price,
+                "trader_price_rub": candidate.trader_price_rub,
+                "trader_currency": candidate.trader_currency,
+                "trader_vendor": candidate.trader_vendor,
+                "trader_min_level": candidate.trader_min_level,
+                **validation,
+                **sim_stats,
+            }
+        )
 
     return {"base": base_stats, "candidates": results}
 
@@ -1393,9 +1492,13 @@ def combo_batch_process(
     db: Session = Depends(get_db),
 ):
     if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
-        raise HTTPException(status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}")
+        raise HTTPException(
+            status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}"
+        )
     if not (EQUIP_ERGO_MIN <= equip_ergo_modifier <= EQUIP_ERGO_MAX):
-        raise HTTPException(status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}")
+        raise HTTPException(
+            status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}"
+        )
 
     _cap_list("installed_ids", installed_ids, MAX_INSTALLED_IDS)
     _cap_list("combos", combos, MAX_COMBO_BATCH)
@@ -1411,10 +1514,7 @@ def combo_batch_process(
             raise HTTPException(status_code=422, detail="Invalid add_ids in combo")
         all_needed_ids.update(add_ids)
 
-    items_map = {
-        item.id: item
-        for item in db.query(Item).filter(Item.id.in_(all_needed_ids)).all()
-    }
+    items_map = {item.id: item for item in db.query(Item).filter(Item.id.in_(all_needed_ids)).all()}
     items_map[base_item_id] = base_item
 
     base_stats = _compute_stats(base_item, installed_ids, items_map, strength_level, equip_ergo_modifier)
@@ -1422,7 +1522,9 @@ def combo_batch_process(
     results = []
     for combo in combos:
         add_ids = combo.get("add_ids", [])
-        sim_stats = _compute_stats(base_item, list(installed_ids) + add_ids, items_map, strength_level, equip_ergo_modifier)
+        sim_stats = _compute_stats(
+            base_item, list(installed_ids) + add_ids, items_map, strength_level, equip_ergo_modifier
+        )
         results.append({"cid": combo.get("cid"), **sim_stats})
 
     return {"base": base_stats, "combos": results}
@@ -1450,9 +1552,13 @@ def combo_full(
     db: Session = Depends(get_db),
 ):
     if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
-        raise HTTPException(status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}")
+        raise HTTPException(
+            status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}"
+        )
     if not (EQUIP_ERGO_MIN <= equip_ergo_modifier <= EQUIP_ERGO_MAX):
-        raise HTTPException(status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}")
+        raise HTTPException(
+            status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}"
+        )
 
     _cap_list("installed_ids", installed_ids, MAX_INSTALLED_IDS)
     _cap_list("exclude_child_slot_names", exclude_child_slot_names, 200)
@@ -1471,10 +1577,15 @@ def combo_full(
     with _COMBO_FULL_CACHE_LOCK:
         cached = _COMBO_FULL_CACHE.get(_cache_key)
     if cached is not None:
+
         def _cached_stream():
             yield f"data: {json.dumps({'type': 'result', 'data': cached})}\n\n"
-        return StreamingResponse(_cached_stream(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+        return StreamingResponse(
+            _cached_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     # 1. Base item
     base_item = db.query(Item).filter(Item.id == base_item_id).first()
@@ -1509,9 +1620,13 @@ def combo_full(
     parent_external_conflict: dict = {}
     for candidate in all_parents:
         r = _check_conflicts(
-            candidate, candidate.id,
-            installed_set_base, base_only_items_map,
-            slots_by_item, root_slot_id, lang,
+            candidate,
+            candidate.id,
+            installed_set_base,
+            base_only_items_map,
+            slots_by_item,
+            root_slot_id,
+            lang,
         )
         if not r["valid"]:
             parent_external_conflict[candidate.id] = r
@@ -1531,10 +1646,7 @@ def combo_full(
     slot_has_items: set = set()
     if all_child_slot_ids:
         counts = (
-            db.query(SlotAllowedItem.slot_id)
-            .filter(SlotAllowedItem.slot_id.in_(all_child_slot_ids))
-            .distinct()
-            .all()
+            db.query(SlotAllowedItem.slot_id).filter(SlotAllowedItem.slot_id.in_(all_child_slot_ids)).distinct().all()
         )
         slot_has_items = {row[0] for row in counts}
 
@@ -1564,18 +1676,14 @@ def combo_full(
     if exclude_item_ids:
         _exclude_ids = set(exclude_item_ids)
         child_items_by_slot = {
-            sid: [i for i in items if i.id not in _exclude_ids]
-            for sid, items in child_items_by_slot.items()
+            sid: [i for i in items if i.id not in _exclude_ids] for sid, items in child_items_by_slot.items()
         }
     child_slots_by_parent = {
-        pid: [s for s in slots if child_items_by_slot.get(s.id)]
-        for pid, slots in child_slots_by_parent.items()
+        pid: [s for s in slots if child_items_by_slot.get(s.id)] for pid, slots in child_slots_by_parent.items()
     }
 
     # 7. Load slots for all parent + child items (needed for slot-conflict checks during expansion)
-    all_combo_item_ids = set(all_parent_ids) | {
-        item.id for items in child_items_by_slot.values() for item in items
-    }
+    all_combo_item_ids = set(all_parent_ids) | {item.id for items in child_items_by_slot.values() for item in items}
     if all_combo_item_ids:
         combo_item_slots = db.query(Slot).filter(Slot.parent_item_id.in_(all_combo_item_ids)).all()
         for s in combo_item_slots:
@@ -1588,11 +1696,7 @@ def combo_full(
 
     _excl_ids = set(exclude_item_ids) if exclude_item_ids else set()
     _already_expanded: set = set(all_parent_ids)
-    _to_expand: set = {
-        item.id
-        for items in child_items_by_slot.values()
-        for item in items
-    }
+    _to_expand: set = {item.id for items in child_items_by_slot.values() for item in items}
     _already_expanded |= _to_expand
 
     _MAX_NEST_DEPTH = 4
@@ -1606,16 +1710,13 @@ def combo_full(
             break
 
         _nest_has_items = {
-            row[0] for row in
-            db.query(SlotAllowedItem.slot_id)
+            row[0]
+            for row in db.query(SlotAllowedItem.slot_id)
             .filter(SlotAllowedItem.slot_id.in_(_nest_slot_ids))
             .distinct()
             .all()
         }
-        _active_nest_slots = [
-            s for s in _nest_slots
-            if s.id in _nest_has_items and s.slot_name not in exclude_names
-        ]
+        _active_nest_slots = [s for s in _nest_slots if s.id in _nest_has_items and s.slot_name not in exclude_names]
         for s in _active_nest_slots:
             nested_slots_by_item.setdefault(s.parent_item_id, []).append(s)
 
@@ -1641,8 +1742,7 @@ def combo_full(
 
         # Drop slots that ended up empty after exclusion
         nested_slots_by_item = {
-            mid: [s for s in slots if nested_items_by_slot.get(s.id)]
-            for mid, slots in nested_slots_by_item.items()
+            mid: [s for s in slots if nested_items_by_slot.get(s.id)] for mid, slots in nested_slots_by_item.items()
         }
 
         # Load slots for newly found items (needed for conflict checking)
@@ -1661,36 +1761,36 @@ def combo_full(
     # 8. Helper to serialize an item for the response
     def _ser(item):
         return {
-            "id":                   item.id,
-            "name":                 _item_name(item, lang),
-            "short_name":           _item_short_name(item, lang),
-            "weight":               item.weight,
-            "ergonomics_modifier":  item.ergonomics_modifier,
-            "recoil_modifier":      item.recoil_modifier,
-            "accuracy_modifier":    item.accuracy_modifier,
-            "center_of_impact":     item.center_of_impact,
-            "deviation_curve":      item.deviation_curve,
-            "deviation_max":        item.deviation_max,
-            "sighting_range":       item.sighting_range,
-            "heat_factor":          item.heat_factor,
-            "cooling_factor":       item.cooling_factor,
+            "id": item.id,
+            "name": _item_name(item, lang),
+            "short_name": _item_short_name(item, lang),
+            "weight": item.weight,
+            "ergonomics_modifier": item.ergonomics_modifier,
+            "recoil_modifier": item.recoil_modifier,
+            "accuracy_modifier": item.accuracy_modifier,
+            "center_of_impact": item.center_of_impact,
+            "deviation_curve": item.deviation_curve,
+            "deviation_max": item.deviation_max,
+            "sighting_range": item.sighting_range,
+            "heat_factor": item.heat_factor,
+            "cooling_factor": item.cooling_factor,
             "durability_burn_factor": item.durability_burn_factor,
-            "velocity_modifier":    item.velocity_modifier,
-            "icon_link":            item.icon_link,
-            "base_image_link":      item.base_image_link,
+            "velocity_modifier": item.velocity_modifier,
+            "icon_link": item.icon_link,
+            "base_image_link": item.base_image_link,
             "conflicting_item_ids": item.conflicting_item_ids,
             "conflicting_slot_ids": item.conflicting_slot_ids,
-            "magazine_capacity":    item.magazine_capacity,
-            "caliber":              item.caliber,
-            "is_weapon":            item.is_weapon,
-            "trader_price":         item.trader_price,
-            "trader_price_rub":     item.trader_price_rub,
-            "trader_currency":      item.trader_currency,
-            "trader_vendor":        item.trader_vendor,
-            "trader_min_level":     item.trader_min_level,
-            "task_unlock_id":       item.task_unlock_id,
-            "task_unlock_name":     item.task_unlock_name,
-            "task_unlock_name_zh":  item.task_unlock_name_zh,
+            "magazine_capacity": item.magazine_capacity,
+            "caliber": item.caliber,
+            "is_weapon": item.is_weapon,
+            "trader_price": item.trader_price,
+            "trader_price_rub": item.trader_price_rub,
+            "trader_currency": item.trader_currency,
+            "trader_vendor": item.trader_vendor,
+            "trader_min_level": item.trader_min_level,
+            "task_unlock_id": item.task_unlock_id,
+            "task_unlock_name": item.task_unlock_name,
+            "task_unlock_name_zh": item.task_unlock_name_zh,
         }
 
     # 9. Conflict helpers and caches
@@ -1708,8 +1808,12 @@ def combo_full(
     def _ser_conflict(r):
         if r is None:
             return None
-        return {"reason_key": r["reason_key"], "reason_name": r["reason_name"],
-                "conflicting_item_id": r["conflicting_item_id"], "conflicting_slot_id": r["conflicting_slot_id"]}
+        return {
+            "reason_key": r["reason_key"],
+            "reason_name": r["reason_name"],
+            "conflicting_item_id": r["conflicting_item_id"],
+            "conflicting_slot_id": r["conflicting_slot_id"],
+        }
 
     def _validated_children(slot_id, inst_list, raw_candidates):
         """Returns [(item, external_conflict_or_None), ...] excluding internal conflicts."""
@@ -1749,11 +1853,11 @@ def combo_full(
                 next_states.append(st)  # skip is always valid
                 for ci, ci_conflict in valid:
                     new_st = {
-                        "child_items":                st["child_items"] + [ci],
-                        "child_slot_ids":             st["child_slot_ids"] + [child_slot.id],
+                        "child_items": st["child_items"] + [ci],
+                        "child_slot_ids": st["child_slot_ids"] + [child_slot.id],
                         "child_slot_parent_item_ids": st["child_slot_parent_item_ids"] + [item.id],
-                        "installed_ids":              st["installed_ids"] + [ci.id],
-                        "conflict":                   st["conflict"] or ci_conflict,
+                        "installed_ids": st["installed_ids"] + [ci.id],
+                        "conflict": st["conflict"] or ci_conflict,
                     }
                     next_states.extend(_expand_item(new_st, ci))
             states = next_states
@@ -1775,20 +1879,30 @@ def combo_full(
             if not child_slots:
                 combo_ids = installed_ids + [parent.id]
                 stats = _compute_stats(base_item, combo_ids, items_map, strength_level, equip_ergo_modifier)
-                all_combos.append({
-                    "parent_item":                  _ser(parent),
-                    "child_items":                  [],
-                    "child_slot_ids":               [],
-                    "child_slot_parent_item_ids":   [],
-                    "all_child_slot_ids":           [],
-                    "all_nested_slot_ids":          [],
-                    "conflict":                     _ser_conflict(parent_conflict),
-                    **stats,
-                })
+                all_combos.append(
+                    {
+                        "parent_item": _ser(parent),
+                        "child_items": [],
+                        "child_slot_ids": [],
+                        "child_slot_parent_item_ids": [],
+                        "all_child_slot_ids": [],
+                        "all_nested_slot_ids": [],
+                        "conflict": _ser_conflict(parent_conflict),
+                        **stats,
+                    }
+                )
                 continue
 
             # frontier: list of dicts { child_items, child_slot_ids, child_slot_parent_item_ids, installed_ids, conflict }
-            frontier = [{"child_items": [], "child_slot_ids": [], "child_slot_parent_item_ids": [], "installed_ids": installed_ids + [parent.id], "conflict": parent_conflict}]
+            frontier = [
+                {
+                    "child_items": [],
+                    "child_slot_ids": [],
+                    "child_slot_parent_item_ids": [],
+                    "installed_ids": installed_ids + [parent.id],
+                    "conflict": parent_conflict,
+                }
+            ]
 
             for cs in child_slots:
                 raw_candidates = child_items_by_slot.get(cs.id, [])
@@ -1807,16 +1921,16 @@ def combo_full(
                     next_frontier.append(state)  # "skip this child slot" is always valid
                     for ci, ext_conflict in valid_children_with_conflicts:
                         new_state = {
-                            "child_items":                state["child_items"] + [ci],
-                            "child_slot_ids":             state["child_slot_ids"] + [cs.id],
+                            "child_items": state["child_items"] + [ci],
+                            "child_slot_ids": state["child_slot_ids"] + [cs.id],
                             "child_slot_parent_item_ids": state["child_slot_parent_item_ids"] + [parent.id],
-                            "installed_ids":              state["installed_ids"] + [ci.id],
-                            "conflict":                   state["conflict"] or ext_conflict,
+                            "installed_ids": state["installed_ids"] + [ci.id],
+                            "conflict": state["conflict"] or ext_conflict,
                         }
                         if ci.id in nested_slots_by_item:
                             _est = len(frontier)
                             for _ns in nested_slots_by_item[ci.id]:
-                                _est *= (1 + len(nested_items_by_slot.get(_ns.id, [])))
+                                _est *= 1 + len(nested_items_by_slot.get(_ns.id, []))
                             if _est > 50_000:
                                 next_frontier.append(new_state)
                             else:
@@ -1839,37 +1953,41 @@ def combo_full(
                 for _ci in state["child_items"]:
                     for _s in nested_slots_by_item.get(_ci.id, []):
                         _nested_sid_set.add(_s.id)
-                all_combos.append({
-                    "parent_item":                  _ser(parent),
-                    "child_items":                  [_ser(ci) for ci in state["child_items"]],
-                    "child_slot_ids":               state["child_slot_ids"],
-                    "child_slot_parent_item_ids":   state["child_slot_parent_item_ids"],
-                    "all_child_slot_ids":           parent_child_slot_ids,
-                    "all_nested_slot_ids":          list(_nested_sid_set),
-                    "conflict":                     _ser_conflict(state["conflict"]),
-                    **stats,
-                })
+                all_combos.append(
+                    {
+                        "parent_item": _ser(parent),
+                        "child_items": [_ser(ci) for ci in state["child_items"]],
+                        "child_slot_ids": state["child_slot_ids"],
+                        "child_slot_parent_item_ids": state["child_slot_parent_item_ids"],
+                        "all_child_slot_ids": parent_child_slot_ids,
+                        "all_nested_slot_ids": list(_nested_sid_set),
+                        "conflict": _ser_conflict(state["conflict"]),
+                        **stats,
+                    }
+                )
 
-        clean      = _dedup_by_stats([c for c in all_combos if not c.get("conflict")])
+        clean = _dedup_by_stats([c for c in all_combos if not c.get("conflict")])
         conflicted = _dedup_by_stats([c for c in all_combos if c.get("conflict")])
         result = {"base": base_stats, "combos": clean + conflicted, "timed_out": False, "truncated": any_truncated}
 
         with _COMBO_FULL_CACHE_LOCK:
             if len(_COMBO_FULL_CACHE) >= _COMBO_FULL_CACHE_MAX:
                 keys = list(_COMBO_FULL_CACHE.keys())
-                for k in keys[:len(keys) // 2]:
+                for k in keys[: len(keys) // 2]:
                     del _COMBO_FULL_CACHE[k]
             _COMBO_FULL_CACHE[_cache_key] = result
 
         yield f"data: {json.dumps({'type': 'result', 'data': result})}\n\n"
 
-    return StreamingResponse(_stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        _stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 
 # ---------------------------------------------------
 # Gun Init (single-request gun selection bootstrap)
 # ---------------------------------------------------
+
 
 @app.get("/guns/{gun_id}/init")
 def get_gun_init(
@@ -1883,10 +2001,14 @@ def get_gun_init(
     db: Session = Depends(get_db),
 ):
     if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
-        raise HTTPException(status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}")
+        raise HTTPException(
+            status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}"
+        )
 
     if not (EQUIP_ERGO_MIN <= equip_ergo_modifier <= EQUIP_ERGO_MAX):
-        raise HTTPException(status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}")
+        raise HTTPException(
+            status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}"
+        )
 
     gun = db.query(Item).filter(Item.id == gun_id).first()
     if not gun:
@@ -1897,10 +2019,7 @@ def get_gun_init(
     # Batch-load all factory attachment items (1 query)
     factory_items_map = {}
     if factory_ids:
-        factory_items_map = {
-            item.id: item
-            for item in db.query(Item).filter(Item.id.in_(factory_ids)).all()
-        }
+        factory_items_map = {item.id: item for item in db.query(Item).filter(Item.id.in_(factory_ids)).all()}
 
     # Batch-load all slots for gun + all factory items (1 query)
     all_item_ids = {gun_id} | set(factory_ids)
@@ -1920,21 +2039,27 @@ def get_gun_init(
     # Build slots_by_item for frontend slotCache population
     slots_by_item: dict[str, list] = {iid: [] for iid in all_item_ids}
     for s in all_slots:
-        slots_by_item[s.parent_item_id].append({
-            "id": s.id,
-            "parent_item_id": s.parent_item_id,
-            "slot_name": s.slot_name,
-            "slot_game_name": s.slot_game_name,
-            "has_allowed_items": slot_counts.get(s.id, 0) > 0,
-        })
+        slots_by_item[s.parent_item_id].append(
+            {
+                "id": s.id,
+                "parent_item_id": s.parent_item_id,
+                "slot_name": s.slot_name,
+                "slot_game_name": s.slot_game_name,
+                "has_allowed_items": slot_counts.get(s.id, 0) > 0,
+            }
+        )
 
     # Find which factory items are allowed in which slots (1 query)
     factory_allowed_by_slot: dict[str, set] = {}
     if all_slot_ids and factory_ids:
-        for rec in db.query(SlotAllowedItem).filter(
-            SlotAllowedItem.slot_id.in_(all_slot_ids),
-            SlotAllowedItem.allowed_item_id.in_(factory_ids),
-        ).all():
+        for rec in (
+            db.query(SlotAllowedItem)
+            .filter(
+                SlotAllowedItem.slot_id.in_(all_slot_ids),
+                SlotAllowedItem.allowed_item_id.in_(factory_ids),
+            )
+            .all()
+        ):
             factory_allowed_by_slot.setdefault(rec.slot_id, set()).add(rec.allowed_item_id)
 
     # Serialize a factory attachment item (same shape as /slots/{id}/allowed-items)
@@ -1976,17 +2101,11 @@ def get_gun_init(
     factory_child_ids: set[str] = set()
     for s in all_slots:
         if s.parent_item_id in factory_item_ids:
-            factory_child_ids.update(
-                fid for fid in factory_allowed_by_slot.get(s.id, set())
-                if fid != s.parent_item_id
-            )
+            factory_child_ids.update(fid for fid in factory_allowed_by_slot.get(s.id, set()) if fid != s.parent_item_id)
 
     def _sort_ids(ids: list) -> list:
         """Parents (not a child of any factory item) first, child-candidates last."""
-        return (
-            [fid for fid in ids if fid not in factory_child_ids] +
-            [fid for fid in ids if fid in factory_child_ids]
-        )
+        return [fid for fid in ids if fid not in factory_child_ids] + [fid for fid in ids if fid in factory_child_ids]
 
     # Resolve factory attachment tree.
     # Each slot is only filled once (first match wins) to prevent a later item
@@ -1998,8 +2117,7 @@ def get_gun_init(
             if attachment_id not in factory_items_map:
                 continue
             for slot in node_slots:
-                if (slot["id"] not in children and
-                        attachment_id in factory_allowed_by_slot.get(slot["id"], set())):
+                if slot["id"] not in children and attachment_id in factory_allowed_by_slot.get(slot["id"], set()):
                     other_ids = [fid for fid in remaining_ids if fid != attachment_id]
                     children[slot["id"]] = {
                         "item": _fmt_item(factory_items_map[attachment_id]),
@@ -2025,10 +2143,13 @@ def get_gun_init(
                 "trader_vendor": a.trader_vendor,
                 "trader_min_level": a.trader_min_level,
             }
-            for a in db.query(Item).filter(
+            for a in db.query(Item)
+            .filter(
                 Item.is_ammo == True,
                 Item.caliber == gun.caliber,
-            ).order_by(Item.weight.asc()).all()
+            )
+            .order_by(Item.weight.asc())
+            .all()
         ]
 
     # Compute build stats with factory attachments
@@ -2051,14 +2172,14 @@ def get_gun_init(
             if ammo.heat_factor is not None:
                 stats["heat_factor"] = round(stats["heat_factor"] * ammo.heat_factor, 4)
             if ammo.durability_burn_factor is not None:
-                stats["durability_burn_factor"] = round(stats["durability_burn_factor"] * ammo.durability_burn_factor, 4)
+                stats["durability_burn_factor"] = round(
+                    stats["durability_burn_factor"] * ammo.durability_burn_factor, 4
+                )
             if ammo.velocity is not None:
                 stats["muzzle_velocity"] = round(ammo.velocity * (1 + stats["velocity_modifier_pct"] / 100))
             for att in factory_items_map.values():
                 if att.magazine_capacity:
-                    stats["total_weight"] = round(
-                        stats["total_weight"] + (ammo.weight or 0) * att.magazine_capacity, 3
-                    )
+                    stats["total_weight"] = round(stats["total_weight"] + (ammo.weight or 0) * att.magazine_capacity, 3)
             ammo_weight_added = True
 
     # UBGL grenade ammo weight - one round per UBGL installed.
@@ -2068,36 +2189,35 @@ def get_gun_init(
         grenade = db.query(Item).filter(Item.id == selected_ubgl_ammo_id).first()
         if grenade and grenade.is_ammo and grenade.caliber:
             ubgl_count = sum(
-                1 for att in factory_items_map.values()
-                if att.caliber == grenade.caliber and not att.is_ammo
+                1 for att in factory_items_map.values() if att.caliber == grenade.caliber and not att.is_ammo
             )
             if ubgl_count:
-                stats["total_weight"] = round(
-                    stats["total_weight"] + (grenade.weight or 0) * ubgl_count, 3
-                )
+                stats["total_weight"] = round(stats["total_weight"] + (grenade.weight or 0) * ubgl_count, 3)
                 ammo_weight_added = True
 
     if ammo_weight_added:
         b = equip_ergo_modifier
         E = stats["total_ergo"] * (1 + b)
-        KG = 0.0007556 * (E ** 2) + 0.02736 * E + 2.9159
+        KG = 0.0007556 * (E**2) + 0.02736 * E + 2.9159
         evo_weight = stats["total_weight"] - KG
         stats["evo_ergo_delta"] = round(-15 * evo_weight, 2)
         stats["overswing"] = evo_weight > 0
         stats["arm_stamina"] = round(
-            (
-                (85.5 / (stats["total_weight"] + 0.65))
-                + 9.15
-                + 0.06477 * stats["total_ergo"] * (1 + b / 2)
-            ) / 1.04 * (1 + strength_level * 0.004),
-            1
+            ((85.5 / (stats["total_weight"] + 0.65)) + 9.15 + 0.06477 * stats["total_ergo"] * (1 + b / 2))
+            / 1.04
+            * (1 + strength_level * 0.004),
+            1,
         )
 
     # Fetch UBGL grenade ammo list - find any factory UBGL by caliber (UBGLs are non-ammo items with a caliber)
     ubgl_ammo_list = []
     ubgl_caliber = next(
-        (att.caliber for att in factory_items_map.values() if att.caliber and not att.is_ammo and not att.magazine_capacity),
-        None
+        (
+            att.caliber
+            for att in factory_items_map.values()
+            if att.caliber and not att.is_ammo and not att.magazine_capacity
+        ),
+        None,
     )
     if ubgl_caliber:
         ubgl_ammo_list = [
@@ -2112,10 +2232,13 @@ def get_gun_init(
                 "trader_vendor": a.trader_vendor,
                 "trader_min_level": a.trader_min_level,
             }
-            for a in db.query(Item).filter(
+            for a in db.query(Item)
+            .filter(
                 Item.is_ammo == True,
                 Item.caliber == ubgl_caliber,
-            ).order_by(Item.weight.asc()).all()
+            )
+            .order_by(Item.weight.asc())
+            .all()
         ]
 
     return {
@@ -2131,6 +2254,7 @@ def get_gun_init(
 # ---------------------------------------------------
 # Attachment Ratings
 # ---------------------------------------------------
+
 
 @app.get("/ratings/attachments/bulk")
 def get_bulk_ratings(ids: str, x_client_id: str = Header(None), db: Session = Depends(get_ratings_db)):
@@ -2148,25 +2272,27 @@ def get_bulk_ratings(ids: str, x_client_id: str = Header(None), db: Session = De
     # use client token hash for vote lookup; fall back to no user_vote if absent
     client_hash = _get_optional_client_id_hash(x_client_id)
 
-    rating_rows = db.query(AttachmentRating).filter(
-        AttachmentRating.item_id.in_(unique_ids)
-    ).all()
+    rating_rows = db.query(AttachmentRating).filter(AttachmentRating.item_id.in_(unique_ids)).all()
     ratings_map = {r.item_id: r for r in rating_rows}
 
     votes_map = {}
     if client_hash:
-        vote_rows = db.query(AttachmentVote).filter(
-            AttachmentVote.item_id.in_(unique_ids),
-            AttachmentVote.ip_hash == client_hash,
-        ).all()
+        vote_rows = (
+            db.query(AttachmentVote)
+            .filter(
+                AttachmentVote.item_id.in_(unique_ids),
+                AttachmentVote.ip_hash == client_hash,
+            )
+            .all()
+        )
         votes_map = {v.item_id: v.vote for v in vote_rows}
 
     result = {}
     for item_id in unique_ids:
         r = ratings_map.get(item_id)
         result[item_id] = {
-            "likes":     r.like_count    if r else 0,
-            "dislikes":  r.dislike_count if r else 0,
+            "likes": r.like_count if r else 0,
+            "dislikes": r.dislike_count if r else 0,
             "user_vote": votes_map.get(item_id),
         }
 
@@ -2174,17 +2300,26 @@ def get_bulk_ratings(ids: str, x_client_id: str = Header(None), db: Session = De
 
 
 @app.post("/ratings/attachments/{item_id}/vote")
-def post_vote(item_id: str, vote: str = Body(..., embed=True), x_client_id: str = Header(None), db: Session = Depends(get_ratings_db)):
+def post_vote(
+    item_id: str,
+    vote: str = Body(..., embed=True),
+    x_client_id: str = Header(None),
+    db: Session = Depends(get_ratings_db),
+):
     _validate_item_id(item_id)
     if vote not in ("like", "dislike"):
         raise HTTPException(status_code=422, detail='vote must be "like" or "dislike"')
 
     ip_hash = _get_client_id_hash(x_client_id)
 
-    existing = db.query(AttachmentVote).filter(
-        AttachmentVote.item_id == item_id,
-        AttachmentVote.ip_hash == ip_hash,
-    ).first()
+    existing = (
+        db.query(AttachmentVote)
+        .filter(
+            AttachmentVote.item_id == item_id,
+            AttachmentVote.ip_hash == ip_hash,
+        )
+        .first()
+    )
 
     if existing is None:
         db.add(AttachmentVote(item_id=item_id, ip_hash=ip_hash, vote=vote))
@@ -2192,13 +2327,15 @@ def post_vote(item_id: str, vote: str = Body(..., embed=True), x_client_id: str 
         result_vote = vote
     elif existing.vote == vote:
         db.delete(existing)
-        _upsert_rating(db, item_id, like_delta=-1 if vote == "like" else 0, dislike_delta=-1 if vote == "dislike" else 0)
+        _upsert_rating(
+            db, item_id, like_delta=-1 if vote == "like" else 0, dislike_delta=-1 if vote == "dislike" else 0
+        )
         result_vote = None
     else:
         existing.vote = vote
         existing.created_at = datetime.now(timezone.utc)
-        like_d    = (1 if vote == "like" else -1)
-        dislike_d = (1 if vote == "dislike" else -1)
+        like_d = 1 if vote == "like" else -1
+        dislike_d = 1 if vote == "dislike" else -1
         _upsert_rating(db, item_id, like_delta=like_d, dislike_delta=dislike_d)
         result_vote = vote
 
@@ -2206,8 +2343,8 @@ def post_vote(item_id: str, vote: str = Body(..., embed=True), x_client_id: str 
 
     rating = db.query(AttachmentRating).filter(AttachmentRating.item_id == item_id).first()
     return {
-        "likes":     rating.like_count    if rating else 0,
-        "dislikes":  rating.dislike_count if rating else 0,
+        "likes": rating.like_count if rating else 0,
+        "dislikes": rating.dislike_count if rating else 0,
         "user_vote": result_vote,
     }
 
@@ -2217,27 +2354,35 @@ def delete_vote(item_id: str, x_client_id: str = Header(None), db: Session = Dep
     _validate_item_id(item_id)
     ip_hash = _get_client_id_hash(x_client_id)
 
-    existing = db.query(AttachmentVote).filter(
-        AttachmentVote.item_id == item_id,
-        AttachmentVote.ip_hash == ip_hash,
-    ).first()
+    existing = (
+        db.query(AttachmentVote)
+        .filter(
+            AttachmentVote.item_id == item_id,
+            AttachmentVote.ip_hash == ip_hash,
+        )
+        .first()
+    )
 
     if existing:
         old_vote = existing.vote
         db.delete(existing)
-        _upsert_rating(db, item_id, like_delta=-1 if old_vote == "like" else 0, dislike_delta=-1 if old_vote == "dislike" else 0)
+        _upsert_rating(
+            db, item_id, like_delta=-1 if old_vote == "like" else 0, dislike_delta=-1 if old_vote == "dislike" else 0
+        )
         db.commit()
 
     rating = db.query(AttachmentRating).filter(AttachmentRating.item_id == item_id).first()
     return {
-        "likes":     rating.like_count    if rating else 0,
-        "dislikes":  rating.dislike_count if rating else 0,
+        "likes": rating.like_count if rating else 0,
+        "dislikes": rating.dislike_count if rating else 0,
         "user_vote": None,
     }
 
 
 @app.delete("/admin/ratings/attachments/{item_id}")
-def admin_clear_rating(item_id: str, request: Request, x_admin_key: str = Header(None), db: Session = Depends(get_ratings_db)):
+def admin_clear_rating(
+    item_id: str, request: Request, x_admin_key: str = Header(None), db: Session = Depends(get_ratings_db)
+):
     _require_admin(request, x_admin_key)
     _validate_item_id(item_id)
 
@@ -2252,21 +2397,24 @@ def _upsert_rating(db: Session, item_id: str, like_delta: int, dislike_delta: in
     """Insert or update the rating summary row atomically."""
     existing = db.query(AttachmentRating).filter(AttachmentRating.item_id == item_id).first()
     if existing is None:
-        db.add(AttachmentRating(
-            item_id=item_id,
-            like_count=max(0, like_delta),
-            dislike_count=max(0, dislike_delta),
-            last_updated=datetime.now(timezone.utc),
-        ))
+        db.add(
+            AttachmentRating(
+                item_id=item_id,
+                like_count=max(0, like_delta),
+                dislike_count=max(0, dislike_delta),
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
     else:
-        existing.like_count    = max(0, existing.like_count    + like_delta)
+        existing.like_count = max(0, existing.like_count + like_delta)
         existing.dislike_count = max(0, existing.dislike_count + dislike_delta)
-        existing.last_updated  = datetime.now(timezone.utc)
+        existing.last_updated = datetime.now(timezone.utc)
 
 
 # ---------------------------------------------------
 # Build Ratings
 # ---------------------------------------------------
+
 
 def _validate_build_id_positive(build_id: int) -> None:
     if build_id <= 0:
@@ -2276,16 +2424,18 @@ def _validate_build_id_positive(build_id: int) -> None:
 def _upsert_build_rating(db: Session, build_id: int, like_delta: int, dislike_delta: int) -> None:
     existing = db.query(BuildRating).filter(BuildRating.build_id == build_id).first()
     if existing is None:
-        db.add(BuildRating(
-            build_id=build_id,
-            like_count=max(0, like_delta),
-            dislike_count=max(0, dislike_delta),
-            last_updated=datetime.now(timezone.utc),
-        ))
+        db.add(
+            BuildRating(
+                build_id=build_id,
+                like_count=max(0, like_delta),
+                dislike_count=max(0, dislike_delta),
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
     else:
-        existing.like_count    = max(0, existing.like_count    + like_delta)
+        existing.like_count = max(0, existing.like_count + like_delta)
         existing.dislike_count = max(0, existing.dislike_count + dislike_delta)
-        existing.last_updated  = datetime.now(timezone.utc)
+        existing.last_updated = datetime.now(timezone.utc)
 
 
 @app.get("/ratings/builds/bulk")
@@ -2311,18 +2461,22 @@ def get_bulk_build_ratings(ids: str, x_client_id: str = Header(None), db: Sessio
 
     votes_map = {}
     if client_hash:
-        vote_rows = db.query(BuildVote).filter(
-            BuildVote.build_id.in_(unique_ids),
-            BuildVote.ip_hash == client_hash,
-        ).all()
+        vote_rows = (
+            db.query(BuildVote)
+            .filter(
+                BuildVote.build_id.in_(unique_ids),
+                BuildVote.ip_hash == client_hash,
+            )
+            .all()
+        )
         votes_map = {v.build_id: v.vote for v in vote_rows}
 
     result = {}
     for build_id in unique_ids:
         r = ratings_map.get(build_id)
         result[str(build_id)] = {
-            "likes":     r.like_count    if r else 0,
-            "dislikes":  r.dislike_count if r else 0,
+            "likes": r.like_count if r else 0,
+            "dislikes": r.dislike_count if r else 0,
             "user_vote": votes_map.get(build_id),
         }
 
@@ -2330,7 +2484,12 @@ def get_bulk_build_ratings(ids: str, x_client_id: str = Header(None), db: Sessio
 
 
 @app.post("/ratings/builds/{build_id}/vote")
-def post_build_vote(build_id: int, vote: str = Body(..., embed=True), x_client_id: str = Header(None), db: Session = Depends(get_builds_db)):
+def post_build_vote(
+    build_id: int,
+    vote: str = Body(..., embed=True),
+    x_client_id: str = Header(None),
+    db: Session = Depends(get_builds_db),
+):
     _validate_build_id_positive(build_id)
     if vote != "like":
         raise HTTPException(status_code=422, detail='vote must be "like"')
@@ -2340,24 +2499,32 @@ def post_build_vote(build_id: int, vote: str = Body(..., embed=True), x_client_i
 
     ip_hash = _get_client_id_hash(x_client_id)
 
-    existing = db.query(BuildVote).filter(
-        BuildVote.build_id == build_id,
-        BuildVote.ip_hash  == ip_hash,
-    ).first()
+    existing = (
+        db.query(BuildVote)
+        .filter(
+            BuildVote.build_id == build_id,
+            BuildVote.ip_hash == ip_hash,
+        )
+        .first()
+    )
 
     if existing is None:
         db.add(BuildVote(build_id=build_id, ip_hash=ip_hash, vote=vote))
-        _upsert_build_rating(db, build_id, like_delta=1 if vote == "like" else 0, dislike_delta=1 if vote == "dislike" else 0)
+        _upsert_build_rating(
+            db, build_id, like_delta=1 if vote == "like" else 0, dislike_delta=1 if vote == "dislike" else 0
+        )
         result_vote = vote
     elif existing.vote == vote:
         db.delete(existing)
-        _upsert_build_rating(db, build_id, like_delta=-1 if vote == "like" else 0, dislike_delta=-1 if vote == "dislike" else 0)
+        _upsert_build_rating(
+            db, build_id, like_delta=-1 if vote == "like" else 0, dislike_delta=-1 if vote == "dislike" else 0
+        )
         result_vote = None
     else:
         existing.vote = vote
         existing.created_at = datetime.now(timezone.utc)
-        like_d    = (1 if vote == "like" else -1)
-        dislike_d = (1 if vote == "dislike" else -1)
+        like_d = 1 if vote == "like" else -1
+        dislike_d = 1 if vote == "dislike" else -1
         _upsert_build_rating(db, build_id, like_delta=like_d, dislike_delta=dislike_d)
         result_vote = vote
 
@@ -2365,8 +2532,8 @@ def post_build_vote(build_id: int, vote: str = Body(..., embed=True), x_client_i
 
     rating = db.query(BuildRating).filter(BuildRating.build_id == build_id).first()
     return {
-        "likes":     rating.like_count    if rating else 0,
-        "dislikes":  rating.dislike_count if rating else 0,
+        "likes": rating.like_count if rating else 0,
+        "dislikes": rating.dislike_count if rating else 0,
         "user_vote": result_vote,
     }
 
@@ -2376,21 +2543,27 @@ def delete_build_vote(build_id: int, x_client_id: str = Header(None), db: Sessio
     _validate_build_id_positive(build_id)
     ip_hash = _get_client_id_hash(x_client_id)
 
-    existing = db.query(BuildVote).filter(
-        BuildVote.build_id == build_id,
-        BuildVote.ip_hash  == ip_hash,
-    ).first()
+    existing = (
+        db.query(BuildVote)
+        .filter(
+            BuildVote.build_id == build_id,
+            BuildVote.ip_hash == ip_hash,
+        )
+        .first()
+    )
 
     if existing:
         old_vote = existing.vote
         db.delete(existing)
-        _upsert_build_rating(db, build_id, like_delta=-1 if old_vote == "like" else 0, dislike_delta=-1 if old_vote == "dislike" else 0)
+        _upsert_build_rating(
+            db, build_id, like_delta=-1 if old_vote == "like" else 0, dislike_delta=-1 if old_vote == "dislike" else 0
+        )
         db.commit()
 
     rating = db.query(BuildRating).filter(BuildRating.build_id == build_id).first()
     return {
-        "likes":     rating.like_count    if rating else 0,
-        "dislikes":  rating.dislike_count if rating else 0,
+        "likes": rating.like_count if rating else 0,
+        "dislikes": rating.dislike_count if rating else 0,
         "user_vote": None,
     }
 
@@ -2402,23 +2575,24 @@ def delete_build_vote(build_id: int, x_client_id: str = Header(None), db: Sessio
 # Simple in-process cache keyed by a hash of the items list.
 # ---------------------------------------------------
 
-_IMAGE_GEN_CACHE: dict[str, str] = {}   # hash -> image_url
-_IMAGE_GEN_MAX   = 500                  # evict when cache exceeds this size
+_IMAGE_GEN_CACHE: dict[str, str] = {}  # hash -> image_url
+_IMAGE_GEN_MAX = 500  # evict when cache exceeds this size
 
 _IMGGEN_HEALTH_CACHE: dict = {}  # {"status": str, "ts": float, "error": str|None}
-_IMGGEN_HEALTH_TTL   = 300       # 5 min - one real probe per UptimeRobot polling cycle
+_IMGGEN_HEALTH_TTL = 300  # 5 min - one real probe per UptimeRobot polling cycle
 
 # Patchright runs in a dedicated thread with its own ProactorEventLoop so that
 # asyncio.create_subprocess_exec (used internally to launch the browser) works
 # on Windows regardless of which event loop uvicorn chooses.
-_pw_loop:      asyncio.AbstractEventLoop | None = None
+_pw_loop: asyncio.AbstractEventLoop | None = None
 _pw_loop_ready = threading.Event()
-_pw_instance   = None
-_pw_context    = None
-_pw_page       = None   # persistent page - API calls run as real browser fetch()
+_pw_instance = None
+_pw_context = None
+_pw_page = None  # persistent page - API calls run as real browser fetch()
 
 # Persistent profile dir - Cloudflare session data accumulates across restarts
 _PW_PROFILE_DIR = os.path.join(RUNTIME_DIR, "pw_profile")
+
 
 def _run_pw_event_loop():
     global _pw_loop
@@ -2429,6 +2603,7 @@ def _run_pw_event_loop():
     asyncio.set_event_loop(_pw_loop)
     _pw_loop_ready.set()
     _pw_loop.run_forever()
+
 
 threading.Thread(target=_run_pw_event_loop, daemon=True, name="patchright-loop").start()
 
@@ -2549,6 +2724,7 @@ self.addEventListener('install', function(e) { e.waitUntil(self.skipWaiting()); 
 self.addEventListener('activate', function(e) { e.waitUntil(self.clients.claim()); });
 """
 
+
 async def _init_pw():
     global _pw_instance, _pw_context, _pw_page
     # Remove stale Chrome singleton lock files left behind by a previous crash.
@@ -2563,6 +2739,7 @@ async def _init_pw():
             except OSError as _e:
                 _logger.warning("Could not remove Chrome lock %s: %s", _lock_path, _e)
     from patchright.async_api import async_playwright
+
     _pw_instance = await async_playwright().start()
     _pw_context = await _pw_instance.chromium.launch_persistent_context(
         user_data_dir=_PW_PROFILE_DIR,
@@ -2577,10 +2754,10 @@ async def _init_pw():
     async def _serve_sw(route):
         await route.fulfill(
             status=200,
-            headers={"content-type": "application/javascript; charset=utf-8",
-                     "service-worker-allowed": "/"},
+            headers={"content-type": "application/javascript; charset=utf-8", "service-worker-allowed": "/"},
             body=_SW_CODE.encode(),
         )
+
     await _pw_context.route("**/eft-sw.js", _serve_sw)
 
     # Inject _FETCH_OVERRIDE_SCRIPT into the page HTML as the very first <head>
@@ -2596,9 +2773,13 @@ async def _init_pw():
             body = await resp.body()
             patched = body.replace(b"<head>", b"<head>" + _override_tag, 1)
             injected = patched != body
-            _STRIP = ("content-length", "content-encoding",
-                      "content-security-policy", "x-content-security-policy",
-                      "x-webkit-csp")
+            _STRIP = (
+                "content-length",
+                "content-encoding",
+                "content-security-policy",
+                "x-content-security-policy",
+                "x-webkit-csp",
+            )
             hdrs = {k: v for k, v in resp.headers.items() if k.lower() not in _STRIP}
             await route.fulfill(status=resp.status, headers=hdrs, body=patched)
             _logger.warning("HTML patched: injected=%s script_bytes=%d", injected, len(_override_tag))
@@ -2654,8 +2835,10 @@ async def _init_pw():
         [c["name"] for c in cookies],
     )
 
+
 _pw_req_lock: asyncio.Lock | None = None
 _pw_in_flight: int = 0  # number of requests currently waiting or generating
+
 
 async def _reset_pw_page():
     """Called from the pw loop after a build-image failure.  Tears down the
@@ -2681,7 +2864,7 @@ async def _reset_pw_page():
 
 
 async def _do_pw_request(id: str, items: list, weapon_name: str) -> dict:
-    global _pw_page, _pw_req_lock, _pw_in_flight
+    global _pw_req_lock, _pw_in_flight
     if _pw_page is None:
         await _init_pw()
         # give the page time to fully settle after a cold-start before the
@@ -2722,11 +2905,14 @@ async def _do_pw_request(id: str, items: list, weapon_name: str) -> dict:
                 # (installed by our HTML-injected script) stores the payload in
                 # window.__EFT_BUILD_OVERRIDE__ so the fetch wrapper can use it.
                 payload = {"data": {"id": id, "items": items}}
-                await _pw_page.evaluate("""(payload) => {
+                await _pw_page.evaluate(
+                    """(payload) => {
                     document.dispatchEvent(
                         new CustomEvent('__eft_set_override__', {detail: payload})
                     );
-                }""", payload)
+                }""",
+                    payload,
+                )
 
                 # Click the weapon.  The site's own JavaScript fires the fetch call.
                 # Because window.fetch in the main world is OUR wrapper (installed
@@ -2746,9 +2932,7 @@ async def _do_pw_request(id: str, items: list, weapon_name: str) -> dict:
                     raise RuntimeError("Timed out waiting for generate-build response")
 
                 # Read diagnostic attributes back from shared DOM
-                fired = await _pw_page.evaluate(
-                    "() => document.body.getAttribute('data-eft-fired')"
-                )
+                fired = await _pw_page.evaluate("() => document.body.getAttribute('data-eft-fired')")
                 _logger.warning("Override fired: %s", fired == "1")
 
             finally:
@@ -2766,6 +2950,7 @@ async def _do_pw_request(id: str, items: list, weapon_name: str) -> dict:
             return data
     finally:
         _pw_in_flight -= 1
+
 
 @app.get("/build-image/busy")
 async def build_image_busy():
@@ -2785,21 +2970,17 @@ async def health_imggen():
         raise HTTPException(status_code=503, detail=cached.get("error", "down"))
 
     with BuildsSessionLocal() as bdb:
-        build = bdb.query(PublicBuild).filter(
-            PublicBuild.pairs_json != "[]"
-        ).order_by(PublicBuild.id.desc()).first()
+        build = bdb.query(PublicBuild).filter(PublicBuild.pairs_json != "[]").order_by(PublicBuild.id.desc()).first()
     if not build:
         raise HTTPException(status_code=503, detail="No builds available for probe")
 
     pairs = json.loads(build.pairs_json)
     items = _build_spt_items(build.gun_id, pairs)
     _pw_loop_ready.wait(timeout=10)
-    future = asyncio.run_coroutine_threadsafe(
-        _do_pw_request(build.gun_id, items, build.gun_name), _pw_loop
-    )
+    future = asyncio.run_coroutine_threadsafe(_do_pw_request(build.gun_id, items, build.gun_name), _pw_loop)
     try:
         uvloop = asyncio.get_event_loop()
-        data = await uvloop.run_in_executor(None, lambda: future.result(timeout=120))
+        await uvloop.run_in_executor(None, lambda: future.result(timeout=120))
         _IMGGEN_HEALTH_CACHE["result"] = {"status": "ok", "ts": now, "error": None}
         return {"status": "ok"}
     except Exception as exc:
@@ -2812,9 +2993,9 @@ async def health_imggen():
 
 @app.post("/build-image")
 async def proxy_build_image(
-    id:    str        = Body(...),
+    id: str = Body(...),
     items: List[dict] = Body(...),
-    db:    Session    = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     if _imggen_disabled:
         raise HTTPException(status_code=503, detail="Build preview generation is temporarily disabled")
@@ -2822,7 +3003,7 @@ async def proxy_build_image(
     _cap_list("items", items, MAX_IMAGE_ITEMS)
 
     # Stable cache key: hash of sorted item tpl+slot pairs
-    cache_key_src = json.dumps(sorted((i.get("_tpl","") + i.get("slotId","")) for i in items))
+    cache_key_src = json.dumps(sorted((i.get("_tpl", "") + i.get("slotId", "")) for i in items))
     cache_key = hashlib.sha256(cache_key_src.encode()).hexdigest()[:16]
 
     if cache_key in _IMAGE_GEN_CACHE:
@@ -2835,9 +3016,7 @@ async def proxy_build_image(
 
     _pw_loop_ready.wait(timeout=10)
 
-    future = asyncio.run_coroutine_threadsafe(
-        _do_pw_request(id, items, weapon_name), _pw_loop
-    )
+    future = asyncio.run_coroutine_threadsafe(_do_pw_request(id, items, weapon_name), _pw_loop)
     try:
         uvloop = asyncio.get_event_loop()
         data = await uvloop.run_in_executor(None, lambda: future.result(timeout=120))
@@ -2874,22 +3053,23 @@ async def proxy_build_image(
 # cards never depend on the third-party image-gen URLs.
 # ---------------------------------------------------
 
+
 def _bp_hex24(s: str) -> str:
     """Port of the frontend _bpHex24 hash.
     Produces a 24-char hex instance ID - must match the JS implementation exactly."""
     MASK = 0xFFFFFFFF
-    h1, h2, h3 = 0x6b4a1c7f, 0x3e9d5a2b, 0xd1e4c7a9
+    h1, h2, h3 = 0x6B4A1C7F, 0x3E9D5A2B, 0xD1E4C7A9
     for ch in s:
         c = ord(ch)
-        h1 = ((h1 ^ c) * 0x9e3779b9) & MASK
-        h2 = ((h2 ^ c) * 0x85ebca6b) & MASK
-        h3 = ((h3 ^ c) * 0xc2b2ae35) & MASK
+        h1 = ((h1 ^ c) * 0x9E3779B9) & MASK
+        h2 = ((h2 ^ c) * 0x85EBCA6B) & MASK
+        h3 = ((h3 ^ c) * 0xC2B2AE35) & MASK
         h1 ^= (h2 >> 13) ^ (h3 >> 7)
         h2 ^= (h1 >> 17) ^ (h3 >> 5)
         h3 ^= (h1 >> 11) ^ (h2 >> 19)
     h1 = (h1 ^ h2 ^ h3) & MASK
-    h2 = (h2 ^ ((h1 * 0x27d4eb2d) & MASK)) & MASK
-    h3 = (h3 ^ ((h2 * 0x165667b1) & MASK)) & MASK
+    h2 = (h2 ^ ((h1 * 0x27D4EB2D) & MASK)) & MASK
+    h3 = (h3 ^ ((h2 * 0x165667B1) & MASK)) & MASK
     return "".join(f"{v:08x}" for v in (h1, h2, h3))
 
 
@@ -2897,12 +3077,14 @@ def _build_spt_items(gun_id: str, pairs: list) -> list:
     """Convert pairs [[slot_id, item_id], ...] to the SPT-format items array
     the image-gen API expects, matching the frontend _bpBuildSptItems() exactly."""
     gun_instance_id = _bp_hex24(gun_id + ":root")
-    items = [{
-        "_id":      gun_instance_id,
-        "_tpl":     gun_id,
-        "slotId":   "hideout",
-        "parentId": "hideout",
-    }]
+    items = [
+        {
+            "_id": gun_instance_id,
+            "_tpl": gun_id,
+            "slotId": "hideout",
+            "parentId": "hideout",
+        }
+    ]
 
     if not pairs:
         return items
@@ -2919,37 +3101,33 @@ def _build_spt_items(gun_id: str, pairs: list) -> list:
         slot = slot_map.get(slot_id)
         if not slot:
             continue
-        game_slot_name  = slot.slot_game_name or slot.slot_name
+        game_slot_name = slot.slot_game_name or slot.slot_name
         parent_instance = instance_map.get(slot.parent_item_id)
         if not parent_instance:
             continue
         instance_id = _bp_hex24(parent_instance + ":" + game_slot_name)
-        items.append({
-            "_id":      instance_id,
-            "_tpl":     item_id,
-            "slotId":   game_slot_name,
-            "parentId": parent_instance,
-        })
+        items.append(
+            {
+                "_id": instance_id,
+                "_tpl": item_id,
+                "slotId": game_slot_name,
+                "parentId": parent_instance,
+            }
+        )
         instance_map[item_id] = instance_id
 
     return items
 
 
-_GITEE_API        = "https://gitee.com/api/v5"
-_GITEE_OWNER      = "morph1ne"
-_GITEE_REPO       = "eftforge-assets"
-_GITEE_FOLDER     = "streaming-assets/build-images"
-_GITEE_BRANCH     = "master"
-_GITEE_RAW_PREFIX = (
-    f"https://gitee.com/{_GITEE_OWNER}/{_GITEE_REPO}"
-    f"/raw/{_GITEE_BRANCH}/{_GITEE_FOLDER}/"
-)
+_GITEE_API = "https://gitee.com/api/v5"
+_GITEE_OWNER = "morph1ne"
+_GITEE_REPO = "eftforge-assets"
+_GITEE_FOLDER = "streaming-assets/build-images"
+_GITEE_BRANCH = "master"
+_GITEE_RAW_PREFIX = f"https://gitee.com/{_GITEE_OWNER}/{_GITEE_REPO}" f"/raw/{_GITEE_BRANCH}/{_GITEE_FOLDER}/"
 
 _GITEE_AVATAR_FOLDER = "streaming-assets/avatars"
-_GITEE_AVATAR_PREFIX = (
-    f"https://gitee.com/{_GITEE_OWNER}/{_GITEE_REPO}"
-    f"/raw/{_GITEE_BRANCH}/{_GITEE_AVATAR_FOLDER}/"
-)
+_GITEE_AVATAR_PREFIX = f"https://gitee.com/{_GITEE_OWNER}/{_GITEE_REPO}" f"/raw/{_GITEE_BRANCH}/{_GITEE_AVATAR_FOLDER}/"
 
 
 def _gitee_upload_sync(filename: str, image_bytes: bytes, token: str) -> str:
@@ -2957,7 +3135,7 @@ def _gitee_upload_sync(filename: str, image_bytes: bytes, token: str) -> str:
     Returns the permanent raw URL for the file."""
     import requests as _req
 
-    path    = f"{_GITEE_FOLDER}/{filename}"
+    path = f"{_GITEE_FOLDER}/{filename}"
     api_url = f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/contents/{path}"
     content = base64.b64encode(image_bytes).decode()
 
@@ -2991,14 +3169,15 @@ def _gitee_delete_image(card_image_url: str | None, build_id: int) -> None:
         return  # nothing to delete (no image, dry-run prefix, error sentinel, etc.)
 
     from config import GITEE_TOKEN, GITEE_DRY_RUN
+
     if not GITEE_TOKEN or GITEE_DRY_RUN:
         return
 
     import requests as _req
 
     filename = card_image_url.removeprefix(_GITEE_RAW_PREFIX)
-    path     = f"{_GITEE_FOLDER}/{filename}"
-    api_url  = f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/contents/{path}"
+    path = f"{_GITEE_FOLDER}/{filename}"
+    api_url = f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/contents/{path}"
 
     try:
         r = _req.get(api_url, params={"access_token": GITEE_TOKEN}, timeout=20)
@@ -3010,12 +3189,16 @@ def _gitee_delete_image(card_image_url: str | None, build_id: int) -> None:
             _logger.error("gitee-delete: no SHA returned for build %s image %s", build_id, filename)
             return
 
-        r = _req.delete(api_url, json={
-            "access_token": GITEE_TOKEN,
-            "message":      f"ci: remove build image for deleted build {build_id}",
-            "sha":          sha,
-            "branch":       _GITEE_BRANCH,
-        }, timeout=30)
+        r = _req.delete(
+            api_url,
+            json={
+                "access_token": GITEE_TOKEN,
+                "message": f"ci: remove build image for deleted build {build_id}",
+                "sha": sha,
+                "branch": _GITEE_BRANCH,
+            },
+            timeout=30,
+        )
         r.raise_for_status()
         _logger.warning("gitee-delete: removed image %s for build %s", filename, build_id)
     except Exception as exc:
@@ -3026,6 +3209,7 @@ def _gitee_wipe_build_images_folder() -> int:
     """Delete every file in the build-images folder via the Contents API.
     Returns the number of images deleted, or -1 on error."""
     from config import GITEE_TOKEN, GITEE_DRY_RUN
+
     if not GITEE_TOKEN or GITEE_DRY_RUN:
         return 0
 
@@ -3056,8 +3240,8 @@ def _gitee_wipe_build_images_folder() -> int:
                 params=tok,
                 json={
                     "message": "ci: wipe all build images",
-                    "sha":     entry["sha"],
-                    "branch":  _GITEE_BRANCH,
+                    "sha": entry["sha"],
+                    "branch": _GITEE_BRANCH,
                 },
                 timeout=30,
             )
@@ -3075,7 +3259,8 @@ def _gitee_wipe_build_images_folder() -> int:
 
 
 _MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2 MB raw limit before processing
-_AVATAR_RENDER_SIZE = 128             # output square dimension in pixels
+_AVATAR_RENDER_SIZE = 128  # output square dimension in pixels
+
 
 def _process_and_upload_avatar(image_bytes: bytes, ip_hash: str) -> str:
     """Decode, resize to 128x128 JPEG, upload to Gitee. Returns the raw URL."""
@@ -3098,17 +3283,17 @@ def _process_and_upload_avatar(image_bytes: bytes, ip_hash: str) -> str:
     w, h = img.size
     side = min(w, h)
     left = (w - side) // 2
-    top  = (h - side) // 2
-    img  = img.crop((left, top, left + side, top + side))
+    top = (h - side) // 2
+    img = img.crop((left, top, left + side, top + side))
 
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=85, optimize=True)
     jpeg_bytes = buf.getvalue()
 
     filename = f"avatar_{ip_hash[:20]}.jpg"
-    path     = f"{_GITEE_AVATAR_FOLDER}/{filename}"
-    api_url  = f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/contents/{path}"
-    content  = base64.b64encode(jpeg_bytes).decode()
+    path = f"{_GITEE_AVATAR_FOLDER}/{filename}"
+    api_url = f"{_GITEE_API}/repos/{_GITEE_OWNER}/{_GITEE_REPO}/contents/{path}"
+    content = base64.b64encode(jpeg_bytes).decode()
 
     import requests as _req
 
@@ -3120,9 +3305,9 @@ def _process_and_upload_avatar(image_bytes: bytes, ip_hash: str) -> str:
 
     payload = {
         "access_token": GITEE_TOKEN,
-        "message":      f"ci: avatar upload for {ip_hash[:8]}",
-        "content":      content,
-        "branch":       _GITEE_BRANCH,
+        "message": f"ci: avatar upload for {ip_hash[:8]}",
+        "content": content,
+        "branch": _GITEE_BRANCH,
     }
     if sha:
         payload["sha"] = sha
@@ -3163,9 +3348,7 @@ def _generate_and_save_build_image(build_id: int, gun_id: str, gun_name: str, pa
     items = _build_spt_items(gun_id, pairs)
 
     # generate via patchright - blocks until the lock is acquired and generation completes
-    future = asyncio.run_coroutine_threadsafe(
-        _do_pw_request(gun_id, items, gun_name), _pw_loop
-    )
+    future = asyncio.run_coroutine_threadsafe(_do_pw_request(gun_id, items, gun_name), _pw_loop)
     try:
         data = future.result(timeout=120)
     except Exception as exc:
@@ -3200,7 +3383,10 @@ def _generate_and_save_build_image(build_id: int, gun_id: str, gun_name: str, pa
         dry_url = f"dryrun:{_GITEE_RAW_PREFIX}{filename}"
         _logger.warning(
             "build-image [DRY RUN]: build %s - %d bytes (%s) - would upload to %s",
-            build_id, len(image_bytes), content_type, dry_url.removeprefix("dryrun:"),
+            build_id,
+            len(image_bytes),
+            content_type,
+            dry_url.removeprefix("dryrun:"),
         )
         with BuildsSessionLocal() as db:
             b = db.get(PublicBuild, build_id)
@@ -3247,7 +3433,7 @@ async def _bg_migrate_build_images(force: bool = False):
     await asyncio.sleep(15)
 
     _logger.warning("bg-migrate: build image migration worker started")
-    loop     = asyncio.get_event_loop()
+    loop = asyncio.get_event_loop()
     build_id = None
 
     while True:
@@ -3279,18 +3465,18 @@ async def _bg_migrate_build_images(force: bool = False):
                     break
 
                 build_id = build.id
-                gun_id   = build.gun_id
+                gun_id = build.gun_id
                 gun_name = build.gun_name
-                pairs    = json.loads(build.pairs_json)
+                pairs = json.loads(build.pairs_json)
 
-            captured_id, captured_gun_id, captured_gun_name, captured_pairs = (
-                build_id, gun_id, gun_name, pairs
-            )
+            captured_id, captured_gun_id, captured_gun_name, captured_pairs = (build_id, gun_id, gun_name, pairs)
             ok = False
             for attempt in range(1, 4):
                 _logger.warning(
                     "bg-migrate: generating image for build %s (%s) - attempt %s/3",
-                    build_id, gun_name, attempt,
+                    build_id,
+                    gun_name,
+                    attempt,
                 )
                 ok = await loop.run_in_executor(
                     None,
@@ -3318,14 +3504,12 @@ async def _bg_migrate_build_images(force: bool = False):
             await asyncio.sleep(3)
 
         except Exception as exc:
-            _logger.error(
-                "bg-migrate: error on build %s: %s", build_id or "?", exc, exc_info=True
-            )
+            _logger.error("bg-migrate: error on build %s: %s", build_id or "?", exc, exc_info=True)
             await asyncio.sleep(30)  # back off before retrying
 
 
 _bg_migrate_task: asyncio.Task | None = None
-_bg_sync_task:    asyncio.Task | None = None
+_bg_sync_task: asyncio.Task | None = None
 
 
 async def _run_sync_once() -> bool:
@@ -3363,7 +3547,6 @@ async def _run_sync_once() -> bool:
 async def _bg_hyperactive_sync():
     """Background loop: while hyperactive mode is on, re-sync every 30 minutes.
     Triggers an immediate sync as soon as the mode is enabled."""
-    global _hyperactive_mode
     while True:
         if not _hyperactive_mode:
             # Idle - wait indefinitely until the admin enables the mode.
@@ -3390,12 +3573,12 @@ async def _on_startup():
     if os.path.exists(_SYNC_IN_PROGRESS_FILE):
         os.remove(_SYNC_IN_PROGRESS_FILE)
     _bg_migrate_task = asyncio.create_task(_bg_migrate_build_images())
-    _bg_sync_task    = asyncio.create_task(_bg_hyperactive_sync())
+    _bg_sync_task = asyncio.create_task(_bg_hyperactive_sync())
 
 
 @app.post("/admin/builds/retrigger-migrate")
 async def admin_retrigger_migrate(
-    request:     Request,
+    request: Request,
     x_admin_key: str = Header(None),
 ):
     global _bg_migrate_task
@@ -3410,42 +3593,43 @@ async def admin_retrigger_migrate(
 # Admin - Hyperactive Sync Mode
 # ---------------------------------------------------
 
+
 @app.get("/admin/hyperactive-mode")
 def admin_get_hyperactive_mode(
-    request:     Request,
+    request: Request,
     x_admin_key: str = Header(None),
 ):
     _require_admin(request, x_admin_key)
     return {
-        "hyperactive_mode":       _hyperactive_mode,
-        "sync_running":           _sync_running,
-        "last_sync_at":           _last_sync_at,
-        "sync_interval_seconds":  _SYNC_INTERVAL_HYPERACTIVE_SECS,
+        "hyperactive_mode": _hyperactive_mode,
+        "sync_running": _sync_running,
+        "last_sync_at": _last_sync_at,
+        "sync_interval_seconds": _SYNC_INTERVAL_HYPERACTIVE_SECS,
     }
 
 
 @app.post("/admin/hyperactive-mode")
 async def admin_set_hyperactive_mode(
-    request:     Request,
-    enabled:     bool = Body(...),
-    x_admin_key: str  = Header(None),
+    request: Request,
+    enabled: bool = Body(...),
+    x_admin_key: str = Header(None),
 ):
     global _hyperactive_mode
     _require_admin(request, x_admin_key)
     _hyperactive_mode = enabled
     if enabled:
         open(_HYPERACTIVE_LOCK_FILE, "w").close()
-        _sync_trigger.set()   # wake the background loop for an immediate sync
+        _sync_trigger.set()  # wake the background loop for an immediate sync
     else:
         if os.path.exists(_HYPERACTIVE_LOCK_FILE):
             os.remove(_HYPERACTIVE_LOCK_FILE)
-        _sync_trigger.set()   # wake the background loop so it sees mode=False
+        _sync_trigger.set()  # wake the background loop so it sees mode=False
     return {"hyperactive_mode": enabled}
 
 
 @app.get("/admin/imggen-disabled")
 def admin_get_imggen_disabled(
-    request:     Request,
+    request: Request,
     x_admin_key: str = Header(None),
 ):
     _require_admin(request, x_admin_key)
@@ -3454,9 +3638,9 @@ def admin_get_imggen_disabled(
 
 @app.post("/admin/imggen-disabled")
 def admin_set_imggen_disabled(
-    request:     Request,
-    disabled:    bool = Body(...),
-    x_admin_key: str  = Header(None),
+    request: Request,
+    disabled: bool = Body(...),
+    x_admin_key: str = Header(None),
 ):
     global _imggen_disabled
     _require_admin(request, x_admin_key)
@@ -3473,13 +3657,14 @@ def admin_set_imggen_disabled(
 # User Profile
 # ---------------------------------------------------
 
+
 @app.post("/profile/avatar")
 def upload_avatar(
-    request:     Request,
-    x_client_id: str      = Header(None),
-    image_b64:   str      = Body(...),
-    mime_type:   str      = Body("image/jpeg"),
-    db:          Session  = Depends(get_builds_db),
+    request: Request,
+    x_client_id: str = Header(None),
+    image_b64: str = Body(...),
+    mime_type: str = Body("image/jpeg"),
+    db: Session = Depends(get_builds_db),
 ):
     from config import GITEE_TOKEN, GITEE_DRY_RUN
 
@@ -3524,10 +3709,10 @@ def upload_avatar(
 
 @app.post("/profile/update")
 def update_profile(
-    x_client_id:      str      = Header(None),
-    username:         str | None = Body(default=None, max_length=30),
-    avatar_url:       str | None = Body(default=None),
-    db:               Session  = Depends(get_builds_db),
+    x_client_id: str = Header(None),
+    username: str | None = Body(default=None, max_length=30),
+    avatar_url: str | None = Body(default=None),
+    db: Session = Depends(get_builds_db),
 ):
     client_hash = _get_client_id_hash(x_client_id)
 
@@ -3545,19 +3730,15 @@ def update_profile(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    builds = (
-        db.query(PublicBuild)
-        .filter(PublicBuild.ip_hash == client_hash, PublicBuild.is_admin_build == False)  # noqa: E712
-        .all()
-    )
+    builds = db.query(PublicBuild).filter(PublicBuild.ip_hash == client_hash, PublicBuild.is_admin_build == False).all()
     for b in builds:
         b.user_display_name = clean_name or None
-        b.user_avatar_url   = clean_avatar or None
+        b.user_avatar_url = clean_avatar or None
 
     comments = db.query(BuildComment).filter(BuildComment.ip_hash == client_hash).all()
     for c in comments:
         c.user_display_name = clean_name or None
-        c.user_avatar_url   = clean_avatar or None
+        c.user_avatar_url = clean_avatar or None
 
     db.commit()
     _username_last[client_hash] = now_mono
@@ -3566,11 +3747,11 @@ def update_profile(
 
 @app.post("/profile/transfer/preview")
 def transfer_preview(
-    x_client_id: str      = Header(None),
-    old_uuid:    str      = Body(..., embed=True),
-    db:          Session  = Depends(get_builds_db),
+    x_client_id: str = Header(None),
+    old_uuid: str = Body(..., embed=True),
+    db: Session = Depends(get_builds_db),
 ):
-    current_hash   = _get_client_id_hash(x_client_id)
+    current_hash = _get_client_id_hash(x_client_id)
     old_uuid_clean = old_uuid.strip().lower()
 
     if not _CLIENT_ID_RE.match(old_uuid_clean):
@@ -3580,26 +3761,30 @@ def transfer_preview(
 
     old_hash = hmac.new(IP_HASH_SECRET.encode(), old_uuid_clean.encode(), hashlib.sha256).hexdigest()
 
-    old_builds   = db.query(PublicBuild).filter(PublicBuild.ip_hash == old_hash,     PublicBuild.is_admin_build == False).count()  # noqa: E712
+    old_builds = (
+        db.query(PublicBuild).filter(PublicBuild.ip_hash == old_hash, PublicBuild.is_admin_build == False).count()
+    )
     old_comments = db.query(BuildComment).filter(BuildComment.ip_hash == old_hash).count()
-    cur_builds   = db.query(PublicBuild).filter(PublicBuild.ip_hash == current_hash, PublicBuild.is_admin_build == False).count()  # noqa: E712
+    cur_builds = (
+        db.query(PublicBuild).filter(PublicBuild.ip_hash == current_hash, PublicBuild.is_admin_build == False).count()
+    )
     cur_comments = db.query(BuildComment).filter(BuildComment.ip_hash == current_hash).count()
 
     return {
-        "old_builds":   old_builds,
+        "old_builds": old_builds,
         "old_comments": old_comments,
-        "cur_builds":   cur_builds,
+        "cur_builds": cur_builds,
         "cur_comments": cur_comments,
     }
 
 
 @app.post("/profile/transfer")
 def transfer_account(
-    x_client_id: str       = Header(None),
-    old_uuid:    str       = Body(..., embed=True),
-    username:    str | None = Body(default=None, max_length=30),
-    avatar_url:  str | None = Body(default=None),
-    db:          Session   = Depends(get_builds_db),
+    x_client_id: str = Header(None),
+    old_uuid: str = Body(..., embed=True),
+    username: str | None = Body(default=None, max_length=30),
+    avatar_url: str | None = Body(default=None),
+    db: Session = Depends(get_builds_db),
 ):
     current_hash = _get_client_id_hash(x_client_id)
 
@@ -3619,13 +3804,17 @@ def transfer_account(
 
     old_hash = hmac.new(IP_HASH_SECRET.encode(), old_uuid_clean.encode(), hashlib.sha256).hexdigest()
 
-    transferred_builds = db.query(PublicBuild).filter(
-        PublicBuild.ip_hash == old_hash, PublicBuild.is_admin_build == False  # noqa: E712
-    ).update({"ip_hash": current_hash}, synchronize_session=False)
+    transferred_builds = (
+        db.query(PublicBuild)
+        .filter(PublicBuild.ip_hash == old_hash, PublicBuild.is_admin_build == False)
+        .update({"ip_hash": current_hash}, synchronize_session=False)
+    )
 
-    transferred_comments = db.query(BuildComment).filter(
-        BuildComment.ip_hash == old_hash
-    ).update({"ip_hash": current_hash}, synchronize_session=False)
+    transferred_comments = (
+        db.query(BuildComment)
+        .filter(BuildComment.ip_hash == old_hash)
+        .update({"ip_hash": current_hash}, synchronize_session=False)
+    )
 
     # Apply the current account's profile to all records now under current_hash
     clean_name = _sanitize_username(username) if username else None
@@ -3634,13 +3823,13 @@ def transfer_account(
     except ValueError:
         clean_avatar = None
 
-    db.query(PublicBuild).filter(
-        PublicBuild.ip_hash == current_hash, PublicBuild.is_admin_build == False  # noqa: E712
-    ).update({"user_display_name": clean_name, "user_avatar_url": clean_avatar}, synchronize_session=False)
+    db.query(PublicBuild).filter(PublicBuild.ip_hash == current_hash, PublicBuild.is_admin_build == False).update(
+        {"user_display_name": clean_name, "user_avatar_url": clean_avatar}, synchronize_session=False
+    )
 
-    db.query(BuildComment).filter(
-        BuildComment.ip_hash == current_hash
-    ).update({"user_display_name": clean_name, "user_avatar_url": clean_avatar}, synchronize_session=False)
+    db.query(BuildComment).filter(BuildComment.ip_hash == current_hash).update(
+        {"user_display_name": clean_name, "user_avatar_url": clean_avatar}, synchronize_session=False
+    )
 
     db.commit()
     _transfer_last[current_hash] = now_mono
@@ -3652,21 +3841,22 @@ def transfer_account(
 # Public Builds
 # ---------------------------------------------------
 
+
 @app.post("/builds/publish")
 def publish_build(
-    request:          Request,
+    request: Request,
     background_tasks: BackgroundTasks,
-    x_client_id:      str        = Header(None),
-    gun_id:           str        = Body(...),
-    build_name:       str        = Body(..., max_length=60),
-    pairs:            List[list] = Body(...),
-    stats:            dict | None = Body(default=None),
-    ammo_id:          str | None  = Body(default=None),
-    author_username:  str | None  = Body(default=None, max_length=30),
+    x_client_id: str = Header(None),
+    gun_id: str = Body(...),
+    build_name: str = Body(..., max_length=60),
+    pairs: List[list] = Body(...),
+    stats: dict | None = Body(default=None),
+    ammo_id: str | None = Body(default=None),
+    author_username: str | None = Body(default=None, max_length=30),
     author_avatar_url: str | None = Body(default=None),
-    tags:             List[str] | None = Body(default=None),
-    db:               Session    = Depends(get_builds_db),
-    db_main:          Session    = Depends(get_db),
+    tags: List[str] | None = Body(default=None),
+    db: Session = Depends(get_builds_db),
+    db_main: Session = Depends(get_db),
 ):
     client_hash = _get_client_id_hash(x_client_id)
 
@@ -3706,8 +3896,7 @@ def publish_build(
     if len(pairs) > 200:
         raise HTTPException(status_code=422, detail="Too many pairs (max 200).")
     for p in pairs:
-        if not (isinstance(p, list) and len(p) == 2
-                and isinstance(p[0], str) and isinstance(p[1], str)):
+        if not (isinstance(p, list) and len(p) == 2 and isinstance(p[0], str) and isinstance(p[1], str)):
             raise HTTPException(status_code=422, detail="Each pair must be [slot_id, item_id].")
 
     _validate_pairs(pairs, db_main)
@@ -3732,20 +3921,20 @@ def publish_build(
         raise HTTPException(status_code=422, detail="stats payload too large.")
 
     build = PublicBuild(
-        gun_id            = gun_id,
-        gun_name          = gun.name,
-        build_name        = name,
-        pairs_json        = json.dumps(pairs),
-        ip_hash           = client_hash,
-        ip_snapshot       = _get_client_ip(request),
-        author_id         = None,
-        is_admin_build    = False,
-        stats_json        = stats_serialized,
-        user_display_name = u_name or None,
-        user_avatar_url   = u_avatar or None,
-        total_price_rub   = total_price,
-        ammo_id           = ammo_id or None,
-        tags_json         = json.dumps(clean_tags) if clean_tags else None,
+        gun_id=gun_id,
+        gun_name=gun.name,
+        build_name=name,
+        pairs_json=json.dumps(pairs),
+        ip_hash=client_hash,
+        ip_snapshot=_get_client_ip(request),
+        author_id=None,
+        is_admin_build=False,
+        stats_json=stats_serialized,
+        user_display_name=u_name or None,
+        user_avatar_url=u_avatar or None,
+        total_price_rub=total_price,
+        ammo_id=ammo_id or None,
+        tags_json=json.dumps(clean_tags) if clean_tags else None,
     )
     db.add(build)
     db.commit()
@@ -3756,7 +3945,10 @@ def publish_build(
     # kick off image generation in the background - response returns immediately
     background_tasks.add_task(
         _generate_and_save_build_image,
-        build.id, gun_id, gun.name, pairs,
+        build.id,
+        gun_id,
+        gun.name,
+        pairs,
     )
 
     return {"id": build.id, "published_at": build.published_at.isoformat()}
@@ -3796,24 +3988,24 @@ def get_my_builds(
 
     return [
         {
-            "id":                b.id,
-            "gun_id":            b.gun_id,
-            "gun_name":          b.gun_name,
-            "build_name":        b.build_name,
+            "id": b.id,
+            "gun_id": b.gun_id,
+            "gun_name": b.gun_name,
+            "build_name": b.build_name,
             "user_display_name": b.user_display_name,
-            "user_avatar_url":   b.user_avatar_url,
-            "is_admin_build":    False,
-            "is_featured":       b.is_featured,
-            "published_at":      b.published_at.isoformat(),
-            "is_mine":           True,
-            "pairs":             _safe_json_loads(b.pairs_json),
-            "stats":             _safe_json_loads(b.stats_json),
-            "load_count":        b.load_count or 0,
-            "like_count":        like_counts.get(b.id, 0),
-            "comment_count":     comment_counts.get(b.id, 0),
-            "card_image_url":    b.card_image_url,
-            "ammo_id":           b.ammo_id,
-            "tags":              _safe_json_loads(b.tags_json) or [],
+            "user_avatar_url": b.user_avatar_url,
+            "is_admin_build": False,
+            "is_featured": b.is_featured,
+            "published_at": b.published_at.isoformat(),
+            "is_mine": True,
+            "pairs": _safe_json_loads(b.pairs_json),
+            "stats": _safe_json_loads(b.stats_json),
+            "load_count": b.load_count or 0,
+            "like_count": like_counts.get(b.id, 0),
+            "comment_count": comment_counts.get(b.id, 0),
+            "card_image_url": b.card_image_url,
+            "ammo_id": b.ammo_id,
+            "tags": _safe_json_loads(b.tags_json) or [],
         }
         for b in rows
     ]
@@ -3852,26 +4044,26 @@ def get_public_builds(
 
     return [
         {
-            "id":                     build.id,
-            "gun_id":                 build.gun_id,
-            "build_name":             build.build_name,
-            "author_display_name":    author.display_name     if author else None,
-            "author_display_name_zh": author.display_name_zh  if author else None,
-            "author_avatar_url":      author.avatar_url        if author else None,
-            "user_display_name":      build.user_display_name,
-            "user_avatar_url":        build.user_avatar_url,
-            "is_admin_build":         build.is_admin_build,
-            "is_featured":            build.is_featured,
-            "published_at":           build.published_at.isoformat(),
-            "is_mine":                (client_hash is not None and build.ip_hash == client_hash),
-            "pairs":                  _safe_json_loads(build.pairs_json),
-            "stats":                  _safe_json_loads(build.stats_json),
-            "total_price_rub":        build.total_price_rub,
-            "load_count":             build.load_count or 0,
-            "card_image_url":         build.card_image_url,
-            "ammo_id":                build.ammo_id,
-            "tags":                   _safe_json_loads(build.tags_json) or [],
-            "comment_count":          comment_counts.get(build.id, 0),
+            "id": build.id,
+            "gun_id": build.gun_id,
+            "build_name": build.build_name,
+            "author_display_name": author.display_name if author else None,
+            "author_display_name_zh": author.display_name_zh if author else None,
+            "author_avatar_url": author.avatar_url if author else None,
+            "user_display_name": build.user_display_name,
+            "user_avatar_url": build.user_avatar_url,
+            "is_admin_build": build.is_admin_build,
+            "is_featured": build.is_featured,
+            "published_at": build.published_at.isoformat(),
+            "is_mine": (client_hash is not None and build.ip_hash == client_hash),
+            "pairs": _safe_json_loads(build.pairs_json),
+            "stats": _safe_json_loads(build.stats_json),
+            "total_price_rub": build.total_price_rub,
+            "load_count": build.load_count or 0,
+            "card_image_url": build.card_image_url,
+            "ammo_id": build.ammo_id,
+            "tags": _safe_json_loads(build.tags_json) or [],
+            "comment_count": comment_counts.get(build.id, 0),
         }
         for build, author in rows
     ]
@@ -3880,6 +4072,7 @@ def get_public_builds(
 # load-count cooldown: (client_ip, build_id) -> monotonic time of last counted load
 _load_count_last: dict[tuple[str, int], float] = {}
 _LOAD_COUNT_COOLDOWN = 60.0
+
 
 @app.post("/builds/{build_id}/load")
 def record_build_load(
@@ -3935,17 +4128,19 @@ def get_notifications(
         db.query(PendingNotification)
         .filter(
             PendingNotification.ip_hash == client_hash,
-            PendingNotification.delivered == False,  # noqa: E712
+            PendingNotification.delivered == False,
         )
         .all()
     )
 
     result = []
     for note in notes:
-        result.append({
-            "type": note.type,
-            "data": json.loads(note.data_json),
-        })
+        result.append(
+            {
+                "type": note.type,
+                "data": json.loads(note.data_json),
+            }
+        )
         note.delivered = True
 
     db.commit()
@@ -3964,9 +4159,9 @@ def get_ban_status(x_client_id: str = Header(None), db: Session = Depends(get_bu
     if ban.banned_until is not None and ban.banned_until <= now:
         return {"is_banned": False, "banned_until": None}
     return {
-        "is_banned":    True,
+        "is_banned": True,
         "banned_until": ban.banned_until.isoformat() + "Z" if ban.banned_until else None,
-        "reason":       ban.reason,
+        "reason": ban.reason,
     }
 
 
@@ -3974,19 +4169,20 @@ def get_ban_status(x_client_id: str = Header(None), db: Session = Depends(get_bu
 # Admin - Builds
 # ---------------------------------------------------
 
+
 @app.post("/admin/builds/publish")
 def admin_publish_build(
-    request:         Request,
-    x_admin_key:     str = Header(None),
-    gun_id:          str        = Body(...),
-    build_name:      str        = Body(..., max_length=60),
-    pairs:           List[list] = Body(...),
-    author_id:       str | None = Body(default=None),
-    stats:           dict | None = Body(default=None),
-    card_image_url:  str | None = Body(default=None),
-    ammo_id:         str | None = Body(default=None),
-    db:              Session    = Depends(get_builds_db),
-    db_main:         Session    = Depends(get_db),
+    request: Request,
+    x_admin_key: str = Header(None),
+    gun_id: str = Body(...),
+    build_name: str = Body(..., max_length=60),
+    pairs: List[list] = Body(...),
+    author_id: str | None = Body(default=None),
+    stats: dict | None = Body(default=None),
+    card_image_url: str | None = Body(default=None),
+    ammo_id: str | None = Body(default=None),
+    db: Session = Depends(get_builds_db),
+    db_main: Session = Depends(get_db),
 ):
     _require_admin(request, x_admin_key)
 
@@ -4005,8 +4201,7 @@ def admin_publish_build(
     if not isinstance(pairs, list):
         raise HTTPException(status_code=422, detail="pairs must be an array.")
     for p in pairs:
-        if not (isinstance(p, list) and len(p) == 2
-                and isinstance(p[0], str) and isinstance(p[1], str)):
+        if not (isinstance(p, list) and len(p) == 2 and isinstance(p[0], str) and isinstance(p[1], str)):
             raise HTTPException(status_code=422, detail="Each pair must be [slot_id, item_id].")
 
     _validate_pairs(pairs, db_main)
@@ -4016,19 +4211,19 @@ def admin_publish_build(
     total_price = sum(r[1] or 0 for r in price_rows) or None
 
     build = PublicBuild(
-        gun_id          = gun_id,
-        gun_name        = gun.name,
-        build_name      = name,
-        pairs_json      = json.dumps(pairs),
-        ip_hash         = "admin",
-        ip_snapshot     = None,
-        author_id       = author_id,
-        is_admin_build  = True,
-        is_featured     = True,
-        stats_json      = json.dumps(stats) if stats else None,
-        total_price_rub = total_price,
-        card_image_url  = card_image_url,
-        ammo_id         = ammo_id or None,
+        gun_id=gun_id,
+        gun_name=gun.name,
+        build_name=name,
+        pairs_json=json.dumps(pairs),
+        ip_hash="admin",
+        ip_snapshot=None,
+        author_id=author_id,
+        is_admin_build=True,
+        is_featured=True,
+        stats_json=json.dumps(stats) if stats else None,
+        total_price_rub=total_price,
+        card_image_url=card_image_url,
+        ammo_id=ammo_id or None,
     )
     db.add(build)
     db.commit()
@@ -4038,12 +4233,12 @@ def admin_publish_build(
 
 @app.post("/admin/builds/{build_id}/feature")
 def admin_feature_build(
-    build_id:       int,
-    request:        Request,
-    x_admin_key:    str = Header(None),
+    build_id: int,
+    request: Request,
+    x_admin_key: str = Header(None),
     card_image_url: str | None = Body(default=None),
-    author_id:      str | None = Body(default=None),
-    db:             Session = Depends(get_builds_db),
+    author_id: str | None = Body(default=None),
+    db: Session = Depends(get_builds_db),
 ):
     _require_admin(request, x_admin_key)
     build = db.query(PublicBuild).filter(PublicBuild.id == build_id).first()
@@ -4052,7 +4247,7 @@ def admin_feature_build(
     if author_id is not None:
         if not db.query(PublicBuildAuthor).filter(PublicBuildAuthor.id == author_id).first():
             raise HTTPException(status_code=422, detail="author_id not found.")
-    build.is_featured    = True
+    build.is_featured = True
     if card_image_url is not None:
         build.card_image_url = card_image_url
     if author_id is not None:
@@ -4063,10 +4258,10 @@ def admin_feature_build(
 
 @app.post("/admin/builds/{build_id}/unfeature")
 def admin_unfeature_build(
-    build_id:    int,
-    request:     Request,
+    build_id: int,
+    request: Request,
     x_admin_key: str = Header(None),
-    db:          Session = Depends(get_builds_db),
+    db: Session = Depends(get_builds_db),
 ):
     _require_admin(request, x_admin_key)
     build = db.query(PublicBuild).filter(PublicBuild.id == build_id).first()
@@ -4075,38 +4270,38 @@ def admin_unfeature_build(
     build.is_featured = False
     if build.is_admin_build:
         build.card_image_url = None
-        build.author_id      = None
+        build.author_id = None
     db.commit()
     return {"id": build.id, "is_featured": False}
 
 
 @app.get("/admin/builds/featured")
 def admin_list_featured_builds(
-    request:     Request,
+    request: Request,
     x_admin_key: str = Header(None),
-    db:          Session = Depends(get_builds_db),
+    db: Session = Depends(get_builds_db),
 ):
     _require_admin(request, x_admin_key)
     rows = (
         db.query(PublicBuild, PublicBuildAuthor, BuildRating)
         .outerjoin(PublicBuildAuthor, PublicBuild.author_id == PublicBuildAuthor.id)
         .outerjoin(BuildRating, BuildRating.build_id == PublicBuild.id)
-        .filter(PublicBuild.is_featured == True)  # noqa: E712
+        .filter(PublicBuild.is_featured == True)
         .order_by(PublicBuild.is_rotating.desc(), PublicBuild.published_at.desc())
         .all()
     )
     return [
         {
-            "id":             b.id,
-            "gun_id":         b.gun_id,
-            "gun_name":       b.gun_name,
-            "build_name":     b.build_name,
-            "author_id":      b.author_id,
-            "author_name":    a.display_name if a else None,
-            "published_at":   b.published_at.isoformat(),
+            "id": b.id,
+            "gun_id": b.gun_id,
+            "gun_name": b.gun_name,
+            "build_name": b.build_name,
+            "author_id": b.author_id,
+            "author_name": a.display_name if a else None,
+            "published_at": b.published_at.isoformat(),
             "is_admin_build": b.is_admin_build,
-            "is_rotating":    b.is_rotating,
-            "like_count":     r.like_count if r else 0,
+            "is_rotating": b.is_rotating,
+            "like_count": r.like_count if r else 0,
         }
         for b, a, r in rows
     ]
@@ -4114,24 +4309,22 @@ def admin_list_featured_builds(
 
 @app.post("/admin/builds/rotate-featured")
 def admin_rotate_featured_builds(
-    request:     Request,
+    request: Request,
     x_admin_key: str = Header(None),
-    db:          Session = Depends(get_builds_db),
+    db: Session = Depends(get_builds_db),
 ):
     _require_admin(request, x_admin_key)
 
     # unfeature all builds currently in the rotation batch
-    outgoing = db.query(PublicBuild).filter(PublicBuild.is_rotating == True).all()  # noqa: E712
+    outgoing = db.query(PublicBuild).filter(PublicBuild.is_rotating == True).all()
     for b in outgoing:
-        b.is_featured  = False
-        b.is_rotating  = False
+        b.is_featured = False
+        b.is_rotating = False
 
     two_weeks_ago = datetime.now(timezone.utc) - timedelta(weeks=2)
 
     # top 10 most-liked community builds by votes cast in the last 2 weeks
-    already_featured_ids = {
-        row[0] for row in db.query(PublicBuild.id).filter(PublicBuild.is_featured == True).all()  # noqa: E712
-    }
+    already_featured_ids = {row[0] for row in db.query(PublicBuild.id).filter(PublicBuild.is_featured == True).all()}
     candidates = (
         db.query(PublicBuild, func.count(BuildVote.id).label("recent_likes"))
         .join(BuildVote, BuildVote.build_id == PublicBuild.id)
@@ -4158,17 +4351,17 @@ def admin_rotate_featured_builds(
     db.commit()
     return {
         "unfeatured": [{"id": b.id, "build_name": b.build_name} for b in outgoing],
-        "featured":   incoming,
+        "featured": incoming,
     }
 
 
 @app.post("/admin/builds/{build_id}/card-image")
 def admin_set_card_image(
-    build_id:       int,
-    request:        Request,
-    x_admin_key:    str = Header(None),
+    build_id: int,
+    request: Request,
+    x_admin_key: str = Header(None),
     card_image_url: str | None = Body(default=None, embed=True),
-    db:             Session = Depends(get_builds_db),
+    db: Session = Depends(get_builds_db),
 ):
     _require_admin(request, x_admin_key)
     build = db.query(PublicBuild).filter(PublicBuild.id == build_id).first()
@@ -4181,11 +4374,11 @@ def admin_set_card_image(
 
 @app.post("/admin/builds/{build_id}/author")
 def admin_set_build_author(
-    build_id:    int,
-    request:     Request,
+    build_id: int,
+    request: Request,
     x_admin_key: str = Header(None),
-    author_id:   str | None = Body(default=..., embed=True),
-    db:          Session = Depends(get_builds_db),
+    author_id: str | None = Body(default=..., embed=True),
+    db: Session = Depends(get_builds_db),
 ):
     _require_admin(request, x_admin_key)
     build = db.query(PublicBuild).filter(PublicBuild.id == build_id).first()
@@ -4211,18 +4404,20 @@ def admin_delete_build(
     if not build:
         raise HTTPException(status_code=404, detail="Build not found.")
 
-    owner_hash     = build.ip_hash
-    build_name     = build.build_name
+    owner_hash = build.ip_hash
+    build_name = build.build_name
     card_image_url = build.card_image_url
     db.delete(build)
 
     # notify the owner (skip for admin-published builds)
     if owner_hash != "admin":
-        db.add(PendingNotification(
-            ip_hash   = owner_hash,
-            type      = "unlist",
-            data_json = json.dumps({"build_name": build_name}),
-        ))
+        db.add(
+            PendingNotification(
+                ip_hash=owner_hash,
+                type="unlist",
+                data_json=json.dumps({"build_name": build_name}),
+            )
+        )
 
     db.commit()
     _gitee_delete_image(card_image_url, build_id)
@@ -4231,41 +4426,35 @@ def admin_delete_build(
 
 @app.get("/admin/migration/status")
 def admin_migration_status(
-    request:     Request,
+    request: Request,
     x_admin_key: str = Header(None),
     db: Session = Depends(get_builds_db),
 ):
     _require_admin(request, x_admin_key)
     from config import GITEE_TOKEN, GITEE_DRY_RUN, DISABLE_BG_MIGRATE
 
-    total    = db.query(PublicBuild).count()
-    migrated = db.query(PublicBuild).filter(
-        PublicBuild.card_image_url.like(_GITEE_RAW_PREFIX + "%")
-    ).count()
-    errored  = db.query(PublicBuild).filter(
-        PublicBuild.card_image_url.like("error:%")
-    ).count()
-    dry_run_count = db.query(PublicBuild).filter(
-        PublicBuild.card_image_url.like("dryrun:%")
-    ).count()
-    pending  = total - migrated - errored - dry_run_count
+    total = db.query(PublicBuild).count()
+    migrated = db.query(PublicBuild).filter(PublicBuild.card_image_url.like(_GITEE_RAW_PREFIX + "%")).count()
+    errored = db.query(PublicBuild).filter(PublicBuild.card_image_url.like("error:%")).count()
+    dry_run_count = db.query(PublicBuild).filter(PublicBuild.card_image_url.like("dryrun:%")).count()
+    pending = total - migrated - errored - dry_run_count
 
     return {
-        "total":            total,
-        "migrated":         migrated,
-        "pending":          pending,
-        "errored":          errored,
+        "total": total,
+        "migrated": migrated,
+        "pending": pending,
+        "errored": errored,
         "dry_run_processed": dry_run_count,
-        "worker_disabled":  DISABLE_BG_MIGRATE,
-        "dry_run":          GITEE_DRY_RUN,
-        "token_set":        bool(GITEE_TOKEN),
-        "complete":         pending == 0 and errored == 0,
+        "worker_disabled": DISABLE_BG_MIGRATE,
+        "dry_run": GITEE_DRY_RUN,
+        "token_set": bool(GITEE_TOKEN),
+        "complete": pending == 0 and errored == 0,
     }
 
 
 @app.post("/admin/migration/reset")
 def admin_migration_reset(
-    request:     Request,
+    request: Request,
     x_admin_key: str = Header(None),
     db: Session = Depends(get_builds_db),
 ):
@@ -4287,17 +4476,14 @@ def admin_migration_reset(
 
 @app.post("/admin/migration/clear-errors")
 def admin_migration_clear_errors(
-    request:     Request,
+    request: Request,
     x_admin_key: str = Header(None),
     db: Session = Depends(get_builds_db),
 ):
     _require_admin(request, x_admin_key)
     count = (
         db.query(PublicBuild)
-        .filter(
-            PublicBuild.card_image_url.like("error:%")
-            | PublicBuild.card_image_url.like("dryrun:%")
-        )
+        .filter(PublicBuild.card_image_url.like("error:%") | PublicBuild.card_image_url.like("dryrun:%"))
         .update({"card_image_url": None}, synchronize_session=False)
     )
     db.commit()
@@ -4306,11 +4492,11 @@ def admin_migration_clear_errors(
 
 @app.post("/admin/migration/regenerate-image/{build_id}")
 def admin_migration_regenerate_image(
-    build_id:         int,
-    request:          Request,
+    build_id: int,
+    request: Request,
     background_tasks: BackgroundTasks,
-    x_admin_key:      str = Header(None),
-    db:               Session = Depends(get_builds_db),
+    x_admin_key: str = Header(None),
+    db: Session = Depends(get_builds_db),
 ):
     """Force-regenerate the card image for a single build.
     Bypasses DISABLE_BG_MIGRATE - always runs regardless of env config."""
@@ -4323,16 +4509,19 @@ def admin_migration_regenerate_image(
     db.commit()
     background_tasks.add_task(
         _generate_and_save_build_image,
-        build.id, build.gun_id, build.gun_name, pairs,
+        build.id,
+        build.gun_id,
+        build.gun_name,
+        pairs,
     )
     return {"queued": True, "id": build_id}
 
 
 @app.post("/admin/builds/wipe-all")
 def admin_wipe_all_builds(
-    request:     Request,
+    request: Request,
     x_admin_key: str = Header(None),
-    db:          Session = Depends(get_builds_db),
+    db: Session = Depends(get_builds_db),
 ):
     """Delete every community build from the DB and wipe the Gitee build-images folder."""
     _require_admin(request, x_admin_key)
@@ -4355,11 +4544,12 @@ def admin_wipe_all_builds(
 # Build Comments
 # ---------------------------------------------------
 
+
 @app.get("/builds/{build_id}/comments")
 def get_build_comments(
-    build_id:    int,
+    build_id: int,
     x_client_id: str = Header(None),
-    db:          Session = Depends(get_builds_db),
+    db: Session = Depends(get_builds_db),
 ):
     build = db.query(PublicBuild).filter(PublicBuild.id == build_id).first()
     if not build:
@@ -4367,19 +4557,19 @@ def get_build_comments(
     client_hash = _get_optional_client_id_hash(x_client_id)
     rows = (
         db.query(BuildComment)
-        .filter(BuildComment.build_id == build_id, BuildComment.is_deleted == False)  # noqa: E712
+        .filter(BuildComment.build_id == build_id, BuildComment.is_deleted == False)
         .order_by(BuildComment.created_at.asc())
         .limit(100)
         .all()
     )
     return [
         {
-            "id":                r.id,
-            "content":           r.content,
-            "created_at":        r.created_at.isoformat(),
-            "is_mine":           (client_hash is not None and r.ip_hash == client_hash),
+            "id": r.id,
+            "content": r.content,
+            "created_at": r.created_at.isoformat(),
+            "is_mine": (client_hash is not None and r.ip_hash == client_hash),
             "user_display_name": r.user_display_name,
-            "user_avatar_url":   r.user_avatar_url,
+            "user_avatar_url": r.user_avatar_url,
         }
         for r in rows
     ]
@@ -4387,13 +4577,13 @@ def get_build_comments(
 
 @app.post("/builds/{build_id}/comments")
 def post_build_comment(
-    build_id:         int,
-    request:          Request,
-    x_client_id:      str      = Header(None),
-    content:          str      = Body(..., max_length=280),
+    build_id: int,
+    request: Request,
+    x_client_id: str = Header(None),
+    content: str = Body(..., max_length=280),
     user_display_name: str | None = Body(default=None, max_length=30),
-    user_avatar_url:   str | None = Body(default=None),
-    db:               Session = Depends(get_builds_db),
+    user_avatar_url: str | None = Body(default=None),
+    db: Session = Depends(get_builds_db),
 ):
     build = db.query(PublicBuild).filter(PublicBuild.id == build_id).first()
     if not build:
@@ -4422,51 +4612,57 @@ def post_build_comment(
         raise HTTPException(status_code=422, detail=str(exc))
 
     comment = BuildComment(
-        build_id          = build_id,
-        ip_hash           = client_hash,
-        content           = cleaned,
-        created_at        = datetime.now(timezone.utc).replace(tzinfo=None),
-        user_display_name = c_name or None,
-        user_avatar_url   = c_avatar or None,
+        build_id=build_id,
+        ip_hash=client_hash,
+        content=cleaned,
+        created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        user_display_name=c_name or None,
+        user_avatar_url=c_avatar or None,
     )
     db.add(comment)
     db.flush()
 
     if build.ip_hash and client_hash != build.ip_hash:
-        db.add(PendingNotification(
-            ip_hash    = build.ip_hash,
-            type       = "new_comment",
-            data_json  = json.dumps({"build_id": build_id, "build_name": build.build_name}),
-            created_at = datetime.now(timezone.utc).replace(tzinfo=None),
-            delivered  = False,
-        ))
+        db.add(
+            PendingNotification(
+                ip_hash=build.ip_hash,
+                type="new_comment",
+                data_json=json.dumps({"build_id": build_id, "build_name": build.build_name}),
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                delivered=False,
+            )
+        )
 
     db.commit()
     db.refresh(comment)
 
     _comment_last[client_hash] = now
     return {
-        "id":                comment.id,
-        "content":           comment.content,
-        "created_at":        comment.created_at.isoformat(),
-        "is_mine":           True,
+        "id": comment.id,
+        "content": comment.content,
+        "created_at": comment.created_at.isoformat(),
+        "is_mine": True,
         "user_display_name": comment.user_display_name,
-        "user_avatar_url":   comment.user_avatar_url,
+        "user_avatar_url": comment.user_avatar_url,
     }
 
 
 @app.delete("/builds/{build_id}/comments/{comment_id}")
 def delete_own_comment(
-    build_id:    int,
-    comment_id:  int,
+    build_id: int,
+    comment_id: int,
     x_client_id: str = Header(None),
-    db:          Session = Depends(get_builds_db),
+    db: Session = Depends(get_builds_db),
 ):
     client_hash = _get_client_id_hash(x_client_id)
-    comment = db.query(BuildComment).filter(
-        BuildComment.id == comment_id,
-        BuildComment.build_id == build_id,
-    ).first()
+    comment = (
+        db.query(BuildComment)
+        .filter(
+            BuildComment.id == comment_id,
+            BuildComment.build_id == build_id,
+        )
+        .first()
+    )
     if not comment:
         raise HTTPException(status_code=404, detail="Comment not found.")
     if comment.is_deleted:
@@ -4480,10 +4676,10 @@ def delete_own_comment(
 
 @app.delete("/admin/builds/comments/{comment_id}")
 def admin_delete_comment(
-    comment_id:  int,
-    request:     Request,
+    comment_id: int,
+    request: Request,
     x_admin_key: str = Header(None),
-    db:          Session = Depends(get_builds_db),
+    db: Session = Depends(get_builds_db),
 ):
     _require_admin(request, x_admin_key)
     comment = db.query(BuildComment).filter(BuildComment.id == comment_id).first()
@@ -4496,15 +4692,15 @@ def admin_delete_comment(
 
 @app.get("/admin/builds/comments")
 def admin_list_builds_with_comments(
-    request:     Request,
+    request: Request,
     x_admin_key: str = Header(None),
-    db:          Session = Depends(get_builds_db),
+    db: Session = Depends(get_builds_db),
 ):
     _require_admin(request, x_admin_key)
     rows = (
         db.query(BuildComment, PublicBuild)
         .join(PublicBuild, BuildComment.build_id == PublicBuild.id)
-        .filter(BuildComment.is_deleted == False)  # noqa: E712
+        .filter(BuildComment.is_deleted == False)
         .order_by(BuildComment.created_at.desc())
         .all()
     )
@@ -4512,17 +4708,19 @@ def admin_list_builds_with_comments(
     for comment, build in rows:
         if build.id not in builds:
             builds[build.id] = {
-                "build_id":     build.id,
-                "build_name":   build.build_name,
-                "gun_name":     build.gun_name,
+                "build_id": build.id,
+                "build_name": build.build_name,
+                "gun_name": build.gun_name,
                 "published_at": build.published_at.isoformat(),
-                "comments":     [],
+                "comments": [],
             }
-        builds[build.id]["comments"].append({
-            "id":         comment.id,
-            "content":    comment.content,
-            "created_at": comment.created_at.isoformat(),
-        })
+        builds[build.id]["comments"].append(
+            {
+                "id": comment.id,
+                "content": comment.content,
+                "created_at": comment.created_at.isoformat(),
+            }
+        )
     result = list(builds.values())
     for entry in result:
         entry["comment_count"] = len(entry["comments"])
@@ -4539,15 +4737,15 @@ def admin_list_builds(
     rows = db.query(PublicBuild).order_by(PublicBuild.published_at.desc()).all()
     return [
         {
-            "id":             b.id,
-            "gun_id":         b.gun_id,
-            "gun_name":       b.gun_name,
-            "build_name":     b.build_name,
-            "author_id":      b.author_id,
-            "ip_hash":        b.ip_hash,
-            "ip_snapshot":    b.ip_snapshot,
+            "id": b.id,
+            "gun_id": b.gun_id,
+            "gun_name": b.gun_name,
+            "build_name": b.build_name,
+            "author_id": b.author_id,
+            "ip_hash": b.ip_hash,
+            "ip_snapshot": b.ip_snapshot,
             "is_admin_build": b.is_admin_build,
-            "published_at":   b.published_at.isoformat(),
+            "published_at": b.published_at.isoformat(),
         }
         for b in rows
     ]
@@ -4556,6 +4754,7 @@ def admin_list_builds(
 # ---------------------------------------------------
 # Leaderboard
 # ---------------------------------------------------
+
 
 def _dense_rank(scores):
     """Return dense ranks for a descending-sorted list of scores.
@@ -4571,24 +4770,24 @@ def _dense_rank(scores):
 
 def _build_row_to_dict(rank, build, author, like_count):
     return {
-        "rank":                   rank,
-        "build_id":               build.id,
-        "build_name":             build.build_name,
-        "gun_id":                 build.gun_id,
-        "gun_name":               build.gun_name,
-        "author_display_name":    author.display_name     if author else None,
-        "author_display_name_zh": author.display_name_zh  if author else None,
-        "author_avatar_url":      author.avatar_url        if author else None,
-        "user_display_name":      build.user_display_name,
-        "user_avatar_url":        build.user_avatar_url,
-        "like_count":             like_count,
-        "is_admin_build":         build.is_admin_build,
-        "is_featured":            build.is_featured,
-        "pairs":                  _safe_json_loads(build.pairs_json),
-        "stats":                  _safe_json_loads(build.stats_json),
-        "total_price_rub":        build.total_price_rub,
-        "card_image_url":         build.card_image_url,
-        "ammo_id":                build.ammo_id,
+        "rank": rank,
+        "build_id": build.id,
+        "build_name": build.build_name,
+        "gun_id": build.gun_id,
+        "gun_name": build.gun_name,
+        "author_display_name": author.display_name if author else None,
+        "author_display_name_zh": author.display_name_zh if author else None,
+        "author_avatar_url": author.avatar_url if author else None,
+        "user_display_name": build.user_display_name,
+        "user_avatar_url": build.user_avatar_url,
+        "like_count": like_count,
+        "is_admin_build": build.is_admin_build,
+        "is_featured": build.is_featured,
+        "pairs": _safe_json_loads(build.pairs_json),
+        "stats": _safe_json_loads(build.stats_json),
+        "total_price_rub": build.total_price_rub,
+        "card_image_url": build.card_image_url,
+        "ammo_id": build.ammo_id,
     }
 
 
@@ -4613,7 +4812,7 @@ def get_leaderboard_builds(
             .all()
         )
         counts = [count for _, _, count in rows]
-        ranks  = _dense_rank(counts)
+        ranks = _dense_rank(counts)
         return [_build_row_to_dict(ranks[i], build, author, count) for i, (build, author, count) in enumerate(rows)]
     else:
         rows = (
@@ -4626,7 +4825,7 @@ def get_leaderboard_builds(
             .all()
         )
         counts = [rating.like_count if rating else 0 for _, _, rating in rows]
-        ranks  = _dense_rank(counts)
+        ranks = _dense_rank(counts)
         return [_build_row_to_dict(ranks[i], build, author, counts[i]) for i, (build, author, _) in enumerate(rows)]
 
 
@@ -4642,7 +4841,7 @@ def get_leaderboard_attachments(
     if sort not in ("likes", "dislikes"):
         raise HTTPException(status_code=400, detail='sort must be "likes" or "dislikes"')
 
-    likes_label    = func.sum(case((AttachmentVote.vote == "like",    1), else_=0))
+    likes_label = func.sum(case((AttachmentVote.vote == "like", 1), else_=0))
     dislikes_label = func.sum(case((AttachmentVote.vote == "dislike", 1), else_=0))
 
     if period == "2w":
@@ -4676,10 +4875,7 @@ def get_leaderboard_attachments(
         )
 
     item_ids = [row.item_id for row in rows]
-    items_map = {
-        item.id: item
-        for item in db_main.query(Item).filter(Item.id.in_(item_ids)).all()
-    } if item_ids else {}
+    items_map = {item.id: item for item in db_main.query(Item).filter(Item.id.in_(item_ids)).all()} if item_ids else {}
 
     # resolve most common slot_name for each item as its category
     category_map: dict[str, str] = {}
@@ -4693,21 +4889,21 @@ def get_leaderboard_attachments(
         )
         # keep highest count slot_name per item
         for item_id, slot_name, cnt in slot_rows:
-            if item_id not in category_map or cnt > category_map.get('__cnt__' + item_id, 0):
+            if item_id not in category_map or cnt > category_map.get("__cnt__" + item_id, 0):
                 category_map[item_id] = slot_name
-                category_map['__cnt__' + item_id] = cnt
+                category_map["__cnt__" + item_id] = cnt
 
     scores = [row.likes if sort == "likes" else row.dislikes for row in rows]
-    ranks  = _dense_rank(scores)
+    ranks = _dense_rank(scores)
 
     return [
         {
-            "rank":          ranks[i],
-            "item_id":       row.item_id,
-            "item_name":     items_map[row.item_id].name      if row.item_id in items_map else row.item_id,
-            "item_name_zh":  items_map[row.item_id].name_zh   if row.item_id in items_map else None,
-            "icon_link":     items_map[row.item_id].icon_link if row.item_id in items_map else None,
-            "like_count":    row.likes,
+            "rank": ranks[i],
+            "item_id": row.item_id,
+            "item_name": items_map[row.item_id].name if row.item_id in items_map else row.item_id,
+            "item_name_zh": items_map[row.item_id].name_zh if row.item_id in items_map else None,
+            "icon_link": items_map[row.item_id].icon_link if row.item_id in items_map else None,
+            "like_count": row.likes,
             "dislike_count": row.dislikes,
             "item_category": category_map.get(row.item_id, None),
         }
@@ -4729,18 +4925,19 @@ def get_stat_changelog(
     )
 
     item_ids = list({r.item_id for r in rows})
-    items_map = {
-        item.id: item
-        for item in db.query(Item).filter(Item.id.in_(item_ids)).all()
-    } if item_ids else {}
+    items_map = {item.id: item for item in db.query(Item).filter(Item.id.in_(item_ids)).all()} if item_ids else {}
 
-    attachment_ids = {
-        row[0] for row in
-        db.query(SlotAllowedItem.allowed_item_id)
-        .filter(SlotAllowedItem.allowed_item_id.in_(item_ids))
-        .distinct()
-        .all()
-    } if item_ids else set()
+    attachment_ids = (
+        {
+            row[0]
+            for row in db.query(SlotAllowedItem.allowed_item_id)
+            .filter(SlotAllowedItem.allowed_item_id.in_(item_ids))
+            .distinct()
+            .all()
+        }
+        if item_ids
+        else set()
+    )
 
     def _is_tracked_item(item_id):
         item = items_map.get(item_id)
@@ -4752,16 +4949,16 @@ def get_stat_changelog(
 
     return [
         {
-            "item_id":      row.item_id,
-            "item_name":    items_map[row.item_id].name      if row.item_id in items_map else row.item_name,
-            "item_name_zh": items_map[row.item_id].name_zh   if row.item_id in items_map else None,
-            "icon_link":    items_map[row.item_id].icon_link  if row.item_id in items_map else None,
-            "is_weapon":    items_map[row.item_id].is_weapon  if row.item_id in items_map else None,
-            "is_ammo":      items_map[row.item_id].is_ammo    if row.item_id in items_map else None,
-            "stat_name":    row.stat_name,
-            "old_value":    row.old_value,
-            "new_value":    row.new_value,
-            "detected_at":  row.detected_at.isoformat() if row.detected_at else None,
+            "item_id": row.item_id,
+            "item_name": items_map[row.item_id].name if row.item_id in items_map else row.item_name,
+            "item_name_zh": items_map[row.item_id].name_zh if row.item_id in items_map else None,
+            "icon_link": items_map[row.item_id].icon_link if row.item_id in items_map else None,
+            "is_weapon": items_map[row.item_id].is_weapon if row.item_id in items_map else None,
+            "is_ammo": items_map[row.item_id].is_ammo if row.item_id in items_map else None,
+            "stat_name": row.stat_name,
+            "old_value": row.old_value,
+            "new_value": row.new_value,
+            "detected_at": row.detected_at.isoformat() if row.detected_at else None,
         }
         for row in rows
     ]
@@ -4771,13 +4968,14 @@ def get_stat_changelog(
 # Admin - Bans
 # ---------------------------------------------------
 
+
 @app.post("/admin/bans")
 def admin_create_ban(
     request: Request,
-    x_admin_key:    str      = Header(None),
-    client_id_hash: str      = Body(...),
+    x_admin_key: str = Header(None),
+    client_id_hash: str = Body(...),
     duration_hours: int | None = Body(default=None),
-    reason:         str | None = Body(default=None),
+    reason: str | None = Body(default=None),
     db: Session = Depends(get_builds_db),
 ):
     _require_admin(request, x_admin_key)
@@ -4788,21 +4986,25 @@ def admin_create_ban(
 
     existing = db.query(IPBan).filter(IPBan.ip_hash == client_id_hash).first()
     if existing:
-        existing.banned_at    = datetime.now(timezone.utc)
+        existing.banned_at = datetime.now(timezone.utc)
         existing.banned_until = banned_until
-        existing.reason       = reason
+        existing.reason = reason
     else:
         db.add(IPBan(ip_hash=client_id_hash, banned_until=banned_until, reason=reason))
 
     # notify the banned client
-    db.add(PendingNotification(
-        ip_hash   = client_id_hash,
-        type      = "ban",
-        data_json = json.dumps({
-            "banned_until": banned_until.replace(tzinfo=None).isoformat() + "Z" if banned_until else None,
-            "reason":       reason,
-        }),
-    ))
+    db.add(
+        PendingNotification(
+            ip_hash=client_id_hash,
+            type="ban",
+            data_json=json.dumps(
+                {
+                    "banned_until": banned_until.replace(tzinfo=None).isoformat() + "Z" if banned_until else None,
+                    "reason": reason,
+                }
+            ),
+        )
+    )
 
     db.commit()
     return {"banned": True, "client_id_hash": client_id_hash}
@@ -4818,11 +5020,13 @@ def admin_delete_ban(
     _require_admin(request, x_admin_key)
     deleted = db.query(IPBan).filter(IPBan.ip_hash == client_id_hash).delete()
     if deleted:
-        db.add(PendingNotification(
-            ip_hash   = client_id_hash,
-            type      = "unban",
-            data_json = json.dumps({}),
-        ))
+        db.add(
+            PendingNotification(
+                ip_hash=client_id_hash,
+                type="unban",
+                data_json=json.dumps({}),
+            )
+        )
     db.commit()
     return {"unbanned": True, "client_id_hash": client_id_hash}
 
@@ -4838,11 +5042,11 @@ def admin_list_bans(
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     return [
         {
-            "ip_hash":      b.ip_hash,
-            "banned_at":    b.banned_at.isoformat(),
+            "ip_hash": b.ip_hash,
+            "banned_at": b.banned_at.isoformat(),
             "banned_until": b.banned_until.isoformat() + "Z" if b.banned_until else None,
-            "is_active":    b.banned_until is None or b.banned_until > now,
-            "reason":       b.reason,
+            "is_active": b.banned_until is None or b.banned_until > now,
+            "reason": b.reason,
         }
         for b in bans
     ]
@@ -4852,29 +5056,32 @@ def admin_list_bans(
 # Admin - Authors
 # ---------------------------------------------------
 
+
 @app.post("/admin/authors")
 def admin_upsert_author(
     request: Request,
-    x_admin_key:     str      = Header(None),
-    id:              str      = Body(...),
-    display_name:    str      = Body(...),
-    avatar_url:      str | None = Body(default=None),
+    x_admin_key: str = Header(None),
+    id: str = Body(...),
+    display_name: str = Body(...),
+    avatar_url: str | None = Body(default=None),
     display_name_zh: str | None = Body(default=None),
     db: Session = Depends(get_builds_db),
 ):
     _require_admin(request, x_admin_key)
     existing = db.query(PublicBuildAuthor).filter(PublicBuildAuthor.id == id).first()
     if existing:
-        existing.display_name    = display_name
-        existing.avatar_url      = avatar_url
+        existing.display_name = display_name
+        existing.avatar_url = avatar_url
         existing.display_name_zh = display_name_zh
     else:
-        db.add(PublicBuildAuthor(
-            id              = id,
-            display_name    = display_name,
-            avatar_url      = avatar_url,
-            display_name_zh = display_name_zh,
-        ))
+        db.add(
+            PublicBuildAuthor(
+                id=id,
+                display_name=display_name,
+                avatar_url=avatar_url,
+                display_name_zh=display_name_zh,
+            )
+        )
     db.commit()
     return {"ok": True, "id": id}
 
@@ -4926,20 +5133,17 @@ def get_announcements(db: Session = Depends(get_builds_db)):
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     rows = (
         db.query(ServerAnnouncement)
-        .filter(
-            (ServerAnnouncement.expires_at == None) |  # noqa: E711
-            (ServerAnnouncement.expires_at > now)
-        )
+        .filter((ServerAnnouncement.expires_at == None) | (ServerAnnouncement.expires_at > now))  # noqa: E711
         .order_by(ServerAnnouncement.created_at.desc())
         .all()
     )
     return [
         {
-            "id":          r.id,
-            "message":     r.message,
-            "level":       r.level,
-            "created_at":  r.created_at.isoformat(),
-            "expires_at":  r.expires_at.isoformat() if r.expires_at else None,
+            "id": r.id,
+            "message": r.message,
+            "level": r.level,
+            "created_at": r.created_at.isoformat(),
+            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
             "dismissible": r.dismissible,
         }
         for r in rows
@@ -4951,19 +5155,20 @@ def get_announcements(db: Session = Depends(get_builds_db)):
 # ---------------------------------------------------
 
 _ANNOUNCEMENT_LEVEL_COLORS = {
-    "info":     "#4a90d9",
-    "success":  "#4CAF50",
-    "warning":  "#f5a623",
-    "error":    "#e74c3c",
+    "info": "#4a90d9",
+    "success": "#4CAF50",
+    "warning": "#f5a623",
+    "error": "#e74c3c",
     "critical": "#9b59b6",
 }
 
+
 @app.post("/admin/announcements")
 def admin_create_announcement(
-    request:          Request,
-    x_admin_key:      str      = Header(None),
-    message:          str      = Body(...),
-    level:            Literal["info", "success", "warning", "error", "critical"] = Body(
+    request: Request,
+    x_admin_key: str = Header(None),
+    message: str = Body(...),
+    level: Literal["info", "success", "warning", "error", "critical"] = Body(
         default="info",
         description=(
             "Toast accent color per level: "
@@ -4975,7 +5180,7 @@ def admin_create_announcement(
         ),
     ),
     expires_in_hours: int | None = Body(default=None),
-    dismissible:      bool       = Body(
+    dismissible: bool = Body(
         default=True,
         description="When false, the toast cannot be dismissed by clicking - user must wait for it to expire or for an admin to delete it. Use for critical notices that must not be accidentally cleared.",
     ),
@@ -5004,11 +5209,11 @@ def admin_create_announcement(
     db.commit()
     db.refresh(row)
     return {
-        "id":          row.id,
-        "message":     row.message,
-        "level":       row.level,
-        "created_at":  row.created_at.isoformat(),
-        "expires_at":  row.expires_at.isoformat() if row.expires_at else None,
+        "id": row.id,
+        "message": row.message,
+        "level": row.level,
+        "created_at": row.created_at.isoformat(),
+        "expires_at": row.expires_at.isoformat() if row.expires_at else None,
         "dismissible": row.dismissible,
     }
 
@@ -5016,8 +5221,8 @@ def admin_create_announcement(
 @app.delete("/admin/announcements/{announcement_id}")
 def admin_delete_announcement(
     announcement_id: int,
-    request:         Request,
-    x_admin_key:     str = Header(None),
+    request: Request,
+    x_admin_key: str = Header(None),
     db: Session = Depends(get_builds_db),
 ):
     _require_admin(request, x_admin_key)
@@ -5030,7 +5235,7 @@ def admin_delete_announcement(
 
 @app.get("/admin/announcements")
 def admin_list_announcements(
-    request:     Request,
+    request: Request,
     x_admin_key: str = Header(None),
     db: Session = Depends(get_builds_db),
 ):
@@ -5039,12 +5244,12 @@ def admin_list_announcements(
     rows = db.query(ServerAnnouncement).order_by(ServerAnnouncement.created_at.desc()).all()
     return [
         {
-            "id":          r.id,
-            "message":     r.message,
-            "level":       r.level,
-            "created_at":  r.created_at.isoformat(),
-            "expires_at":  r.expires_at.isoformat() if r.expires_at else None,
-            "is_active":   r.expires_at is None or r.expires_at > now,
+            "id": r.id,
+            "message": r.message,
+            "level": r.level,
+            "created_at": r.created_at.isoformat(),
+            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+            "is_active": r.expires_at is None or r.expires_at > now,
             "dismissible": r.dismissible,
         }
         for r in rows
@@ -5061,10 +5266,10 @@ def admin_list_authors(
     authors = db.query(PublicBuildAuthor).all()
     return [
         {
-            "id":             a.id,
-            "display_name":    a.display_name,
+            "id": a.id,
+            "display_name": a.display_name,
             "display_name_zh": a.display_name_zh,
-            "avatar_url":      a.avatar_url,
+            "avatar_url": a.avatar_url,
         }
         for a in authors
     ]

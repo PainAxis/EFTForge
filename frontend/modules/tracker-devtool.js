@@ -21,7 +21,7 @@
     // FAKE DATA POOL
     // ============================================================
 
-    var _FAKE_ATTACHMENTS = [
+    const _FAKE_ATTACHMENTS = [
         { name: 'Gomidasu!',                            name_zh: 'Gomidasu！' },
         { name: 'Rail(ing your mom)',                   name_zh: '导轨（你的妈妈）' },
         { name: 'Zenit B-10M handguard',                name_zh: 'Zenit B-10M 护木' },
@@ -44,7 +44,7 @@
         { name: 'Mil-Spec M4 buffer tube',              name_zh: 'Mil-Spec M4 缓冲管' },
     ];
 
-    var _FAKE_WEAPONS = [
+    const _FAKE_WEAPONS = [
         { name: 'AK-74M',                           name_zh: 'AK-74M' },
         { name: 'M4A1',                             name_zh: 'M4A1' },
         { name: 'HK 416A5',                         name_zh: 'HK 416A5' },
@@ -57,13 +57,13 @@
         { name: 'ADAR 2-15',                        name_zh: 'ADAR 2-15' },
     ];
 
-    var _ATTACHMENT_STATS  = ['ergonomics_modifier', 'recoil_modifier', 'accuracy_modifier', 'weight'];
-    var _WEAPON_STATS      = ['center_of_impact'];
+    const _ATTACHMENT_STATS  = ['ergonomics_modifier', 'recoil_modifier', 'accuracy_modifier', 'weight'];
+    const _WEAPON_STATS      = ['center_of_impact'];
 
     // Matches backend sync_tarkov_dev._NEW_ITEM_STAT
-    var _NEW_ITEM_STAT = 'new_item';
+    const _NEW_ITEM_STAT = 'new_item';
 
-    var _STAT_RANGES = {
+    const _STAT_RANGES = {
         ergonomics_modifier: { min: -15,   max: 20,   step: 1,     decimals: 0 },
         // Fraction, not whole percent (e.g. -0.05 = -5%) - matches real recoil_modifier
         // storage. tracker.js's formatter scales this by 100 for display.
@@ -79,7 +79,7 @@
     // ============================================================
 
     function _rnd(min, max, step) {
-        var steps = Math.floor((max - min) / step);
+        const steps = Math.floor((max - min) / step);
         return min + Math.floor(Math.random() * (steps + 1)) * step;
     }
 
@@ -88,7 +88,7 @@
     }
 
     function _isoDate(daysAgo) {
-        var d = new Date();
+        const d = new Date();
         d.setUTCDate(d.getUTCDate() - daysAgo);
         return d.toISOString().slice(0, 10) + 'T00:00:00';
     }
@@ -102,11 +102,11 @@
     // ============================================================
 
     function _makeEntry(item, statPool, date) {
-        var stat    = _pick(statPool);
-        var range   = _STAT_RANGES[stat];
-        var oldVal  = _round(_rnd(range.min, range.max, range.step), range.decimals);
-        var maxDelta = Math.max(range.step * 3, Math.abs(oldVal) * 0.30);
-        var delta    = _round(_rnd(-maxDelta, maxDelta, range.step), range.decimals);
+        const stat    = _pick(statPool);
+        const range   = _STAT_RANGES[stat];
+        const oldVal  = _round(_rnd(range.min, range.max, range.step), range.decimals);
+        const maxDelta = Math.max(range.step * 3, Math.abs(oldVal) * 0.30);
+        let delta    = _round(_rnd(-maxDelta, maxDelta, range.step), range.decimals);
         if (delta === 0) delta = range.step;
         return {
             item_id:      'dev_' + Math.random().toString(36).slice(2, 9),
@@ -134,21 +134,21 @@
     }
 
     function injectNewBatch() {
-        var entries = [];
-        var numDates = 3 + Math.floor(Math.random() * 3);
-        for (var d = 0; d < numDates; d++) {
-            var date = _isoDate(Math.floor(d * 6 / Math.max(numDates - 1, 1)));
-            var count = 2 + Math.floor(Math.random() * 7);
-            for (var i = 0; i < count; i++) {
-                var useWeapon = Math.random() < 0.25;
+        const entries = [];
+        const numDates = 3 + Math.floor(Math.random() * 3);
+        for (let d = 0; d < numDates; d++) {
+            const date = _isoDate(Math.floor(d * 6 / Math.max(numDates - 1, 1)));
+            const count = 2 + Math.floor(Math.random() * 7);
+            for (let i = 0; i < count; i++) {
+                const useWeapon = Math.random() < 0.25;
                 entries.push(useWeapon
                     ? _makeEntry(_pick(_FAKE_WEAPONS),     _WEAPON_STATS,     date)
                     : _makeEntry(_pick(_FAKE_ATTACHMENTS), _ATTACHMENT_STATS, date)
                 );
             }
-            var newCount = Math.floor(Math.random() * 3);
-            for (var n = 0; n < newCount; n++) {
-                var pool = Math.random() < 0.25 ? _FAKE_WEAPONS : _FAKE_ATTACHMENTS;
+            const newCount = Math.floor(Math.random() * 3);
+            for (let n = 0; n < newCount; n++) {
+                const pool = Math.random() < 0.25 ? _FAKE_WEAPONS : _FAKE_ATTACHMENTS;
                 entries.push(_makeNewItemEntry(_pick(pool), date));
             }
         }

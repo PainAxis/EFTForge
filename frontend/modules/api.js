@@ -1,5 +1,7 @@
 window.EFTForge = window.EFTForge || {};
 
+/* exported fetchGraphSearchableItems -- called from other modules */
+
 const _base = () => EFTForge.config.API_BASE;
 const _lang = () => (EFTForge.state && EFTForge.state.lang) || "en";
 const _post = (path, body) => fetch(`${_base()}${path}`, {

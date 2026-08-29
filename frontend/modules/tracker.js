@@ -13,22 +13,22 @@ window.EFTForge = window.EFTForge || {};
 
 window.EFTForge.tracker = (function () {
 
-    var _cache       = null;
-    var _searchQuery = '';
-    var _typeFilter  = 'all'; // 'all' | 'weapons' | 'attachments'
-    var _searchTimer = null;
-    var _WINDOW_DAYS = 7;
-    var _PAGE_SIZE   = 40;   // items rendered per IntersectionObserver trigger
+    let _cache       = null;
+    let _searchQuery = '';
+    let _typeFilter  = 'all'; // 'all' | 'weapons' | 'attachments'
+    let _searchTimer = null;
+    const _WINDOW_DAYS = 7;
+    const _PAGE_SIZE   = 40;   // items rendered per IntersectionObserver trigger
 
     // Matches backend sync_tarkov_dev._NEW_ITEM_STAT - flags a row as "brand new
     // item" rather than a stat diff.
-    var _NEW_ITEM_STAT = 'new_item';
+    const _NEW_ITEM_STAT = 'new_item';
 
     // Per-column incremental render state
-    var _colObservers = {};  // type -> IntersectionObserver
-    var _colState     = {};  // type -> { flat: [], cursor: 0, lang: '' }
+    const _colObservers = {};  // type -> IntersectionObserver
+    const _colState     = {};  // type -> { flat: [], cursor: 0, lang: '' }
 
-    var _LOWER_IS_BETTER = {
+    const _LOWER_IS_BETTER = {
         weight:                  true,
         recoil_modifier:         true,
         recoil_vertical:         true,
@@ -44,8 +44,8 @@ window.EFTForge.tracker = (function () {
     =========================== */
 
     function showPanel() {
-        var overlay  = document.getElementById('tracker-overlay');
-        var backdrop = document.getElementById('tracker-backdrop');
+        const overlay  = document.getElementById('tracker-overlay');
+        const backdrop = document.getElementById('tracker-backdrop');
         if (!overlay) return;
 
         overlay.classList.add('visible');
@@ -60,15 +60,15 @@ window.EFTForge.tracker = (function () {
     }
 
     function hidePanel() {
-        var overlay  = document.getElementById('tracker-overlay');
-        var backdrop = document.getElementById('tracker-backdrop');
+        const overlay  = document.getElementById('tracker-overlay');
+        const backdrop = document.getElementById('tracker-backdrop');
         if (overlay)  overlay.classList.remove('visible');
         if (backdrop) backdrop.classList.remove('visible');
         document.getElementById('main-container')?.removeAttribute('inert');
     }
 
     function onLangChange() {
-        var overlay = document.getElementById('tracker-overlay');
+        const overlay = document.getElementById('tracker-overlay');
         if (!overlay || !overlay.classList.contains('visible')) return;
         _updateTitle();
         _updateControlLabels();
@@ -81,14 +81,14 @@ window.EFTForge.tracker = (function () {
     =========================== */
 
     function _cutoff7d() {
-        var d = new Date();
+        const d = new Date();
         d.setUTCDate(d.getUTCDate() - _WINDOW_DAYS);
         d.setUTCHours(0, 0, 0, 0);
         return d;
     }
 
     function _filter7d(data) {
-        var cutoff = _cutoff7d();
+        const cutoff = _cutoff7d();
         return (data || []).filter(function (e) {
             if (!e.detected_at) return false;
             return new Date(e.detected_at) >= cutoff;
@@ -96,9 +96,9 @@ window.EFTForge.tracker = (function () {
     }
 
     function _updateBadge(data) {
-        var btn = document.getElementById('tracker-btn');
+        const btn = document.getElementById('tracker-btn');
         if (!btn) return;
-        var count = _combineByItem(_filter7d(data)).length;
+        const count = _combineByItem(_filter7d(data)).length;
         btn.dataset.badge = count > 0 ? (count > 999 ? '999+' : String(count)) : '';
     }
 
@@ -111,7 +111,7 @@ window.EFTForge.tracker = (function () {
         _showLoading();
 
         try {
-            var data = await EFTForge.api.fetchStatChangelog();
+            const data = await EFTForge.api.fetchStatChangelog();
             _cache = data;
             _updateBadge(data);
             _renderEntries(_filter7d(data));
@@ -122,10 +122,10 @@ window.EFTForge.tracker = (function () {
     }
 
     async function _updateLastSynced() {
-        var el = document.getElementById('tracker-last-synced');
+        const el = document.getElementById('tracker-last-synced');
         if (!el) return;
         try {
-            var status = await EFTForge.api.fetchSyncStatus();
+            const status = await EFTForge.api.fetchSyncStatus();
             if (status && status.last_synced_at) {
                 el.textContent = EFTForge.lang.tFmt('tracker.lastSynced', { date: _formatSyncTime(status.last_synced_at) });
                 return;
@@ -138,7 +138,7 @@ window.EFTForge.tracker = (function () {
 
     async function _prefetch() {
         try {
-            var data = await EFTForge.api.fetchStatChangelog();
+            const data = await EFTForge.api.fetchStatChangelog();
             _cache = data;
             _updateBadge(data);
         } catch (_) {
@@ -154,12 +154,12 @@ window.EFTForge.tracker = (function () {
         if (combinedEntry.stats.length === 1 && combinedEntry.stats[0].stat_name === _NEW_ITEM_STAT) {
             return 'new';
         }
-        var hasBuff = false, hasNerf = false;
-        for (var i = 0; i < combinedEntry.stats.length; i++) {
-            var s = combinedEntry.stats[i];
+        let hasBuff = false, hasNerf = false;
+        for (let i = 0; i < combinedEntry.stats.length; i++) {
+            const s = combinedEntry.stats[i];
             if (s.old_value == null || s.new_value == null) continue;
-            var lowerBetter = !!_LOWER_IS_BETTER[s.stat_name];
-            var improved = lowerBetter ? (s.new_value < s.old_value) : (s.new_value > s.old_value);
+            const lowerBetter = !!_LOWER_IS_BETTER[s.stat_name];
+            const improved = lowerBetter ? (s.new_value < s.old_value) : (s.new_value > s.old_value);
             if (improved) hasBuff = true;
             else hasNerf = true;
         }
@@ -169,14 +169,14 @@ window.EFTForge.tracker = (function () {
     }
 
     function _applyFilters(items) {
-        var q = _searchQuery.toLowerCase().trim();
+        const q = _searchQuery.toLowerCase().trim();
         return items.filter(function (item) {
             if (_typeFilter === 'weapons'     && !item.is_weapon) return false;
             if (_typeFilter === 'attachments' && (item.is_weapon || item.is_ammo)) return false;
             if (_typeFilter === 'ammo'        && !item.is_ammo)  return false;
             if (q) {
-                var name   = (item.item_name    || '').toLowerCase();
-                var nameZh = (item.item_name_zh || '').toLowerCase();
+                const name   = (item.item_name    || '').toLowerCase();
+                const nameZh = (item.item_name_zh || '').toLowerCase();
                 if (!name.includes(q) && !nameZh.includes(q)) return false;
             }
             return true;
@@ -188,16 +188,16 @@ window.EFTForge.tracker = (function () {
     =========================== */
 
     function _updateTitle() {
-        var el = document.getElementById('tracker-header-title');
+        const el = document.getElementById('tracker-header-title');
         if (el) el.textContent = EFTForge.lang.t('tracker.title');
     }
 
     function _updateControlLabels() {
-        var t = EFTForge.lang.t;
-        var s = document.getElementById('tracker-search');
+        const t = EFTForge.lang.t;
+        const s = document.getElementById('tracker-search');
         if (s) s.placeholder = t('tracker.search.placeholder') || 'Search items...';
 
-        var labelMap = {
+        const labelMap = {
             'tracker-filter-all':        'tracker.filter.all',
             'tracker-filter-weapons':    'tracker.filter.weapons',
             'tracker-filter-attachments':'tracker.filter.attachments',
@@ -208,42 +208,42 @@ window.EFTForge.tracker = (function () {
             'tracker-col-label-mixed':   'tracker.col.mixed',
         };
         Object.keys(labelMap).forEach(function (id) {
-            var el = document.getElementById(id);
+            const el = document.getElementById(id);
             if (el) el.textContent = t(labelMap[id]) || el.textContent;
         });
     }
 
     function _showLoading() {
-        var hint = document.getElementById('tracker-no-change-hint');
-        var columns = document.getElementById('tracker-columns');
+        const hint = document.getElementById('tracker-no-change-hint');
+        const columns = document.getElementById('tracker-columns');
         if (hint)    hint.style.display = 'none';
         if (columns) columns.style.display = '';
-        var msg = EFTForge.lang.t('tracker.loading');
+        const msg = EFTForge.lang.t('tracker.loading');
         ['new', 'buff', 'nerf', 'mixed'].forEach(function (col) {
             _destroyColumnObserver(col);
-            var el = document.getElementById('tracker-body-' + col);
+            const el = document.getElementById('tracker-body-' + col);
             if (el) el.innerHTML = '<div class="tracker-empty">' + _esc(msg) + '</div>';
-            var cnt = document.getElementById('tracker-count-' + col);
+            const cnt = document.getElementById('tracker-count-' + col);
             if (cnt) cnt.textContent = '';
         });
     }
 
     function _showError() {
-        var msg = EFTForge.lang.t('tracker.loadError');
+        const msg = EFTForge.lang.t('tracker.loadError');
         ['new', 'buff', 'nerf', 'mixed'].forEach(function (col) {
             _destroyColumnObserver(col);
-            var el = document.getElementById('tracker-body-' + col);
+            const el = document.getElementById('tracker-body-' + col);
             if (el) el.innerHTML = '<div class="tracker-empty">' + _esc(msg) + '</div>';
         });
     }
 
     function _combineByItem(data) {
-        var combined = [];
-        var keyIndex = {};
+        const combined = [];
+        const keyIndex = {};
 
         (data || []).forEach(function (entry) {
-            var dateKey = entry.detected_at ? entry.detected_at.slice(0, 10) : 'unknown';
-            var key = dateKey + '\x00' + entry.item_id;
+            const dateKey = entry.detected_at ? entry.detected_at.slice(0, 10) : 'unknown';
+            const key = dateKey + '\x00' + entry.item_id;
             if (!keyIndex.hasOwnProperty(key)) {
                 keyIndex[key] = combined.length;
                 combined.push({
@@ -268,11 +268,11 @@ window.EFTForge.tracker = (function () {
     }
 
     function _renderEntries(data) {
-        var lang  = EFTForge.state && EFTForge.state.lang;
-        var items = _combineByItem(data);
+        const lang  = EFTForge.state && EFTForge.state.lang;
+        const items = _combineByItem(data);
 
-        var hint    = document.getElementById('tracker-no-change-hint');
-        var columns = document.getElementById('tracker-columns');
+        const hint    = document.getElementById('tracker-no-change-hint');
+        const columns = document.getElementById('tracker-columns');
         if (items.length === 0) {
             if (hint) {
                 hint.textContent = EFTForge.lang.t('tracker.empty');
@@ -285,20 +285,20 @@ window.EFTForge.tracker = (function () {
         if (hint)    hint.style.display = 'none';
         if (columns) columns.style.display = '';
 
-        var filtered = _applyFilters(items);
+        const filtered = _applyFilters(items);
 
-        var news  = filtered.filter(function (i) { return _classify(i) === 'new';   });
-        var buffs = filtered.filter(function (i) { return _classify(i) === 'buff';  });
-        var nerfs = filtered.filter(function (i) { return _classify(i) === 'nerf';  });
-        var mixed = filtered.filter(function (i) { return _classify(i) === 'mixed'; });
+        const news  = filtered.filter(function (i) { return _classify(i) === 'new';   });
+        const buffs = filtered.filter(function (i) { return _classify(i) === 'buff';  });
+        const nerfs = filtered.filter(function (i) { return _classify(i) === 'nerf';  });
+        const mixed = filtered.filter(function (i) { return _classify(i) === 'mixed'; });
 
         _renderColumn('new',   news,   lang);
         _renderColumn('buff',  buffs,  lang);
         _renderColumn('nerf',  nerfs,  lang);
         _renderColumn('mixed', mixed,  lang);
 
-        var setCount = function (id, val) {
-            var el = document.getElementById(id);
+        const setCount = function (id, val) {
+            const el = document.getElementById(id);
             if (el) el.textContent = val;
         };
         setCount('tracker-count-new',   news.length);
@@ -321,15 +321,15 @@ window.EFTForge.tracker = (function () {
     // Build a flat list of {kind:'date',label} | {kind:'item',entry,globalIdx}
     // preserving the date-group order but allowing O(1) cursor advancement.
     function _buildFlat(items) {
-        var groups   = [];
-        var groupMap = {};
+        const groups   = [];
+        const groupMap = {};
         items.forEach(function (item) {
-            var dateKey = item.detected_at ? item.detected_at.slice(0, 10) : 'unknown';
+            const dateKey = item.detected_at ? item.detected_at.slice(0, 10) : 'unknown';
             if (!groupMap[dateKey]) { groupMap[dateKey] = []; groups.push(dateKey); }
             groupMap[dateKey].push(item);
         });
-        var flat = [];
-        var globalIdx = 0;
+        const flat = [];
+        let globalIdx = 0;
         groups.forEach(function (dateKey) {
             flat.push({ kind: 'date', label: _formatDate(dateKey) });
             groupMap[dateKey].forEach(function (entry) {
@@ -341,29 +341,29 @@ window.EFTForge.tracker = (function () {
     }
 
     function _entryHtml(entry, globalIdx, lang) {
-        var name = (lang === 'zh' && entry.item_name_zh)
+        const name = (lang === 'zh' && entry.item_name_zh)
             ? entry.item_name_zh
             : (entry.item_name || entry.item_id);
-        var animIdx  = Math.min(globalIdx, 25);
-        var iconHtml = entry.icon_link
+        const animIdx  = Math.min(globalIdx, 25);
+        const iconHtml = entry.icon_link
             ? '<img class="tracker-item-icon" src="' + _esc(entry.icon_link) + '" alt="" loading="lazy">'
             : '<div class="tracker-item-icon tracker-item-icon-placeholder"></div>';
 
-        var t = EFTForge.lang.t;
-        var isNew = entry.stats.length === 1 && entry.stats[0].stat_name === _NEW_ITEM_STAT;
-        var newBadgeHtml = isNew ? '<span class="tracker-new-badge">+</span>' : '';
-        var statsHtml = '';
+        const t = EFTForge.lang.t;
+        const isNew = entry.stats.length === 1 && entry.stats[0].stat_name === _NEW_ITEM_STAT;
+        const newBadgeHtml = isNew ? '<span class="tracker-new-badge">+</span>' : '';
+        let statsHtml = '';
         if (!isNew) {
             entry.stats.forEach(function (s) {
-                var statLabel   = t('tracker.statLabel.' + s.stat_name) || s.stat_name;
-                var lowerBetter = !!_LOWER_IS_BETTER[s.stat_name];
-                var improved    = (s.old_value != null && s.new_value != null)
+                const statLabel   = t('tracker.statLabel.' + s.stat_name) || s.stat_name;
+                const lowerBetter = !!_LOWER_IS_BETTER[s.stat_name];
+                const improved    = (s.old_value != null && s.new_value != null)
                                   ? (lowerBetter ? s.new_value < s.old_value : s.new_value > s.old_value)
                                   : false;
-                var changeClass = improved ? 'tracker-stat-up' : 'tracker-stat-down';
-                var oldStr      = _fmtValForStat(s.stat_name, s.old_value);
-                var newStr      = _fmtValForStat(s.stat_name, s.new_value);
-                var pctStr      = _fmtPct(s.old_value, s.new_value);
+                const changeClass = improved ? 'tracker-stat-up' : 'tracker-stat-down';
+                const oldStr      = _fmtValForStat(s.stat_name, s.old_value);
+                const newStr      = _fmtValForStat(s.stat_name, s.new_value);
+                const pctStr      = _fmtPct(s.old_value, s.new_value);
                 statsHtml += (
                     '<div class="tracker-stat-row">' +
                     '<span class="tracker-stat-label">' + _esc(statLabel) + '</span>' +
@@ -391,24 +391,24 @@ window.EFTForge.tracker = (function () {
     }
 
     function _appendItems(type) {
-        var body = document.getElementById('tracker-body-' + type);
+        const body = document.getElementById('tracker-body-' + type);
         if (!body) return;
-        var state = _colState[type];
+        const state = _colState[type];
         if (!state) return;
 
         // Remove existing sentinel before appending more content
-        var sentinel = body.querySelector('.tracker-sentinel');
+        const sentinel = body.querySelector('.tracker-sentinel');
         if (sentinel) sentinel.remove();
 
-        var flat   = state.flat;
-        var cursor = state.cursor;
-        var end    = Math.min(cursor + _PAGE_SIZE, flat.length);
+        const flat   = state.flat;
+        const cursor = state.cursor;
+        const end    = Math.min(cursor + _PAGE_SIZE, flat.length);
 
         if (cursor >= flat.length) return;
 
-        var html = '';
-        for (var i = cursor; i < end; i++) {
-            var f = flat[i];
+        let html = '';
+        for (let i = cursor; i < end; i++) {
+            const f = flat[i];
             if (f.kind === 'date') {
                 html += '<div class="tracker-date-label">' + _esc(f.label) + '</div>';
             } else {
@@ -430,14 +430,14 @@ window.EFTForge.tracker = (function () {
         state.cursor = end;
 
         if (end < flat.length) {
-            var s = document.createElement('div');
+            const s = document.createElement('div');
             s.className = 'tracker-sentinel';
             body.appendChild(s);
 
             _destroyColumnObserver(type);
             // Use the column body as root so intersection is relative to
             // the column's own scroll viewport, not the window.
-            var observer = new IntersectionObserver(function (entries) {
+            const observer = new IntersectionObserver(function (entries) {
                 if (entries[0].isIntersecting) {
                     _destroyColumnObserver(type);
                     _appendItems(type);
@@ -449,7 +449,7 @@ window.EFTForge.tracker = (function () {
     }
 
     function _renderColumn(type, items, lang) {
-        var body = document.getElementById('tracker-body-' + type);
+        const body = document.getElementById('tracker-body-' + type);
         if (!body) return;
 
         _destroyColumnObserver(type);
@@ -472,9 +472,9 @@ window.EFTForge.tracker = (function () {
     function _formatDate(dateStr) {
         if (!dateStr || dateStr === 'unknown') return dateStr;
         try {
-            var parts  = dateStr.split('-').map(Number);
-            var d      = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
-            var locale = EFTForge.state.lang === 'zh' ? 'zh-CN' : 'en-US';
+            const parts  = dateStr.split('-').map(Number);
+            const d      = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+            const locale = EFTForge.state.lang === 'zh' ? 'zh-CN' : 'en-US';
             return d.toLocaleDateString(locale, {
                 year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC'
             });
@@ -485,8 +485,8 @@ window.EFTForge.tracker = (function () {
 
     function _formatSyncTime(isoStr) {
         try {
-            var d      = new Date(isoStr);
-            var locale = EFTForge.state.lang === 'zh' ? 'zh-CN' : 'en-US';
+            const d      = new Date(isoStr);
+            const locale = EFTForge.state.lang === 'zh' ? 'zh-CN' : 'en-US';
             return d.toLocaleString(locale, {
                 year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
             });
@@ -507,23 +507,23 @@ window.EFTForge.tracker = (function () {
         }
         if (statName === 'recoil_modifier') {
             // Stored as a fraction (e.g. -0.05) - scale to percent for display.
-            var pv   = v * 100;
-            var sign = pv >= 0 ? '+' : '';
+            const pv   = v * 100;
+            const sign = pv >= 0 ? '+' : '';
             return sign + parseFloat(pv.toFixed(1)) + '%';
         }
         if (statName === 'accuracy_modifier') {
             // Unlike recoil_modifier, already stored in whole-percent scale
             // (see sync_tarkov_dev.py's `round(acc * 100, 4)`) - no further scaling needed.
-            var aSign = v >= 0 ? '+' : '';
+            const aSign = v >= 0 ? '+' : '';
             return aSign + parseFloat(v.toFixed(1)) + '%';
         }
         if (statName === 'heat_factor' || statName === 'cooling_factor' || statName === 'durability_burn_factor') {
-            var fv    = (v - 1) * 100;
-            var fSign = fv >= 0 ? '+' : '';
+            const fv    = (v - 1) * 100;
+            const fSign = fv >= 0 ? '+' : '';
             return fSign + parseFloat(fv.toFixed(1)) + '%';
         }
         if (statName === 'velocity_modifier') {
-            var vSign = v >= 0 ? '+' : '';
+            const vSign = v >= 0 ? '+' : '';
             return vSign + parseFloat(v.toFixed(1)) + '%';
         }
         return _fmtVal(v);
@@ -532,8 +532,8 @@ window.EFTForge.tracker = (function () {
     function _fmtPct(oldVal, newVal) {
         if (oldVal == null || newVal == null) return 'N/A';
         if (oldVal === 0) return newVal > 0 ? '+∞' : newVal < 0 ? '-∞' : '0%';
-        var pct  = ((newVal - oldVal) / Math.abs(oldVal)) * 100;
-        var sign = pct >= 0 ? '+' : '';
+        const pct  = ((newVal - oldVal) / Math.abs(oldVal)) * 100;
+        const sign = pct >= 0 ? '+' : '';
         return sign + parseFloat(pct.toFixed(1)) + '%';
     }
 
@@ -553,13 +553,13 @@ window.EFTForge.tracker = (function () {
     function _init() {
         document.addEventListener('keydown', function (e) {
             if (e.key !== 'Escape') return;
-            var overlay = document.getElementById('tracker-overlay');
+            const overlay = document.getElementById('tracker-overlay');
             if (!overlay || !overlay.classList.contains('visible')) return;
             e.stopPropagation();
             hidePanel();
         }, true);
 
-        var searchInput = document.getElementById('tracker-search');
+        const searchInput = document.getElementById('tracker-search');
         if (searchInput) {
             searchInput.addEventListener('input', function (e) {
                 _searchQuery = e.target.value || '';
@@ -570,10 +570,10 @@ window.EFTForge.tracker = (function () {
             });
         }
 
-        var filterWrap = document.getElementById('tracker-type-filter');
+        const filterWrap = document.getElementById('tracker-type-filter');
         if (filterWrap) {
             filterWrap.addEventListener('click', function (e) {
-                var btn = e.target.closest('.tracker-filter-btn');
+                const btn = e.target.closest('.tracker-filter-btn');
                 if (!btn) return;
                 _typeFilter = btn.dataset.filter || 'all';
                 filterWrap.querySelectorAll('.tracker-filter-btn').forEach(function (b) {
@@ -588,7 +588,7 @@ window.EFTForge.tracker = (function () {
 
     function reload() {
         _cache = null;
-        var overlay = document.getElementById('tracker-overlay');
+        const overlay = document.getElementById('tracker-overlay');
         if (overlay && overlay.classList.contains('visible')) {
             _loadData();
         } else {

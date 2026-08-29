@@ -9,18 +9,17 @@ Run with:  cd backend && python -m pytest tests/
 """
 
 import math
-import sys
-import os
 
 # ---------------------------------------------------------------------------
 # Inline the formula functions so tests don't depend on a live DB / FastAPI
 # ---------------------------------------------------------------------------
 
+
 def _calc_evo_weight(total_ergo: float, total_weight: float, equip_ergo_modifier: float = 0.0) -> float:
     """Returns evo_weight (positive = overswing, negative = under threshold)."""
     b = equip_ergo_modifier
     E = total_ergo * (1 + b)
-    KG = 0.0007556 * (E ** 2) + 0.02736 * E + 2.9159
+    KG = 0.0007556 * (E**2) + 0.02736 * E + 2.9159
     return total_weight - KG
 
 
@@ -28,18 +27,21 @@ def _calc_eed(total_ergo: float, total_weight: float, equip_ergo_modifier: float
     return -15 * _calc_evo_weight(total_ergo, total_weight, equip_ergo_modifier)
 
 
-def _calc_arm_stamina(total_weight: float, total_ergo: float, strength_level: int = 10, equip_ergo_modifier: float = 0.0) -> float:
+def _calc_arm_stamina(
+    total_weight: float, total_ergo: float, strength_level: int = 10, equip_ergo_modifier: float = 0.0
+) -> float:
     b = equip_ergo_modifier
     return (
-        (85.5 / (total_weight + 0.65))
-        + 9.15
-        + 0.06477 * total_ergo * (1 + b / 2)
-    ) / 1.04 * (1 + strength_level * 0.004)
+        ((85.5 / (total_weight + 0.65)) + 9.15 + 0.06477 * total_ergo * (1 + b / 2))
+        / 1.04
+        * (1 + strength_level * 0.004)
+    )
 
 
 # ---------------------------------------------------------------------------
 # EED tests
 # ---------------------------------------------------------------------------
+
 
 class TestCalcEED:
     def test_zero_weight_zero_ergo(self):
@@ -64,7 +66,7 @@ class TestCalcEED:
         total_ergo = 60.0
         b = 0.0
         E = total_ergo * (1 + b)
-        kg = 0.0007556 * (E ** 2) + 0.02736 * E + 2.9159
+        kg = 0.0007556 * (E**2) + 0.02736 * E + 2.9159
         eed = _calc_eed(total_ergo, kg)  # total_weight == KG → evo_weight = 0
         assert abs(eed) < 0.001
 
@@ -88,6 +90,7 @@ class TestCalcEED:
 # Arm stamina tests
 # ---------------------------------------------------------------------------
 
+
 class TestCalcArmStamina:
     def test_heavier_build_decreases_stamina(self):
         light = _calc_arm_stamina(3.0, 50)
@@ -95,7 +98,7 @@ class TestCalcArmStamina:
         assert heavy < light
 
     def test_higher_ergo_increases_stamina(self):
-        low_ergo  = _calc_arm_stamina(4.0, 30)
+        low_ergo = _calc_arm_stamina(4.0, 30)
         high_ergo = _calc_arm_stamina(4.0, 70)
         assert high_ergo > low_ergo
 
@@ -107,11 +110,7 @@ class TestCalcArmStamina:
         # JS calcArmStamina(4.0, 50, 10, 0):
         #   = ((85.5 / (4.0 + 0.65)) + 9.15 + 0.06477 * 50 * (1 + 0/2)) / 1.04 * (1 + 10 * 0.004)
         stamina = _calc_arm_stamina(4.0, 50, 10, 0.0)
-        expected = (
-            (85.5 / (4.0 + 0.65))
-            + 9.15
-            + 0.06477 * 50 * (1 + 0.0 / 2)
-        ) / 1.04 * (1 + 10 * 0.004)
+        expected = ((85.5 / (4.0 + 0.65)) + 9.15 + 0.06477 * 50 * (1 + 0.0 / 2)) / 1.04 * (1 + 10 * 0.004)
         assert abs(stamina - expected) < 0.01
 
     def test_higher_strength_increases_stamina(self):
@@ -123,6 +122,7 @@ class TestCalcArmStamina:
 # ---------------------------------------------------------------------------
 # Recoil modifier application
 # ---------------------------------------------------------------------------
+
 
 class TestRecoilModifier:
     def test_positive_modifier_increases_recoil(self):

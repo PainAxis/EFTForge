@@ -27,6 +27,7 @@ _PREFERRED_PORT = 47651
 
 def _run_sync_worker() -> None:
     import sync_tarkov_dev
+
     sync_tarkov_dev.sync_items()
 
 
@@ -65,6 +66,7 @@ def _seed_data_dir(data_dir: str) -> None:
     snapshot = os.path.join(_resource_dir(), "tarkov.db")
     if os.path.exists(snapshot):
         import shutil
+
         print(f"First run - seeding item database into {data_dir}", flush=True)
         print("EFTFORGE_STATUS=seed_db", flush=True)
         shutil.copyfile(snapshot, live_db)

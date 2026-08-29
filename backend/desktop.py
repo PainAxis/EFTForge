@@ -68,14 +68,14 @@ _SETTINGS_LOCK = threading.Lock()
 # opt-in from the UI.
 _DEFAULT_SETTINGS = {
     "community_mode": "local",
-    "update_source":  "auto",
-    "close_action":   "ask",
+    "update_source": "auto",
+    "close_action": "ask",
 }
 
 _VALID_VALUES = {
     "community_mode": {"connected", "local"},
-    "update_source":  {"auto", "gitee", "github"},
-    "close_action":   {"ask", "tray", "exit"},
+    "update_source": {"auto", "gitee", "github"},
+    "close_action": {"ask", "tray", "exit"},
 }
 
 
@@ -134,21 +134,35 @@ _LOCAL_BLOCKED_PREFIXES = (
 
 # Hop-by-hop / local-only request headers never forwarded upstream.
 _STRIP_REQUEST_HEADERS = {
-    "host", "connection", "keep-alive", "proxy-authorization", "te",
-    "trailers", "transfer-encoding", "upgrade", "content-length",
-    "accept-encoding", "origin", "referer", "x-admin-key",
+    "host",
+    "connection",
+    "keep-alive",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
+    "content-length",
+    "accept-encoding",
+    "origin",
+    "referer",
+    "x-admin-key",
 }
 
 # Response headers not forwarded back (requests already decodes the body).
 _STRIP_RESPONSE_HEADERS = {
-    "content-encoding", "transfer-encoding", "content-length", "connection",
-    "keep-alive", "alt-svc", "server", "strict-transport-security",
+    "content-encoding",
+    "transfer-encoding",
+    "content-length",
+    "connection",
+    "keep-alive",
+    "alt-svc",
+    "server",
+    "strict-transport-security",
 }
 
 _proxy_session = requests.Session()
-_proxy_session.headers["User-Agent"] = (
-    f"EFTForge-Desktop/{DESKTOP_APP_VERSION} (+https://eftforge.com)"
-)
+_proxy_session.headers["User-Agent"] = f"EFTForge-Desktop/{DESKTOP_APP_VERSION} (+https://eftforge.com)"
 
 
 def _path_matches(path: str, prefixes: tuple) -> bool:
@@ -163,10 +177,7 @@ def _forward_to_remote(request: Request, body: bytes) -> Response:
     if request.url.query:
         url += "?" + request.url.query
 
-    headers = {
-        k: v for k, v in request.headers.items()
-        if k.lower() not in _STRIP_REQUEST_HEADERS
-    }
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in _STRIP_REQUEST_HEADERS}
 
     try:
         upstream = _proxy_session.request(
@@ -187,10 +198,7 @@ def _forward_to_remote(request: Request, body: bytes) -> Response:
             media_type="application/json",
         )
 
-    response_headers = {
-        k: v for k, v in upstream.headers.items()
-        if k.lower() not in _STRIP_RESPONSE_HEADERS
-    }
+    response_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in _STRIP_RESPONSE_HEADERS}
     return Response(
         content=upstream.content,
         status_code=upstream.status_code,
@@ -202,9 +210,9 @@ def _forward_to_remote(request: Request, body: bytes) -> Response:
 # tarkov.dev sync manager (scratch-DB approach, same guarantees as reset.py)
 # ---------------------------------------------------------------------------
 
-_LIVE_DB_PATH    = os.path.join(DATA_DIR, "tarkov.db")
+_LIVE_DB_PATH = os.path.join(DATA_DIR, "tarkov.db")
 _SCRATCH_DB_PATH = os.path.join(DATA_DIR, "tarkov_dev_sync_scratch.db")
-_SYNC_LOCK_FILE  = os.path.join(RUNTIME_DIR, "sync_in_progress.lock")
+_SYNC_LOCK_FILE = os.path.join(RUNTIME_DIR, "sync_in_progress.lock")
 
 # Tables rewritten on every sync. Children deleted before parents, parents
 # inserted before children (mirrors reset.py).
@@ -215,9 +223,9 @@ _AUTO_SYNC_MAX_AGE_SECS = 12 * 3600
 
 _sync_state_lock = threading.Lock()
 _sync_state = {
-    "running":     False,
-    "changed":     False,   # result of the most recent completed sync
-    "error":       None,
+    "running": False,
+    "changed": False,  # result of the most recent completed sync
+    "error": None,
     "finished_at": None,
 }
 
@@ -230,6 +238,7 @@ def _items_fingerprint(db_path: str):
     conn = sqlite3.connect(db_path)
     try:
         import hashlib
+
         h = hashlib.sha256()
         for row in conn.execute("SELECT * FROM items ORDER BY id"):
             h.update(repr(row).encode("utf-8", "ignore"))
@@ -269,7 +278,6 @@ def _sync_worker_command() -> list[str]:
 
 
 def _run_sync() -> None:
-    global _sync_state
     try:
         open(_SYNC_LOCK_FILE, "w").close()
 
@@ -289,7 +297,7 @@ def _run_sync() -> None:
             raise RuntimeError(f"sync worker exited with code {result.returncode}")
 
         before = _items_fingerprint(_LIVE_DB_PATH)
-        after  = _items_fingerprint(_SCRATCH_DB_PATH)
+        after = _items_fingerprint(_SCRATCH_DB_PATH)
         changed = after is not None and after != before
         if changed:
             _copy_scratch_into_live()
@@ -347,6 +355,7 @@ def _auto_sync_if_stale() -> None:
     if last:
         try:
             from datetime import datetime, timezone
+
             last_dt = datetime.fromisoformat(last)
             if last_dt.tzinfo is None:
                 last_dt = last_dt.replace(tzinfo=timezone.utc)
@@ -363,6 +372,7 @@ def _auto_sync_if_stale() -> None:
 # ---------------------------------------------------------------------------
 # Wiring
 # ---------------------------------------------------------------------------
+
 
 def init_desktop(app: FastAPI, clear_caches=None) -> None:
     global _clear_caches
@@ -388,9 +398,9 @@ def init_desktop(app: FastAPI, clear_caches=None) -> None:
     @app.get("/desktop/settings")
     def desktop_get_settings():
         return {
-            "settings":    get_settings(),
+            "settings": get_settings(),
             "app_version": DESKTOP_APP_VERSION,
-            "data_dir":    DATA_DIR,
+            "data_dir": DATA_DIR,
             "remote_origin": REMOTE_ORIGIN,
         }
 
@@ -442,13 +452,15 @@ def init_desktop(app: FastAPI, clear_caches=None) -> None:
         with open(index_path, "r", encoding="utf-8") as f:
             html = f.read()
         community_mode = get_settings()["community_mode"]
-        flag = json.dumps({
-            "appVersion":    DESKTOP_APP_VERSION,
-            "adminKey":      ADMIN_API_KEY,
-            # Rendered per request (index is no-store), so a reload after
-            # switching modes always reflects the current setting.
-            "communityMode": community_mode,
-        })
+        flag = json.dumps(
+            {
+                "appVersion": DESKTOP_APP_VERSION,
+                "adminKey": ADMIN_API_KEY,
+                # Rendered per request (index is no-store), so a reload after
+                # switching modes always reflects the current setting.
+                "communityMode": community_mode,
+            }
+        )
         inject = "<script>window.__EFTFORGE_DESKTOP__ = " + flag + ";</script>"
         if community_mode == "local":
             # Community-only header buttons must never paint in local mode -
@@ -473,5 +485,7 @@ def init_desktop(app: FastAPI, clear_caches=None) -> None:
 
     _logger.info(
         "desktop mode: data dir %s | frontend %s | community mode %s",
-        DATA_DIR, FRONTEND_DIR, get_settings()["community_mode"],
+        DATA_DIR,
+        FRONTEND_DIR,
+        get_settings()["community_mode"],
     )

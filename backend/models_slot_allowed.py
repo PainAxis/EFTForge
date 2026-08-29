@@ -10,6 +10,4 @@ class SlotAllowedItem(Base):
     slot_id = Column(String, ForeignKey("slots.id"), index=True)
     allowed_item_id = Column(String, ForeignKey("items.id"), index=True)
 
-    __table_args__ = (
-        UniqueConstraint("slot_id", "allowed_item_id", name="uix_slot_allowed"),
-    )
+    __table_args__ = (UniqueConstraint("slot_id", "allowed_item_id", name="uix_slot_allowed"),)

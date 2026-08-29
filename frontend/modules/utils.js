@@ -1,5 +1,7 @@
 window.EFTForge = window.EFTForge || {};
 
+/* exported proxyAvatarUrl, isMobileLayout, _formatPrice, setToastStatus -- called from other modules */
+
 window.EFTForge.utils = {};
 
 function proxyAvatarUrl(url) {

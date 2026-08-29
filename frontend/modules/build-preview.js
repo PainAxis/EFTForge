@@ -1,5 +1,7 @@
 window.EFTForge = window.EFTForge || {};
 
+/* exported _bpBuildSptItemsForPairs -- called from other modules */
+
 // ============================================================
 // LIVE BUILD IMAGE PREVIEW
 //

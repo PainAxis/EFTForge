@@ -53,17 +53,10 @@ def migrate(source_path: str):
             sync_source TEXT    NOT NULL DEFAULT 'scheduled'
         )
     """)
-    dst.execute(
-        "CREATE INDEX IF NOT EXISTS ix_stat_change_log_item_id ON stat_change_log (item_id)"
-    )
+    dst.execute("CREATE INDEX IF NOT EXISTS ix_stat_change_log_item_id ON stat_change_log (item_id)")
 
     # Build a set of existing (item_id, stat_name, detected_at) to skip dupes
-    existing = {
-        (r[0], r[1], r[2])
-        for r in dst.execute(
-            "SELECT item_id, stat_name, detected_at FROM stat_change_log"
-        )
-    }
+    existing = {(r[0], r[1], r[2]) for r in dst.execute("SELECT item_id, stat_name, detected_at FROM stat_change_log")}
 
     inserted = 0
     skipped = 0

@@ -1,7 +1,7 @@
 # Python
-backend/__pycache__/
-backend/*.pyc
-backend/*.pyo
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
 
 # Virtual environment
 backend/venv/
@@ -32,6 +32,7 @@ Thumbs.db
 # Desktop app build artifacts
 backend/data/
 desktop/node_modules/
+frontend/node_modules/
 desktop/pyinstaller/build/
 desktop/pyinstaller/dist/
 desktop/src-tauri/target/

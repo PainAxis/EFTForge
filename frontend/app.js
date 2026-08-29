@@ -1,3 +1,4 @@
+/* exported _syncHeaderScrollOnly, showAboutDialog, switchLang -- called from other modules or index.html attributes */
 
 // Guard variables - declared at top to avoid TDZ errors from hoisted function calls below.
 let _syncNoticeInterval     = null;

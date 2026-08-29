@@ -4,6 +4,7 @@ import os
 import requests
 import time
 from dotenv import load_dotenv
+
 load_dotenv()
 from datetime import datetime, timezone
 from database import SessionLocal, Base, engine
@@ -70,9 +71,7 @@ _FLOAT_EPS = 1e-4
 
 def _snapshot_items(db) -> dict:
     """Capture tracked stats for weapons and weapon-slot attachments before the wipe."""
-    attachment_ids = {
-        row[0] for row in db.query(SlotAllowedItem.allowed_item_id).distinct().all()
-    }
+    attachment_ids = {row[0] for row in db.query(SlotAllowedItem.allowed_item_id).distinct().all()}
 
     snapshot = {}
     for item in db.query(Item).all():
@@ -100,7 +99,9 @@ def _floats_differ(a, b) -> bool:
     return abs(a - b) > _FLOAT_EPS
 
 
-_NOT_YET_TRACKED = object()  # sentinel: distinguishes "stat wasn't tracked in the old snapshot" from "stat was tracked and its value was null"
+_NOT_YET_TRACKED = (
+    object()
+)  # sentinel: distinguishes "stat wasn't tracked in the old snapshot" from "stat was tracked and its value was null"
 
 # stat_name used to flag a changelog row as "brand new item" rather than a stat
 # diff - old_value/new_value are left null and the frontend renders it distinctly.
@@ -133,15 +134,17 @@ def _build_change_logs(db, snapshot: dict, sync_source: str, sync_time: datetime
                 continue
             new_val = getattr(item, stat)
             if _floats_differ(old_val, new_val):
-                logs.append(StatChangeLog(
-                    item_id=item.id,
-                    item_name=prev["name"],
-                    stat_name=stat,
-                    old_value=old_val,
-                    new_value=new_val,
-                    detected_at=sync_time,
-                    sync_source=sync_source,
-                ))
+                logs.append(
+                    StatChangeLog(
+                        item_id=item.id,
+                        item_name=prev["name"],
+                        stat_name=stat,
+                        old_value=old_val,
+                        new_value=new_val,
+                        detected_at=sync_time,
+                        sync_source=sync_source,
+                    )
+                )
 
     return logs
 
@@ -157,9 +160,7 @@ def _build_new_item_logs(db, snapshot: dict, sync_source: str, sync_time: dateti
     if not snapshot:
         return []
 
-    attachment_ids = {
-        row[0] for row in db.query(SlotAllowedItem.allowed_item_id).distinct().all()
-    }
+    attachment_ids = {row[0] for row in db.query(SlotAllowedItem.allowed_item_id).distinct().all()}
 
     logs = []
     for item in db.query(Item).all():
@@ -167,15 +168,17 @@ def _build_new_item_logs(db, snapshot: dict, sync_source: str, sync_time: dateti
             continue
         if not (item.is_weapon or item.is_ammo or item.id in attachment_ids):
             continue
-        logs.append(StatChangeLog(
-            item_id=item.id,
-            item_name=item.name,
-            stat_name=_NEW_ITEM_STAT,
-            old_value=None,
-            new_value=None,
-            detected_at=sync_time,
-            sync_source=sync_source,
-        ))
+        logs.append(
+            StatChangeLog(
+                item_id=item.id,
+                item_name=item.name,
+                stat_name=_NEW_ITEM_STAT,
+                old_value=None,
+                new_value=None,
+                detected_at=sync_time,
+                sync_source=sync_source,
+            )
+        )
     return logs
 
 
@@ -272,6 +275,7 @@ def _localize(overlay, token, default=None):
         return default
     return overlay.get(token, default)
 
+
 def _sync_spt_hidden_stats(db):
     """
     Supplementary sync from a local SPT items.json.
@@ -318,20 +322,20 @@ def _sync_spt_hidden_stats(db):
         # Map: (db_column, _props_field)
         # tarkov.dev fields take priority - only fill if still null
         spt_fields = [
-            ("aim_sensitivity",  "AimSensitivity"),
-            ("cam_angle_step",   "CameraToWeaponAngleStep"),
-            ("mount_cam_snap",   "MountCameraSnapMultiplier"),
-            ("mount_h_rec",      "MountHorizontalRecoilMultiplier"),
-            ("mount_v_rec",      "MountVerticalRecoilMultiplier"),
-            ("mount_breath",     "MountingVerticalOutOfBreathMultiplier"),
-            ("rec_hand_rot",     "RecoilCategoryMultiplierHandRotation"),
-            ("rec_force_back",   "RecoilForceBack"),
-            ("rec_force_up",     "RecoilForceUp"),
+            ("aim_sensitivity", "AimSensitivity"),
+            ("cam_angle_step", "CameraToWeaponAngleStep"),
+            ("mount_cam_snap", "MountCameraSnapMultiplier"),
+            ("mount_h_rec", "MountHorizontalRecoilMultiplier"),
+            ("mount_v_rec", "MountVerticalRecoilMultiplier"),
+            ("mount_breath", "MountingVerticalOutOfBreathMultiplier"),
+            ("rec_hand_rot", "RecoilCategoryMultiplierHandRotation"),
+            ("rec_force_back", "RecoilForceBack"),
+            ("rec_force_up", "RecoilForceUp"),
             ("rec_return_speed", "RecoilReturnSpeedHandRotation"),
             # tarkov.dev API fields - use SPT as fallback if null
             ("center_of_impact", "CenterOfImpact"),
-            ("camera_recoil",    "CameraRecoil"),
-            ("convergence",      "Convergence"),
+            ("camera_recoil", "CameraRecoil"),
+            ("convergence", "Convergence"),
         ]
 
         for db_col, spt_key in spt_fields:
@@ -372,7 +376,7 @@ def sync_items(sync_source: str = "scheduled"):
     logger.info("Fetching tarkov.dev items...")
 
     base = _fetch_json(f"{JSON_API_BASE}/{GAME_MODE}/items", 60, "items")
-    items_map = base["data"]["items"]                 # {id: item}
+    items_map = base["data"]["items"]  # {id: item}
     item_categories = base["data"]["itemCategories"]  # {id: {name(token), normalizedName, ...}}
     logger.info("Total items fetched: %d", len(items_map))
 
@@ -384,10 +388,7 @@ def sync_items(sync_source: str = "scheduled"):
 
     # Resolve category id strings to English display names so the weapon-class
     # matching below keeps working against WEAPON_CLASS_PRIORITY.
-    cat_name_en = {
-        cid: _localize(en, c.get("name"), c.get("normalizedName"))
-        for cid, c in item_categories.items()
-    }
+    cat_name_en = {cid: _localize(en, c.get("name"), c.get("normalizedName")) for cid, c in item_categories.items()}
 
     items_to_add = []
 
@@ -405,14 +406,14 @@ def sync_items(sync_source: str = "scheduled"):
         # so we take the highest-priority (most specific) match.
         # Both spellings are listed for each class to handle API inconsistencies.
         WEAPON_CLASS_PRIORITY = [
-            "Assault carbine",   # must precede "Assault rifle"
+            "Assault carbine",  # must precede "Assault rifle"
             "Marksman rifle",
             "Sniper rifle",
-            "Machinegun",        # actual tarkov.dev API name
-            "Machine gun",       # fallback
-            "Machine Gun",       # fallback
-            "SMG",               # tarkov.dev API
-            "Submachine gun",    # fallback
+            "Machinegun",  # actual tarkov.dev API name
+            "Machine gun",  # fallback
+            "Machine Gun",  # fallback
+            "SMG",  # tarkov.dev API
+            "Submachine gun",  # fallback
             "Shotgun",
             "Handgun",
             "Revolver",
@@ -478,10 +479,10 @@ def sync_items(sync_source: str = "scheduled"):
         accuracy_modifier = None
 
         icon_link = item.get("iconLink")
-        base_image_link     = item.get("baseImageLink")
-        image_512_link      = None
+        base_image_link = item.get("baseImageLink")
+        image_512_link = None
         bare_image_512_link = None
-        preset_icon_link    = None
+        preset_icon_link = None
 
         if properties:
             typename = properties.get("propertiesType")
@@ -516,16 +517,16 @@ def sync_items(sync_source: str = "scheduled"):
                 # API parent category wins over what the game actually calls them.
                 WEAPON_CLASS_OVERRIDES = {
                     # Long-gun revolvers (tarkov.dev calls them "Revolver" but they're not pistols)
-                    "60db29ce99594040e04c4a27": "Shotgun",           # MTs-255-12
+                    "60db29ce99594040e04c4a27": "Shotgun",  # MTs-255-12
                     "6275303a9f372d6ea97f9ec7": "Grenade launcher",  # Milkor M32A1 (lowercase to match API)
                     # Carbines that tarkov.dev only tags "Assault rifle"
-                    "5c07c60e0db834002330051f": "Assault carbine",   # ADAR 2-15
-                    "628b5638ad252a16da6dd245": "Assault carbine",   # SAG AK-545
-                    "628b9c37a733087d0d7fe84b": "Assault carbine",   # SAG AK-545 Short
-                    "5d43021ca4b9362eab4b5e25": "Assault carbine",   # Lone Star TX-15 DML
-                    "59e6152586f77473dc057aa1": "Assault carbine",   # VPO-136 Vepr-KM
-                    "59e6687d86f77411d949b251": "Assault carbine",   # VPO-209 .366 TKM
-                    "5f2a9575926fd9352339381f": "Assault carbine",   # Kel-Tec RFB
+                    "5c07c60e0db834002330051f": "Assault carbine",  # ADAR 2-15
+                    "628b5638ad252a16da6dd245": "Assault carbine",  # SAG AK-545
+                    "628b9c37a733087d0d7fe84b": "Assault carbine",  # SAG AK-545 Short
+                    "5d43021ca4b9362eab4b5e25": "Assault carbine",  # Lone Star TX-15 DML
+                    "59e6152586f77473dc057aa1": "Assault carbine",  # VPO-136 Vepr-KM
+                    "59e6687d86f77411d949b251": "Assault carbine",  # VPO-209 .366 TKM
+                    "5f2a9575926fd9352339381f": "Assault carbine",  # Kel-Tec RFB
                 }
                 if item["id"] in WEAPON_CLASS_OVERRIDES:
                     weapon_category = WEAPON_CLASS_OVERRIDES[item["id"]]
@@ -533,11 +534,12 @@ def sync_items(sync_source: str = "scheduled"):
                 # Fallback if no class matched from the categories loop
                 if weapon_category is None:
                     weapon_category = "Primary"
-                    logger.warning("[UNMATCHED] %s - categories: %s",
-                                   _localize(en, item.get("name"), item["id"]), category_names)
+                    logger.warning(
+                        "[UNMATCHED] %s - categories: %s", _localize(en, item.get("name"), item["id"]), category_names
+                    )
 
                 bare_image_512_link = item.get("image512pxLink")
-                image_512_link      = bare_image_512_link
+                image_512_link = bare_image_512_link
 
                 # --------------------------
                 # Default Preset Handling
@@ -566,11 +568,11 @@ def sync_items(sync_source: str = "scheduled"):
                 sighting_range = properties.get("sightingRange")
             if typename == "ItemPropertiesBarrel":
                 center_of_impact = properties.get("centerOfImpact")
-                deviation_curve  = properties.get("deviationCurve")
-                deviation_max    = properties.get("deviationMax")
+                deviation_curve = properties.get("deviationCurve")
+                deviation_max = properties.get("deviationMax")
             if typename in ["ItemPropertiesWeaponMod", "ItemPropertiesBarrel"]:
-                heat_factor      = properties.get("heatFactor")
-                cooling_factor   = properties.get("coolingFactor")
+                heat_factor = properties.get("heatFactor")
+                cooling_factor = properties.get("coolingFactor")
                 durability_burn_factor = properties.get("durabilityBurnFactor")
                 # Muzzle velocity % modifier - NOT under properties like the other mod stats;
                 # the JSON API only exposes this as a top-level Item field (mirrors the GraphQL
@@ -590,24 +592,24 @@ def sync_items(sync_source: str = "scheduled"):
             if typename == "ItemPropertiesAmmo":
                 caliber = properties.get("caliber")
                 is_ammo = True
-                ammo_damage           = properties.get("damage")
-                penetration_power     = properties.get("penetrationPower")
-                penetration_chance    = properties.get("penetrationChance")
+                ammo_damage = properties.get("damage")
+                penetration_power = properties.get("penetrationPower")
+                penetration_chance = properties.get("penetrationChance")
                 penetration_power_deviation = properties.get("penetrationPowerDeviation")
-                armor_damage          = properties.get("armorDamage")
-                velocity              = properties.get("initialSpeed")
-                ammo_tracer           = properties.get("tracer")
-                ammo_tracer_color     = properties.get("tracerColor")
-                ammo_type             = properties.get("ammoType")
-                projectile_count      = properties.get("projectileCount")
-                fragmentation_chance  = properties.get("fragmentationChance")
-                ricochet_chance       = properties.get("ricochetChance")
-                stack_max_size        = properties.get("stackMaxSize")
-                ammo_accuracy_mod     = properties.get("accuracyModifier")
-                ammo_recoil_mod       = properties.get("recoilModifier")
-                light_bleed_delta     = properties.get("lightBleedModifier")
-                heavy_bleed_delta     = properties.get("heavyBleedModifier")
-                heat_factor           = properties.get("heatFactor")
+                armor_damage = properties.get("armorDamage")
+                velocity = properties.get("initialSpeed")
+                ammo_tracer = properties.get("tracer")
+                ammo_tracer_color = properties.get("tracerColor")
+                ammo_type = properties.get("ammoType")
+                projectile_count = properties.get("projectileCount")
+                fragmentation_chance = properties.get("fragmentationChance")
+                ricochet_chance = properties.get("ricochetChance")
+                stack_max_size = properties.get("stackMaxSize")
+                ammo_accuracy_mod = properties.get("accuracyModifier")
+                ammo_recoil_mod = properties.get("recoilModifier")
+                light_bleed_delta = properties.get("lightBleedModifier")
+                heavy_bleed_delta = properties.get("heavyBleedModifier")
+                heat_factor = properties.get("heatFactor")
                 durability_burn_factor = properties.get("durabilityBurnFactor")
 
         # --------------------------
@@ -616,8 +618,8 @@ def sync_items(sync_source: str = "scheduled"):
         # Map their IDs to the grenade caliber they accept.
         # --------------------------
         UBGL_CALIBER_MAP = {
-            "62e7e7bbe6da9612f743f1e0": "Caliber40mmRU",   # GP-25 Kostyor 40mm
-            "6357c98711fb55120211f7e1": "Caliber40x46",     # M203 40mm
+            "62e7e7bbe6da9612f743f1e0": "Caliber40mmRU",  # GP-25 Kostyor 40mm
+            "6357c98711fb55120211f7e1": "Caliber40x46",  # M203 40mm
         }
         if item["id"] in UBGL_CALIBER_MAP:
             caliber = UBGL_CALIBER_MAP[item["id"]]
@@ -762,10 +764,7 @@ def sync_items(sync_source: str = "scheduled"):
     all_preset_ids = set(weapon_presets.keys())
     for ids in weapon_presets.values():
         all_preset_ids.update(ids)
-    preset_item_map = {
-        item.id: item
-        for item in db.query(Item).filter(Item.id.in_(all_preset_ids)).all()
-    }
+    preset_item_map = {item.id: item for item in db.query(Item).filter(Item.id.in_(all_preset_ids)).all()}
 
     for weapon_id, attachment_ids in weapon_presets.items():
         weapon = preset_item_map.get(weapon_id)
@@ -783,7 +782,9 @@ def sync_items(sync_source: str = "scheduled"):
 
             attachment = preset_item_map.get(att_id)
             if not attachment:
-                logger.warning("Preset simulation: attachment %s for weapon '%s' not found - skipping", att_id, weapon.name)
+                logger.warning(
+                    "Preset simulation: attachment %s for weapon '%s' not found - skipping", att_id, weapon.name
+                )
                 continue
 
             total_weight += attachment.weight or 0
@@ -794,13 +795,9 @@ def sync_items(sync_source: str = "scheduled"):
         weapon.factory_ergonomics = total_ergo
 
         if weapon.recoil_vertical is not None:
-            weapon.factory_recoil_vertical = round(
-                weapon.recoil_vertical * (1 + total_recoil_modifier)
-            )
+            weapon.factory_recoil_vertical = round(weapon.recoil_vertical * (1 + total_recoil_modifier))
         if weapon.recoil_horizontal is not None:
-            weapon.factory_recoil_horizontal = round(
-                weapon.recoil_horizontal * (1 + total_recoil_modifier)
-            )
+            weapon.factory_recoil_horizontal = round(weapon.recoil_horizontal * (1 + total_recoil_modifier))
 
     db.commit()
 
@@ -858,23 +855,22 @@ def sync_items(sync_source: str = "scheduled"):
     updates = []
     for item in items_map.values():
         buy_for = item.get("buyFromTrader") or []
-        allowed = [
-            b for b in buy_for
-            if trader_norm_map.get(b.get("trader")) not in EXCLUDED_VENDOR_NAMES
-        ]
+        allowed = [b for b in buy_for if trader_norm_map.get(b.get("trader")) not in EXCLUDED_VENDOR_NAMES]
         cheapest = min(allowed, key=lambda b: b.get("priceRUB") or float("inf")) if allowed else None
         task_unlock_id = cheapest.get("taskUnlock") if cheapest else None
-        updates.append({
-            "id":               item["id"],
-            "trader_price":     cheapest["price"]    if cheapest else None,
-            "trader_price_rub": cheapest["priceRUB"] if cheapest else None,
-            "trader_currency":  cheapest["currency"] if cheapest else None,
-            "trader_vendor":    trader_norm_map.get(cheapest["trader"]) if cheapest else None,
-            "trader_min_level": cheapest.get("minTraderLevel") if cheapest else None,
-            "task_unlock_id":      task_unlock_id,
-            "task_unlock_name":    task_name_en.get(task_unlock_id) if task_unlock_id else None,
-            "task_unlock_name_zh": task_name_zh.get(task_unlock_id) if task_unlock_id else None,
-        })
+        updates.append(
+            {
+                "id": item["id"],
+                "trader_price": cheapest["price"] if cheapest else None,
+                "trader_price_rub": cheapest["priceRUB"] if cheapest else None,
+                "trader_currency": cheapest["currency"] if cheapest else None,
+                "trader_vendor": trader_norm_map.get(cheapest["trader"]) if cheapest else None,
+                "trader_min_level": cheapest.get("minTraderLevel") if cheapest else None,
+                "task_unlock_id": task_unlock_id,
+                "task_unlock_name": task_name_en.get(task_unlock_id) if task_unlock_id else None,
+                "task_unlock_name_zh": task_name_zh.get(task_unlock_id) if task_unlock_id else None,
+            }
+        )
     db.bulk_update_mappings(Item, updates)
     db.commit()
     logger.info("Trader prices synced (%d items).", len(updates))

@@ -1,12 +1,12 @@
 window.EFTForge = window.EFTForge || {};
 
 window.EFTForge.mediaViewer = (function () {
-    var _overlay       = null;
-    var _img           = null;
-    var _scale         = 1;
-    var _panX          = 0;
-    var _panY          = 0;
-    var _mdOnBackdrop  = false;
+    let _overlay       = null;
+    let _img           = null;
+    let _scale         = 1;
+    let _panX          = 0;
+    let _panY          = 0;
+    let _mdOnBackdrop  = false;
 
     function open(src) {
         if (_overlay) _destroy();
@@ -39,7 +39,7 @@ window.EFTForge.mediaViewer = (function () {
     function close() {
         if (!_overlay) return;
         _overlay.classList.remove('mv-visible');
-        var ol = _overlay;
+        const ol = _overlay;
         _overlay = null;
         _img = null;
         document.removeEventListener('keydown', _onKeyDown);
@@ -64,15 +64,15 @@ window.EFTForge.mediaViewer = (function () {
 
     function _onWheel(e) {
         e.preventDefault();
-        var factor   = e.deltaY < 0 ? 1.15 : (1 / 1.15);
-        var newScale = Math.min(Math.max(_scale * factor, 0.15), 20);
+        const factor   = e.deltaY < 0 ? 1.15 : (1 / 1.15);
+        const newScale = Math.min(Math.max(_scale * factor, 0.15), 20);
 
-        var rect = _overlay.getBoundingClientRect();
-        var mx   = e.clientX - (rect.left + rect.width  / 2);
-        var my   = e.clientY - (rect.top  + rect.height / 2);
+        const rect = _overlay.getBoundingClientRect();
+        const mx   = e.clientX - (rect.left + rect.width  / 2);
+        const my   = e.clientY - (rect.top  + rect.height / 2);
 
         // Zoom toward the cursor: keep the image point under the cursor stationary
-        var ratio = newScale / _scale;
+        const ratio = newScale / _scale;
         _panX  = mx * (1 - ratio) + _panX * ratio;
         _panY  = my * (1 - ratio) + _panY * ratio;
         _scale = newScale;
@@ -83,8 +83,8 @@ window.EFTForge.mediaViewer = (function () {
         _mdOnBackdrop = e.target === _overlay;
         if (e.button !== 1) return;
         e.preventDefault();
-        var startX = e.clientX - _panX;
-        var startY = e.clientY - _panY;
+        const startX = e.clientX - _panX;
+        const startY = e.clientY - _panY;
         _overlay.classList.add('mv-panning');
 
         function onMove(e) {

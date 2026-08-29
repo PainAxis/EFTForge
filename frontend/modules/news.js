@@ -20,8 +20,8 @@ window.EFTForge = window.EFTForge || {};
 
 window.EFTForge.news = (function () {
 
-    var SEEN_KEY  = 'eftforge_news_seen';
-    var _SECRET_POST = {
+    const SEEN_KEY  = 'eftforge_news_seen';
+    const _SECRET_POST = {
         id:      'secret-about',
         title:   'About the Dev',
         title_zh: '关于开发者',
@@ -32,7 +32,7 @@ window.EFTForge.news = (function () {
         _secret: true,
     };
 
-    var _DEV_POST = {
+    const _DEV_POST = {
         id:          'dev-md-test',
         title:       '[DEV] Markdown Test',
         date:        new Date().toISOString().slice(0, 10),
@@ -43,10 +43,10 @@ window.EFTForge.news = (function () {
         _dev:        true
     };
 
-    var _manifest     = null;
-    var _postCache    = {};    // file path -> markdown string
-    var _currentView  = 'list'; // 'list' | 'post'
-    var _currentPostId = null;
+    let _manifest     = null;
+    const _postCache    = {};    // file path -> markdown string
+    let _currentView  = 'list'; // 'list' | 'post'
+    let _currentPostId = null;
 
     /* ===========================
        PUBLIC API
@@ -60,7 +60,7 @@ window.EFTForge.news = (function () {
         // ESC key in capture phase - fires before app.js's bubble-phase listener
         document.addEventListener('keydown', function (e) {
             if (e.key !== 'Escape') return;
-            var overlay = document.getElementById('news-overlay');
+            const overlay = document.getElementById('news-overlay');
             if (!overlay || !overlay.classList.contains('visible')) return;
 
             if (_currentView === 'post') {
@@ -78,8 +78,8 @@ window.EFTForge.news = (function () {
     }
 
     async function showPage() {
-        var overlay  = document.getElementById('news-overlay');
-        var backdrop = document.getElementById('news-backdrop');
+        const overlay  = document.getElementById('news-overlay');
+        const backdrop = document.getElementById('news-backdrop');
         if (!overlay) return;
 
         _currentView   = 'list';
@@ -96,7 +96,7 @@ window.EFTForge.news = (function () {
         if (!_manifest) {
             _showLoading();
             try {
-                var res = await fetch('./news/manifest.json', { cache: 'no-cache' });
+                const res = await fetch('./news/manifest.json', { cache: 'no-cache' });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 _manifest = await res.json();
                 _injectDevPost();
@@ -112,8 +112,8 @@ window.EFTForge.news = (function () {
     }
 
     async function showPost(postId) {
-        var overlay  = document.getElementById('news-overlay');
-        var backdrop = document.getElementById('news-backdrop');
+        const overlay  = document.getElementById('news-overlay');
+        const backdrop = document.getElementById('news-backdrop');
         if (!overlay) return;
 
         overlay.classList.add('visible');
@@ -127,7 +127,7 @@ window.EFTForge.news = (function () {
         if (!_manifest) {
             _showLoading();
             try {
-                var res = await fetch('./news/manifest.json', { cache: 'no-cache' });
+                const res = await fetch('./news/manifest.json', { cache: 'no-cache' });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 _manifest = await res.json();
                 _injectDevPost();
@@ -138,19 +138,19 @@ window.EFTForge.news = (function () {
             }
         }
 
-        var post = (_manifest.posts || []).find(function (p) { return p.id === postId; });
+        const post = (_manifest.posts || []).find(function (p) { return p.id === postId; });
         if (!post) {
             _showError(EFTForge.lang.t('news.postNotFound'));
             return;
         }
 
-        var lang = EFTForge.state.lang;
-        var file = (lang === 'zh' && post.file_zh) ? post.file_zh : post.file;
+        const lang = EFTForge.state.lang;
+        const file = (lang === 'zh' && post.file_zh) ? post.file_zh : post.file;
 
-        var markdown = _postCache[file];
+        let markdown = _postCache[file];
         if (!markdown) {
             try {
-                var res = await fetch('./news/posts/' + file, { cache: 'no-cache' });
+                const res = await fetch('./news/posts/' + file, { cache: 'no-cache' });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 markdown = await res.text();
                 _postCache[file] = markdown;
@@ -165,8 +165,8 @@ window.EFTForge.news = (function () {
     }
 
     function hidePage() {
-        var overlay  = document.getElementById('news-overlay');
-        var backdrop = document.getElementById('news-backdrop');
+        const overlay  = document.getElementById('news-overlay');
+        const backdrop = document.getElementById('news-backdrop');
         if (!overlay) return;
 
         overlay.classList.remove('visible');
@@ -177,7 +177,7 @@ window.EFTForge.news = (function () {
         _currentPostId = null;
 
         // Mark the latest non-dev post as seen so it won't auto-open again
-        var seenPost = (_manifest && _manifest.posts || []).find(function (p) { return !p._dev; });
+        const seenPost = (_manifest && _manifest.posts || []).find(function (p) { return !p._dev; });
         if (seenPost) localStorage.setItem(SEEN_KEY, seenPost.id);
 
         if (location.hash.startsWith('#news')) {
@@ -187,7 +187,7 @@ window.EFTForge.news = (function () {
 
     // Called by switchLang() in app.js after a language change
     function onLangChange() {
-        var overlay = document.getElementById('news-overlay');
+        const overlay = document.getElementById('news-overlay');
         if (!overlay || !overlay.classList.contains('visible')) return;
 
         if (_currentView === 'list') {
@@ -202,22 +202,22 @@ window.EFTForge.news = (function () {
     =========================== */
 
     function _isDevMode() {
-        var h = location.hostname;
+        const h = location.hostname;
         return h === 'localhost' || h === '127.0.0.1';
     }
 
     function _injectDevPost() {
         if (!_isDevMode()) return;
-        var posts = _manifest.posts || [];
-        var alreadyInjected = posts.some(function (p) { return p.id === _DEV_POST.id; });
+        const posts = _manifest.posts || [];
+        const alreadyInjected = posts.some(function (p) { return p.id === _DEV_POST.id; });
         if (!alreadyInjected) {
             _manifest.posts = [_DEV_POST].concat(posts);
         }
     }
 
     function _injectSecretPost() {
-        var posts = _manifest.posts || [];
-        var alreadyInjected = posts.some(function (p) { return p.id === _SECRET_POST.id; });
+        const posts = _manifest.posts || [];
+        const alreadyInjected = posts.some(function (p) { return p.id === _SECRET_POST.id; });
         if (!alreadyInjected) {
             _manifest.posts = posts.concat([_SECRET_POST]);
         }
@@ -229,17 +229,17 @@ window.EFTForge.news = (function () {
 
     async function _checkForNewPost() {
         try {
-            var res = await fetch('./news/manifest.json', { cache: 'no-cache' });
+            const res = await fetch('./news/manifest.json', { cache: 'no-cache' });
             if (!res.ok) return;
             _manifest = await res.json();
             _injectDevPost();
             _injectSecretPost();
 
-            var posts = (_manifest.posts || []).filter(function (p) { return !p._dev; });
+            const posts = (_manifest.posts || []).filter(function (p) { return !p._dev; });
             if (posts.length === 0) return;
 
-            var latestId = posts[0].id;
-            var seenId   = localStorage.getItem(SEEN_KEY);
+            const latestId = posts[0].id;
+            const seenId   = localStorage.getItem(SEEN_KEY);
 
             if (seenId !== latestId) {
                 showPost(latestId);
@@ -254,11 +254,11 @@ window.EFTForge.news = (function () {
     =========================== */
 
     function _renderPostList() {
-        var body = document.getElementById('news-body');
+        const body = document.getElementById('news-body');
         if (!body) return;
 
-        var posts = (_manifest && _manifest.posts) || [];
-        var lang  = EFTForge.state.lang;
+        let posts = (_manifest && _manifest.posts) || [];
+        const lang  = EFTForge.state.lang;
 
         _updateHeaderTitle(EFTForge.lang.t('news.title'));
 
@@ -268,36 +268,36 @@ window.EFTForge.news = (function () {
         }
 
         // Regular posts first (newest→oldest), dev posts pinned to bottom; secret posts never shown
-        var regularPosts = posts.filter(function (p) { return !p._dev && !p._secret; });
-        var devPosts     = posts.filter(function (p) { return  p._dev; });
+        const regularPosts = posts.filter(function (p) { return !p._dev && !p._secret; });
+        const devPosts     = posts.filter(function (p) { return  p._dev; });
         posts = regularPosts.concat(devPosts);
 
-        var cards = posts.map(function (post) {
-            var title   = (lang === 'zh' && post.title_zh)   ? post.title_zh   : post.title;
-            var summary = (lang === 'zh' && post.summary_zh) ? post.summary_zh : (post.summary || '');
-            var tags    = (post.tags || []).map(function (tag) {
-                var tagClass = 'news-card-tag news-card-tag--' + tag.toLowerCase().replace(/\s+/g, '-');
+        const cards = posts.map(function (post) {
+            const title   = (lang === 'zh' && post.title_zh)   ? post.title_zh   : post.title;
+            const summary = (lang === 'zh' && post.summary_zh) ? post.summary_zh : (post.summary || '');
+            const tags    = (post.tags || []).map(function (tag) {
+                const tagClass = 'news-card-tag news-card-tag--' + tag.toLowerCase().replace(/\s+/g, '-');
                 return '<span class="' + tagClass + '">' + escapeHtml(tag) + '</span>';
             }).join('');
 
-            var media    = post.title_media;
-            var isLogo   = false;
+            let media    = post.title_media;
+            let isLogo   = false;
             if (!media && !post.thumbnail) {
                 media  = './assets/images/EFTForge1080x1080.png';
                 isLogo = true;
             }
 
-            var mediaHtml = '';
+            let mediaHtml = '';
             if (media || post.thumbnail) {
                 if (isLogo) {
                     mediaHtml = '<div class="news-card-media-wrap news-card-logo-bg"><img src="' + media + '" alt=""></div>';
                 } else if (post.thumbnail) {
-                    var wrapStyle = post.thumbnail_style ? ' style="' + post.thumbnail_style + '"' : '';
-                    var imgStyle  = 'width:100%;height:100%;object-fit:cover;' + (post.thumbnail_img_style || '');
+                    const wrapStyle = post.thumbnail_style ? ' style="' + post.thumbnail_style + '"' : '';
+                    const imgStyle  = 'width:100%;height:100%;object-fit:cover;' + (post.thumbnail_img_style || '');
                     mediaHtml = '<div class="news-card-media-wrap"' + wrapStyle + '><img class="news-card-media" src="' + post.thumbnail + '" alt="" style="' + imgStyle + '"></div>';
                 } else {
-                    var ext = media.split('.').pop().toLowerCase();
-                    var isVideo = (ext === 'mp4' || ext === 'webm' || ext === 'ogg');
+                    const ext = media.split('.').pop().toLowerCase();
+                    const isVideo = (ext === 'mp4' || ext === 'webm' || ext === 'ogg');
                     if (isVideo) {
                         mediaHtml = '<div class="news-card-media-wrap"><video class="news-card-media" src="' + media + '#t=0.001" preload="metadata"></video></div>';
                     } else if (ext === 'gif') {
@@ -325,7 +325,7 @@ window.EFTForge.news = (function () {
 
         // Freeze GIF thumbnails by drawing first frame to canvas
         body.querySelectorAll('canvas.news-card-media[data-gif-src]').forEach(function (canvas) {
-            var img = new Image();
+            const img = new Image();
             img.onload = function () {
                 canvas.width  = img.naturalWidth;
                 canvas.height = img.naturalHeight;
@@ -336,11 +336,11 @@ window.EFTForge.news = (function () {
     }
 
     function _renderPost(post, markdown) {
-        var body = document.getElementById('news-body');
+        const body = document.getElementById('news-body');
         if (!body) return;
 
-        var tags = (post.tags || []).map(function (tag) {
-            var tagClass = 'news-card-tag news-card-tag--' + tag.toLowerCase().replace(/\s+/g, '-');
+        const tags = (post.tags || []).map(function (tag) {
+            const tagClass = 'news-card-tag news-card-tag--' + tag.toLowerCase().replace(/\s+/g, '-');
                 return '<span class="' + tagClass + '">' + escapeHtml(tag) + '</span>';
         }).join('');
 
@@ -353,7 +353,7 @@ window.EFTForge.news = (function () {
             }
         }
 
-        var htmlContent = (typeof marked !== 'undefined')
+        const htmlContent = (typeof marked !== 'undefined')
             ? marked.parse(markdown)
             : '<pre>' + escapeHtml(markdown) + '</pre>';
 
@@ -376,8 +376,8 @@ window.EFTForge.news = (function () {
         body.scrollTop = 0;
 
         // Build title media hero - overlays the first <h1> on top of the media
-        var _titleMedia    = post.title_media;
-        var _titleMediaLogo = false;
+        let _titleMedia    = post.title_media;
+        let _titleMediaLogo = false;
         if (!_titleMedia) {
             _titleMedia     = './assets/images/EFTForge1080x1080.png';
             _titleMediaLogo = true;
@@ -388,12 +388,12 @@ window.EFTForge.news = (function () {
         }
 
         if (post.title_media) {
-            var firstH1 = body.querySelector('.news-post-content h1');
+            const firstH1 = body.querySelector('.news-post-content h1');
             if (firstH1) {
-                var ext = post.title_media.split('.').pop().toLowerCase();
-                var isVideo = (ext === 'mp4' || ext === 'webm' || ext === 'ogg');
+                const ext = post.title_media.split('.').pop().toLowerCase();
+                const isVideo = (ext === 'mp4' || ext === 'webm' || ext === 'ogg');
 
-                var mediaEl;
+                let mediaEl;
                 if (isVideo) {
                     mediaEl = document.createElement('video');
                     mediaEl.src      = post.title_media;
@@ -408,16 +408,16 @@ window.EFTForge.news = (function () {
                     mediaEl.alt = '';
                 }
 
-                var overlay = document.createElement('div');
+                const overlay = document.createElement('div');
                 overlay.className = 'news-title-overlay';
                 overlay.appendChild(firstH1);
 
-                var hero = document.createElement('div');
+                const hero = document.createElement('div');
                 hero.className = 'news-title-hero' + (_titleMediaLogo ? ' news-title-hero--logo' : '');
                 hero.appendChild(mediaEl);
                 hero.appendChild(overlay);
 
-                var content = body.querySelector('.news-post-content');
+                const content = body.querySelector('.news-post-content');
                 content.insertAdjacentElement('afterbegin', hero);
             }
         }
@@ -450,30 +450,30 @@ window.EFTForge.news = (function () {
     }
 
     function _animateOut(direction, callback) {
-        var body = document.getElementById('news-body');
-        var page = body && body.querySelector('.news-page');
+        const body = document.getElementById('news-body');
+        const page = body && body.querySelector('.news-page');
         if (!page) { callback(); return; }
-        var cls = direction === 'forward' ? 'news-page--exit-left' : 'news-page--exit-right';
+        const cls = direction === 'forward' ? 'news-page--exit-left' : 'news-page--exit-right';
         page.classList.add(cls);
         setTimeout(callback, 160);
     }
 
     function _showLoading() {
-        var body = document.getElementById('news-body');
+        const body = document.getElementById('news-body');
         if (body) {
             body.innerHTML = '<div class="news-loading">' + escapeHtml(EFTForge.lang.t('news.loading')) + '</div>';
         }
     }
 
     function _showError(msg) {
-        var body = document.getElementById('news-body');
+        const body = document.getElementById('news-body');
         if (body) {
             body.innerHTML = '<div class="news-error">' + escapeHtml(msg) + '</div>';
         }
     }
 
     function _updateHeaderTitle(text) {
-        var el = document.getElementById('news-header-title');
+        const el = document.getElementById('news-header-title');
         if (el) el.textContent = text;
     }
 
@@ -482,21 +482,21 @@ window.EFTForge.news = (function () {
     =========================== */
 
     function _handleHashOnLoad() {
-        var hash = location.hash;
+        const hash = location.hash;
         if (hash === '#news') {
             showPage();
         } else if (hash.startsWith('#news/')) {
-            var postId = hash.slice('#news/'.length);
+            const postId = hash.slice('#news/'.length);
             if (postId) showPost(postId);
         }
     }
 
     function _onHashChange() {
-        var hash = location.hash;
+        const hash = location.hash;
         if (hash === '#news') {
             showPage();
         } else if (hash.startsWith('#news/')) {
-            var postId = hash.slice('#news/'.length);
+            const postId = hash.slice('#news/'.length);
             if (postId) showPost(postId);
         }
     }
@@ -512,9 +512,9 @@ window.EFTForge.news = (function () {
     function _formatDate(dateStr) {
         if (!dateStr) return '';
         try {
-            var parts  = dateStr.split('-').map(Number);
-            var d      = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
-            var locale = EFTForge.state.lang === 'zh' ? 'zh-CN' : 'en-US';
+            const parts  = dateStr.split('-').map(Number);
+            const d      = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+            const locale = EFTForge.state.lang === 'zh' ? 'zh-CN' : 'en-US';
             return d.toLocaleDateString(locale, {
                 year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC'
             });

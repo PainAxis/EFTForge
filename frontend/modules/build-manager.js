@@ -1,5 +1,11 @@
 window.EFTForge = window.EFTForge || {};
 
+/* exported resetBuild, stripBuild, showDiscardChangesModal, _confirmDeleteBuild, showSaveBuildDialog,
+   _confirmDeleteSavePanelBuild, showBuildsDialog, showGunBuildsDialog, _loadSavedBuildById, _copySavedBuildById,
+   _tryRepublishBuild, handleBuildVoteClick, _loadPublicBuildByIdx, _loadMyCommunityBuildByIdx,
+   _confirmUnlistByIdx, _startNotificationPolling, importBuildFromCode, exportBuildsBackup,
+   importBuildsFromFile, pasteImportCode -- called from other modules or index.html attributes */
+
 /* ============================================================
    BUILD MANAGER
    Save, Reset, and Share build functionality.
@@ -243,43 +249,6 @@ function syncBuildDisplayName() {
 
 function clearSessionSnapshot() {
     try { localStorage.removeItem("eftforge_session_snapshot"); } catch (_) {}
-}
-
-function showRestoreSnapshotModal(snapshot) {
-    const { t } = EFTForge.lang;
-    const overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    overlay.innerHTML = `
-        <div class="modal-window" style="max-width:340px; text-align:center;">
-            <div class="modal-header">
-                <span class="modal-title">${escapeHtml(t("modal.restoreTitle"))}</span>
-            </div>
-            <div class="modal-body" style="flex-direction:column; align-items:center; gap:12px;">
-                ${snapshot.gunImage
-                    ? `<img src="${escapeHtml(snapshot.gunImage)}" style="max-height:100px; max-width:100%; object-fit:contain;" />`
-                    : ""}
-                <div style="font-size:16px; font-weight:700; color:#f5c542;">${escapeHtml(snapshot.gunName)}</div>
-                <div style="font-size:12px; color:#888;">${escapeHtml(t("modal.restoreSubtitle"))}</div>
-                <div class="modal-row" style="width:100%; margin-top:4px;">
-                    <button class="modal-btn full-width" id="restore-abandon-btn">${escapeHtml(t("modal.restoreAbandon"))}</button>
-                    <button class="modal-btn primary full-width" id="restore-continue-btn">${escapeHtml(t("modal.restoreContinue"))}</button>
-                </div>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(overlay);
-
-    overlay.querySelector("#restore-abandon-btn").addEventListener("click", () => {
-        clearSessionSnapshot();
-        overlay.remove();
-    });
-    overlay.querySelector("#restore-continue-btn").addEventListener("click", async () => {
-        overlay.remove();
-        const payload = decodeBuildCode(snapshot.code);
-        if (payload) await loadBuildFromPayload(payload, snapshot.buildName, true);
-        const { t: _t } = EFTForge.lang;
-        showToast(_t("toast.stateRestored"), _t("toast.stateRestoredMsg"), 3000, "#4CAF50");
-    });
 }
 
 function showDiscardChangesModal(snapshot, onDiscard) {
@@ -1575,10 +1544,8 @@ function _applyPublicBuildsFilter() {
         const fmtErgo   = hasStats && s.ergo      != null ? parseFloat(s.ergo).toFixed(1)                           : "-";
         const fmtVRec   = hasStats && s.recoil_v  != null ? Math.round(s.recoil_v)                                  : "-";
         const fmtHRec   = hasStats && s.recoil_h  != null ? Math.round(s.recoil_h)                                  : "-";
-        const fmtWeight = hasStats && s.weight    != null ? parseFloat(s.weight).toFixed(3) + " kg"                 : "-";
         const fmtEED    = hasStats && s.eed       != null ? (s.eed >= 0 ? "+" : "") + parseFloat(s.eed).toFixed(1)  : "-";
         const fmtOS     = hasStats && s.overswing != null ? (s.overswing ? t("stats.yes") : t("stats.no"))          : "-";
-        const fmtArm    = hasStats && s.arm_stam  != null ? parseFloat(s.arm_stam).toFixed(1) + "s"                 : "-";
         const eedClass  = hasStats && s.eed       != null ? (s.eed >= 0 ? "positive" : "negative")                  : "";
         const osClass   = hasStats && s.overswing != null ? (s.overswing ? "negative" : "positive")                 : "";
 
@@ -2767,7 +2734,7 @@ function _resolveMergeConflicts(conflicts, cleanToAdd, existingBuilds) {
 }
 
 function _finalizeMerge(cleanToAdd, resolvedList, existingBuilds) {
-    let workingBuilds = [...existingBuilds];
+    const workingBuilds = [...existingBuilds];
 
     // Apply overwrites - replace the existing build with the same name+gunId
     for (const { build, action } of resolvedList) {

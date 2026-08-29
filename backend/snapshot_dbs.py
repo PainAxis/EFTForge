@@ -15,9 +15,9 @@ import re
 import shutil
 from datetime import datetime, timezone, timedelta
 
-SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
-BACKUP_DIR  = os.path.join(SCRIPT_DIR, "backups")
-KEEP        = 30  # snapshots to retain per database
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups")
+KEEP = 30  # snapshots to retain per database
 
 DATABASES = ["ratings.db", "builds.db", "changelog.db"]
 
@@ -36,15 +36,13 @@ def snapshot():
             continue
 
         stem = db_name.replace(".db", "")
-        dst  = os.path.join(BACKUP_DIR, f"{stem}_{stamp}.db")
+        dst = os.path.join(BACKUP_DIR, f"{stem}_{stamp}.db")
         shutil.copy2(src, dst)
         print(f"OK    {dst}")
 
         # prune old snapshots for this database, keeping the most recent KEEP files
         pattern = re.compile(rf"^{re.escape(stem)}_\d{{8}}_\d{{6}}\.db$")
-        existing = sorted(
-            f for f in os.listdir(BACKUP_DIR) if pattern.match(f)
-        )
+        existing = sorted(f for f in os.listdir(BACKUP_DIR) if pattern.match(f))
         for old in existing[:-KEEP]:
             os.remove(os.path.join(BACKUP_DIR, old))
             print(f"PRUNED {old}")

@@ -4,7 +4,17 @@ extend-ignore =
     # E501: line too long (already covered by max-line-length)
     E501,
     # W503: line break before binary operator (conflicts with Black)
-    W503
+    W503,
+    # E221/E272: multiple spaces before operator/keyword - used deliberately
+    # throughout the codebase to align columns in dicts and assignments
+    E221,
+    E272,
+    # E402: module level import not at top of file - sync_tarkov_dev.py calls
+    # load_dotenv() before importing modules that read env vars at import time
+    E402,
+    # E712: comparison to True/False - required by SQLAlchemy's query DSL
+    # (Column == True), not a real bug; `is`/truthy checks don't work there
+    E712
 exclude =
     backend/venv,
     backend/__pycache__,

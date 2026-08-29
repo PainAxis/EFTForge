@@ -1,5 +1,8 @@
 window.EFTForge = window.EFTForge || {};
 
+/* exported restoreFleaCache, showBuildView, showPriceView, updateViewToggleLabels --
+   called from other modules or index.html attributes */
+
 // ---------------------------------------------------
 // Price View helpers
 // ---------------------------------------------------
@@ -488,7 +491,6 @@ function _insertHiddenStatsPanel(animate = true) {
 }
 
 function _removeHiddenStatsPanel() {
-  const { t } = EFTForge.lang;
   const existing = document.getElementById("hidden-stats-panel");
   if (!existing) return;
   existing.style.height = existing.scrollHeight + "px";
@@ -510,7 +512,6 @@ function _removeHiddenStatsPanel() {
 // ---------------------------------------------------
 
 function _applyViewMode(priceView) {
-    const { t } = EFTForge.lang;
     EFTForge.state.priceView = priceView;
     const tableContainer = document.getElementById("attachment-table-container");
     if (tableContainer.innerHTML) {

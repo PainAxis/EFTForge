@@ -1,5 +1,8 @@
 window.EFTForge = window.EFTForge || {};
 
+/* exported _clearGunInitCache, gunById, _evictUnusedGunInitCache, _ensureGunInitCached, updateToggleUI,
+   returnToGunSelection, focusGunSearch, focusAttachmentSearch, clearSearch, renderGunList,
+   syncUbglAmmoSelector, installFactoryAttachment -- called from other modules or index.html attributes */
 
 // Apply a server-resolved factory_tree onto a build-tree node.
 // Used both on initial gun select and on reset build so both paths

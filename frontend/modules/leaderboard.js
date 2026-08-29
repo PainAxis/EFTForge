@@ -14,23 +14,23 @@ window.EFTForge = window.EFTForge || {};
 
 window.EFTForge.leaderboard = (function () {
 
-    var _mode      = 'builds';
-    var _period    = '2w';
-    var _sort      = 'likes';
-    var _category  = 'all';
-    var _gunFilter = 'all';
-    var _cache     = {};  // keyed by "mode:period:sort"
+    let _mode      = 'builds';
+    let _period    = '2w';
+    let _sort      = 'likes';
+    let _category  = 'all';
+    let _gunFilter = 'all';
+    const _cache     = {};  // keyed by "mode:period:sort"
 
-    var _clearMarqueeTimers = EFTForge.utils._clearMarqueeTimers;
-    var _initMarqueeText    = EFTForge.utils._initMarqueeText;
+    const _clearMarqueeTimers = EFTForge.utils._clearMarqueeTimers;
+    const _initMarqueeText    = EFTForge.utils._initMarqueeText;
 
     /* ===========================
        PUBLIC API
     =========================== */
 
     function showPanel() {
-        var overlay  = document.getElementById('leaderboard-overlay');
-        var backdrop = document.getElementById('leaderboard-backdrop');
+        const overlay  = document.getElementById('leaderboard-overlay');
+        const backdrop = document.getElementById('leaderboard-backdrop');
         if (!overlay) return;
 
         // reset filter dropdowns to defaults each open
@@ -49,19 +49,19 @@ window.EFTForge.leaderboard = (function () {
     }
 
     function hidePanel() {
-        var overlay  = document.getElementById('leaderboard-overlay');
-        var backdrop = document.getElementById('leaderboard-backdrop');
+        const overlay  = document.getElementById('leaderboard-overlay');
+        const backdrop = document.getElementById('leaderboard-backdrop');
         if (overlay)  overlay.classList.remove('visible');
         if (backdrop) backdrop.classList.remove('visible');
         document.getElementById('main-container')?.removeAttribute('inert');
     }
 
     function onLangChange() {
-        var overlay = document.getElementById('leaderboard-overlay');
+        const overlay = document.getElementById('leaderboard-overlay');
         if (!overlay || !overlay.classList.contains('visible')) return;
         _renderControls();
         // re-render cached data in new language
-        var key = _cacheKey();
+        const key = _cacheKey();
         if (_cache[key]) {
             _renderEntries(_cache[key]);
         }
@@ -76,17 +76,17 @@ window.EFTForge.leaderboard = (function () {
     }
 
     function _renderControls() {
-        var t = EFTForge.lang.t;
+        const t = EFTForge.lang.t;
 
         // update header title
-        var title = document.getElementById('leaderboard-header-title');
+        const title = document.getElementById('leaderboard-header-title');
         if (title) title.textContent = t('lb.title');
 
         // mode toggle
-        var buildsBtn = document.getElementById('lb-mode-builds');
-        var attBtn    = document.getElementById('lb-mode-att');
+        const buildsBtn = document.getElementById('lb-mode-builds');
+        const attBtn    = document.getElementById('lb-mode-att');
         if (buildsBtn) {
-            var infoSpan = document.getElementById('lb-builds-info-btn');
+            const infoSpan = document.getElementById('lb-builds-info-btn');
             buildsBtn.textContent = t('lb.builds') + ' ';
             if (infoSpan) buildsBtn.appendChild(infoSpan);
             buildsBtn.classList.toggle('active', _mode === 'builds');
@@ -103,8 +103,8 @@ window.EFTForge.leaderboard = (function () {
         ], _period);
 
         // sort + category dropdowns - only visible for attachments
-        var isAtt = _mode === 'attachments';
-        var sortRow = document.getElementById('lb-sort-row');
+        const isAtt = _mode === 'attachments';
+        const sortRow = document.getElementById('lb-sort-row');
         if (sortRow) sortRow.style.display = isAtt ? '' : 'none';
 
         _refreshCustomSelect('lb-sort-select', [
@@ -112,18 +112,18 @@ window.EFTForge.leaderboard = (function () {
             { value: 'dislikes', label: t('lb.sortDislikes') },
         ], _sort);
 
-        var catRow = document.getElementById('lb-category-row');
+        const catRow = document.getElementById('lb-category-row');
         if (catRow) catRow.style.display = isAtt ? '' : 'none';
 
         // build category options from full known slot list
-        var _allSlots = [
+        const _allSlots = [
             'Barrel', 'Muzzle', 'Stock', 'Handguard', 'Scope',
             'Front Sight', 'Rear Sight', 'Pistol Grip', 'Magazine',
             'Gas Block', 'Foregrip', 'Ch. Handle', 'Mount', 'Tactical',
             'Bipod', 'Receiver', 'Ubgl', 'Grip', 'Trigger', 'Hammer',
             'Chamber', 'Catch',
         ];
-        var catOptions = [{ value: 'all', label: t('lb.categoryAll') }];
+        const catOptions = [{ value: 'all', label: t('lb.categoryAll') }];
         _allSlots.forEach(function (slot) {
             catOptions.push({ value: slot, label: t('slot.' + slot) || slot });
         });
@@ -134,20 +134,20 @@ window.EFTForge.leaderboard = (function () {
         _refreshCustomSelect('lb-category-select', catOptions, _category);
 
         // gun filter row - only visible for builds
-        var gunRow = document.getElementById('lb-gun-row');
+        const gunRow = document.getElementById('lb-gun-row');
         if (gunRow) gunRow.style.display = _mode === 'builds' ? '' : 'none';
         _updateGunInputLabel();
 
-        var infoBtn = document.getElementById('lb-builds-info-btn');
+        const infoBtn = document.getElementById('lb-builds-info-btn');
         if (infoBtn) infoBtn.dataset.tooltip = t('lb.buildsInfo');
 
-        var capLabel = document.getElementById('lb-cap-label');
+        const capLabel = document.getElementById('lb-cap-label');
         if (capLabel) capLabel.textContent = _getCapLabel();
 
     }
 
     function _getCapLabel() {
-        var t = EFTForge.lang.t;
+        const t = EFTForge.lang.t;
         if (_mode === 'builds') {
             return _period === '2w' ? t('lb.top10') : t('lb.top50');
         } else {
@@ -160,7 +160,7 @@ window.EFTForge.leaderboard = (function () {
     =========================== */
 
     async function _loadData() {
-        var key = _cacheKey();
+        const key = _cacheKey();
         if (_cache[key]) {
             _renderEntries(_cache[key]);
             return;
@@ -169,7 +169,7 @@ window.EFTForge.leaderboard = (function () {
         _showLoading();
 
         try {
-            var data;
+            let data;
             if (_mode === 'builds') {
                 data = await EFTForge.api.fetchLeaderboardBuilds(_period);
             } else {
@@ -188,43 +188,43 @@ window.EFTForge.leaderboard = (function () {
     =========================== */
 
     function _showLoading() {
-        var body = document.getElementById('leaderboard-body');
+        const body = document.getElementById('leaderboard-body');
         if (!body) return;
-        var t = EFTForge.lang.t;
+        const t = EFTForge.lang.t;
         body.innerHTML = '<div class="lb-loading">' + t('news.loading') + '</div>';
     }
 
     function _showError() {
-        var body = document.getElementById('leaderboard-body');
+        const body = document.getElementById('leaderboard-body');
         if (!body) return;
-        var t = EFTForge.lang.t;
+        const t = EFTForge.lang.t;
         body.innerHTML = '<div class="lb-empty">' + t('lb.loadError') + '</div>';
     }
 
     function _renderEntries(data) {
-        var body = document.getElementById('leaderboard-body');
+        const body = document.getElementById('leaderboard-body');
         if (!body) return;
         _clearMarqueeTimers();
 
-        var t    = EFTForge.lang.t;
-        var lang = EFTForge.state && EFTForge.state.lang;
+        const t    = EFTForge.lang.t;
+        const lang = EFTForge.state && EFTForge.state.lang;
 
         if (!data || data.length === 0) {
             body.innerHTML = '<div class="lb-empty">' + t('lb.empty') + '</div>';
             return;
         }
 
-        var html = '<ol class="lb-list">';
+        let html = '<ol class="lb-list">';
 
         if (_mode === 'builds') {
-            var allGuns    = (EFTForge.state && EFTForge.state.allGuns) || [];
-            var buildData  = _gunFilter === 'all' ? data : data.filter(function (e) { return e.gun_id === _gunFilter; });
+            const allGuns    = (EFTForge.state && EFTForge.state.allGuns) || [];
+            const buildData  = _gunFilter === 'all' ? data : data.filter(function (e) { return e.gun_id === _gunFilter; });
             if (buildData.length === 0) {
                 body.innerHTML = '<div class="lb-empty">' + t('lb.empty') + '</div>';
                 return;
             }
             html += buildData.map(function (entry, idx) {
-                var authorName;
+                let authorName;
                 if (entry.is_admin_build) {
                     authorName = lang === 'zh'
                         ? (entry.author_display_name_zh || entry.author_display_name || 'Morph1ne')
@@ -232,19 +232,19 @@ window.EFTForge.leaderboard = (function () {
                 } else {
                     authorName = entry.user_display_name || t('modal.anonymousAuthor');
                 }
-                var rankClass = entry.rank === 1 ? ' lb-rank-gold' : entry.rank === 2 ? ' lb-rank-silver' : entry.rank === 3 ? ' lb-rank-bronze' : '';
-                var gunObj    = allGuns.find(function (g) { return g.id === entry.gun_id; });
-                var gunName   = (gunObj && gunObj.name) || entry.gun_name || entry.gun_id;
+                const rankClass = entry.rank === 1 ? ' lb-rank-gold' : entry.rank === 2 ? ' lb-rank-silver' : entry.rank === 3 ? ' lb-rank-bronze' : '';
+                const gunObj    = allGuns.find(function (g) { return g.id === entry.gun_id; });
+                const gunName   = (gunObj && gunObj.name) || entry.gun_name || entry.gun_id;
                 // card_image_url is gitee-hosted like avatars - proxy it the same way so it
                 // doesn't hotlink gitee directly (slow/unreliable) while the avatar loads fast.
-                var imgSrc    = proxyAvatarUrl(entry.card_image_url) || (gunObj && (gunObj.image_512_link || gunObj.icon_link)) || '';
-                var imgHtml   = imgSrc
+                const imgSrc    = proxyAvatarUrl(entry.card_image_url) || (gunObj && (gunObj.image_512_link || gunObj.icon_link)) || '';
+                const imgHtml   = imgSrc
                     ? '<img class="lb-build-img" src="' + _escHtml(imgSrc) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
                     : '<div class="lb-build-img-placeholder"></div>';
-                var avatarSrc = entry.is_admin_build
+                const avatarSrc = entry.is_admin_build
                     ? (proxyAvatarUrl(entry.author_avatar_url) || './news/images/devProfilePic.jpg')
                     : (proxyAvatarUrl(entry.user_avatar_url)   || './assets/images/tarkovcitizen.jpg');
-                var avatarHtml = '<img class="lb-author-avatar" src="' + _escHtml(avatarSrc) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.src=\'./assets/images/tarkovcitizen.jpg\';this.onerror=null;">';
+                const avatarHtml = '<img class="lb-author-avatar" src="' + _escHtml(avatarSrc) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.src=\'./assets/images/tarkovcitizen.jpg\';this.onerror=null;">';
                 return (
                     '<li class="lb-entry lb-entry-build" style="--lb-i:' + idx + '" data-idx="' + (_cache[_cacheKey()].indexOf(entry)) + '">' +
                     '<span class="lb-rank' + rankClass + '">' + entry.rank + '</span>' +
@@ -259,18 +259,18 @@ window.EFTForge.leaderboard = (function () {
                 );
             }).join('');
         } else {
-            var voteKey       = _sort === 'likes' ? 'like_count' : 'dislike_count';
-            var voteIcon      = _sort === 'likes' ? './assets/images/icon-fir.png' : './assets/images/Battlestate Games.svg';
-            var voteIconClass = _sort === 'likes' ? 'lb-vote-icon lb-vote-icon-like' : 'lb-vote-icon lb-vote-icon-dislike';
-            var filtered = _category === 'all' ? data : data.filter(function (e) { return e.item_category === _category; });
+            const voteKey       = _sort === 'likes' ? 'like_count' : 'dislike_count';
+            const voteIcon      = _sort === 'likes' ? './assets/images/icon-fir.png' : './assets/images/Battlestate Games.svg';
+            const voteIconClass = _sort === 'likes' ? 'lb-vote-icon lb-vote-icon-like' : 'lb-vote-icon lb-vote-icon-dislike';
+            const filtered = _category === 'all' ? data : data.filter(function (e) { return e.item_category === _category; });
             if (filtered.length === 0) {
                 body.innerHTML = '<div class="lb-empty">' + t('lb.empty') + '</div>';
                 return;
             }
             html += filtered.map(function (entry, idx) {
-                var name = (lang === 'zh' && entry.item_name_zh) ? entry.item_name_zh : (entry.item_name || entry.item_id);
-                var rankClass = entry.rank === 1 ? ' lb-rank-gold' : entry.rank === 2 ? ' lb-rank-silver' : entry.rank === 3 ? ' lb-rank-bronze' : '';
-                var iconHtml = entry.icon_link
+                const name = (lang === 'zh' && entry.item_name_zh) ? entry.item_name_zh : (entry.item_name || entry.item_id);
+                const rankClass = entry.rank === 1 ? ' lb-rank-gold' : entry.rank === 2 ? ' lb-rank-silver' : entry.rank === 3 ? ' lb-rank-bronze' : '';
+                const iconHtml = entry.icon_link
                     ? '<img class="lb-att-icon" src="' + _escHtml(entry.icon_link) + '" alt="" loading="lazy">'
                     : '<div class="lb-att-icon-placeholder"></div>';
                 return (
@@ -296,8 +296,8 @@ window.EFTForge.leaderboard = (function () {
         if (_mode === 'builds') {
             body.querySelectorAll('.lb-entry-build').forEach(function (el) {
                 el.addEventListener('click', function () {
-                    var idx = parseInt(el.dataset.idx, 10);
-                    var entry = (_cache[_cacheKey()] || [])[idx];
+                    const idx = parseInt(el.dataset.idx, 10);
+                    const entry = (_cache[_cacheKey()] || [])[idx];
                     if (entry) _loadBuild(entry);
                 });
             });
@@ -307,9 +307,9 @@ window.EFTForge.leaderboard = (function () {
     async function _loadBuild(build) {
         if (!build || !build.pairs) return;
 
-        var t    = EFTForge.lang.t;
-        var lang = EFTForge.state && EFTForge.state.lang;
-        var authorName, avatarUrl;
+        const t    = EFTForge.lang.t;
+        const lang = EFTForge.state && EFTForge.state.lang;
+        let authorName, avatarUrl;
         if (build.is_admin_build) {
             authorName = lang === 'zh'
                 ? (build.author_display_name_zh || build.author_display_name || 'Morph1ne')
@@ -320,7 +320,7 @@ window.EFTForge.leaderboard = (function () {
             avatarUrl  = proxyAvatarUrl(build.user_avatar_url)  || null;
         }
 
-        var communityBuildInfo = {
+        const communityBuildInfo = {
             pairsKey:     _pairsKey(build.pairs),
             authorName:   authorName,
             avatarUrl:    avatarUrl,
@@ -332,7 +332,7 @@ window.EFTForge.leaderboard = (function () {
 
         EFTForge.api.recordBuildLoad(build.build_id);
 
-        var payload = { g: build.gun_id, p: build.pairs, a: build.ammo_id || null };
+        const payload = { g: build.gun_id, p: build.pairs, a: build.ammo_id || null };
         if (document.body.dataset.mobile !== 'true') {
             await EFTForge.tabs.createTabFromPayload(payload, build.build_name, communityBuildInfo, false);
         } else {
@@ -375,20 +375,20 @@ window.EFTForge.leaderboard = (function () {
         if (_gunFilter === gunId) return;
         _gunFilter = gunId;
         _updateGunInputLabel();
-        var cached = _cache[_cacheKey()];
+        const cached = _cache[_cacheKey()];
         if (cached) _renderEntries(cached);
     }
 
     function _updateGunInputLabel() {
-        var input = document.getElementById('lb-gun-input');
+        const input = document.getElementById('lb-gun-input');
         if (!input) return;
-        var t = EFTForge.lang.t;
+        const t = EFTForge.lang.t;
         if (_gunFilter === 'all') {
             input.value = '';
             input.placeholder = t('lb.gunFilterAll');
         } else {
-            var allGuns = (EFTForge.state && EFTForge.state.allGuns) || [];
-            var gun = allGuns.find(function (g) { return g.id === _gunFilter; });
+            const allGuns = (EFTForge.state && EFTForge.state.allGuns) || [];
+            const gun = allGuns.find(function (g) { return g.id === _gunFilter; });
             input.value = gun ? gun.name : _gunFilter;
             input.placeholder = '';
         }
@@ -397,7 +397,7 @@ window.EFTForge.leaderboard = (function () {
     function _setCategory(cat) {
         if (_category === cat) return;
         _category = cat;
-        var cached = _cache[_cacheKey()];
+        const cached = _cache[_cacheKey()];
         if (cached) _renderEntries(cached);
     }
 
@@ -406,18 +406,18 @@ window.EFTForge.leaderboard = (function () {
     =========================== */
 
     function _initGunSelect() {
-        var input    = document.getElementById('lb-gun-input');
-        var dropdown = document.getElementById('lb-gun-dropdown');
+        const input    = document.getElementById('lb-gun-input');
+        const dropdown = document.getElementById('lb-gun-dropdown');
         if (!input || !dropdown) return;
 
         function _buildList(query) {
-            var t       = EFTForge.lang.t;
-            var allGuns = (EFTForge.state && EFTForge.state.allGuns) || [];
-            var q       = query.trim().toLowerCase();
+            const t       = EFTForge.lang.t;
+            const allGuns = (EFTForge.state && EFTForge.state.allGuns) || [];
+            const q       = query.trim().toLowerCase();
             dropdown.innerHTML = '';
 
             // "All" option
-            var allOpt = document.createElement('div');
+            const allOpt = document.createElement('div');
             allOpt.className = 'lb-gun-option' + (_gunFilter === 'all' ? ' selected' : '');
             allOpt.textContent = t('lb.gunFilterAll');
             allOpt.addEventListener('mousedown', function (e) {
@@ -427,12 +427,12 @@ window.EFTForge.leaderboard = (function () {
             });
             dropdown.appendChild(allOpt);
 
-            var filtered = q
+            const filtered = q
                 ? allGuns.filter(function (g) { return g.name.toLowerCase().indexOf(q) !== -1; })
                 : allGuns;
 
             filtered.forEach(function (gun) {
-                var opt = document.createElement('div');
+                const opt = document.createElement('div');
                 opt.className = 'lb-gun-option' + (_gunFilter === gun.id ? ' selected' : '');
                 opt.textContent = gun.name;
                 opt.addEventListener('mousedown', function (e) {
@@ -469,14 +469,14 @@ window.EFTForge.leaderboard = (function () {
     }
 
     function _refreshCustomSelect(id, options, currentValue) {
-        var sel = document.getElementById(id);
+        const sel = document.getElementById(id);
         if (!sel) return;
         // update option labels (triggers MutationObserver in setupCustomSelect)
-        var existing = document.getElementById(id + '-custom');
+        const existing = document.getElementById(id + '-custom');
         if (existing) existing.remove();
         while (sel.options.length) sel.remove(0);
         options.forEach(function (opt) {
-            var o = document.createElement('option');
+            const o = document.createElement('option');
             o.value = opt.value;
             o.textContent = opt.label;
             if (opt.value === currentValue) o.selected = true;
@@ -507,30 +507,30 @@ window.EFTForge.leaderboard = (function () {
 
     function _init() {
         // wire up mode toggle buttons
-        var modeButtons = [
+        const modeButtons = [
             { id: 'lb-mode-builds', fn: function () { _setMode('builds'); } },
             { id: 'lb-mode-att',    fn: function () { _setMode('attachments'); } },
         ];
         modeButtons.forEach(function (item) {
-            var el = document.getElementById(item.id);
+            const el = document.getElementById(item.id);
             if (el) el.addEventListener('click', item.fn);
         });
 
         _initGunSelect();
 
         // wire up period and sort dropdowns
-        var periodSel = document.getElementById('lb-period-select');
+        const periodSel = document.getElementById('lb-period-select');
         if (periodSel) periodSel.addEventListener('change', function (e) { _setPeriod(e.target.value); });
 
-        var sortSel = document.getElementById('lb-sort-select');
+        const sortSel = document.getElementById('lb-sort-select');
         if (sortSel) sortSel.addEventListener('change', function (e) { _setSort(e.target.value); });
 
-        var catSel = document.getElementById('lb-category-select');
+        const catSel = document.getElementById('lb-category-select');
         if (catSel) catSel.addEventListener('change', function (e) { _setCategory(e.target.value); });
 
         document.addEventListener('keydown', function (e) {
             if (e.key !== 'Escape') return;
-            var overlay = document.getElementById('leaderboard-overlay');
+            const overlay = document.getElementById('leaderboard-overlay');
             if (!overlay || !overlay.classList.contains('visible')) return;
             e.stopPropagation();
             hidePanel();

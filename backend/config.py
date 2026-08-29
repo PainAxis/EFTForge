@@ -4,6 +4,7 @@ import sys
 # Load .env file if present (dev convenience; prod should set vars directly)
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
@@ -64,16 +65,16 @@ if DESKTOP_MODE:
     DATA_DIR = _resolve_desktop_data_dir()
     # Lock/notice/last-sync files written by main.py and the sync scripts.
     RUNTIME_DIR = DATA_DIR
-    _default_db_url           = _sqlite_url(os.path.join(DATA_DIR, "tarkov.db"))
-    _default_ratings_db_url   = _sqlite_url(os.path.join(DATA_DIR, "ratings.db"))
-    _default_builds_db_url    = _sqlite_url(os.path.join(DATA_DIR, "builds.db"))
+    _default_db_url = _sqlite_url(os.path.join(DATA_DIR, "tarkov.db"))
+    _default_ratings_db_url = _sqlite_url(os.path.join(DATA_DIR, "ratings.db"))
+    _default_builds_db_url = _sqlite_url(os.path.join(DATA_DIR, "builds.db"))
     _default_changelog_db_url = _sqlite_url(os.path.join(DATA_DIR, "changelog.db"))
 else:
     DATA_DIR = _BACKEND_DIR
     RUNTIME_DIR = _BACKEND_DIR
-    _default_db_url           = "sqlite:///./tarkov.db"
-    _default_ratings_db_url   = "sqlite:///./ratings.db"
-    _default_builds_db_url    = "sqlite:///./builds.db"
+    _default_db_url = "sqlite:///./tarkov.db"
+    _default_ratings_db_url = "sqlite:///./ratings.db"
+    _default_builds_db_url = "sqlite:///./builds.db"
     _default_changelog_db_url = "sqlite:///./changelog.db"
 
 # Static frontend served by the local backend in desktop mode.
@@ -111,7 +112,8 @@ BUILDS_DB_URL = os.environ.get("BUILDS_DB_URL", _default_builds_db_url)
 # Stat changelog - separate file so it survives tarkov.db resets
 CHANGELOG_DB_URL = os.environ.get("CHANGELOG_DB_URL", _default_changelog_db_url)
 IP_HASH_SECRET = os.environ.get("IP_HASH_SECRET", "")
-ADMIN_API_KEY  = os.environ.get("ADMIN_API_KEY",  "")
+ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")
+
 
 def _load_or_create_secret(filename: str) -> str:
     """Desktop mode: generate a secret once and persist it in the data dir so it
@@ -125,6 +127,7 @@ def _load_or_create_secret(filename: str) -> str:
     except OSError:
         pass
     import secrets as _secrets
+
     value = _secrets.token_hex(32)
     with open(path, "w", encoding="utf-8") as f:
         f.write(value)
@@ -172,6 +175,4 @@ if not IP_HASH_SECRET:
 if not ADMIN_API_KEY:
     _missing.append("ADMIN_API_KEY is not set - admin endpoints will return 503.")
 if _missing and not DESKTOP_MODE:
-    raise RuntimeError(
-        "Missing required environment variables:\n" + "\n".join(f"  - {m}" for m in _missing)
-    )
+    raise RuntimeError("Missing required environment variables:\n" + "\n".join(f"  - {m}" for m in _missing))

@@ -1,5 +1,8 @@
 window.EFTForge = window.EFTForge || {};
 
+/* exported handleVoteClick, openSlotSelector, changeSort, updateComboBalance, togglePurchasableOnly,
+   toggleCompareMode, setComboView -- called from other modules or index.html attributes */
+
 // ---------------------------------------------------
 // Price helpers for the attachment table
 // ---------------------------------------------------
@@ -1107,7 +1110,7 @@ function renderAttachmentRows(items) {
     // Build stat cells - add delta badges when comparing against a baseline
     const showDeltas = EFTForge.state.compareMode && !!baselineEntry && !isBaselineRow;
 
-    let weightCell, recoilCell, ergoCell, accCell, evoCell;
+    let weightCell, recoilCell, ergoCell, evoCell;
 
     // Accuracy cell content: barrel COI takes priority over % modifier
     const itemCOI = item.center_of_impact ?? null;
@@ -1121,7 +1124,7 @@ function renderAttachmentRows(items) {
     } else {
         accCellContent = `-`;
     }
-    accCell = `<td class="acc-cell">${accCellContent}</td>`;
+    const accCell = `<td class="acc-cell">${accCellContent}</td>`;
 
     if (showDeltas) {
         let wD, rD, eD, evD;
@@ -1632,7 +1635,7 @@ function _findComboRootSlot() {
     return { parentNode: targetParent, slotId: targetSlotId, isLeftQueueRoot: false };
 }
 
-let _comboChildSlotCache   = {};   // item_id -> slots[]  (used only for availability check)
+const _comboChildSlotCache   = {};   // item_id -> slots[]  (used only for availability check)
 let _comboAvailableChecked = false; // true once we've finished the availability check for the current slot
 let _comboAbortController  = null;  // AbortController for the in-flight comboFull request
 let _comboCalcInFlight     = false; // true while a comboFull fetch is in progress
@@ -1910,7 +1913,6 @@ async function openComboView() {
     const base       = result.base;
     const baseEED     = parseFloat(base.evo_ergo_delta ?? 0);
     const baseRecoilV = base.recoil_vertical ?? null;
-    const baseRecoilH = base.recoil_horizontal ?? null;
     const baseErgo    = parseFloat(base.total_ergo ?? 0);
     const baseWeight  = parseFloat(base.total_weight ?? 0);
 
