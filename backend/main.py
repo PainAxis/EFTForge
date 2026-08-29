@@ -458,12 +458,34 @@ _AVATAR_COOLDOWN = 90.0
 _username_last: dict[str, float] = {}
 _USERNAME_COOLDOWN = 60.0
 
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+def _strip_html_tags(s: str) -> str:
+    """Strip HTML tags in O(n) time.
+
+    A backtracking regex like <[^>]+> is quadratic on adversarial input with
+    many '<' and no closing '>' (each failed match rescans to the end of the
+    string). This walks the string once, only searching forward from each
+    '<' and giving up on the whole string once one search comes up empty.
+    """
+    out = []
+    i, n = 0, len(s)
+    no_more_close = False
+    while i < n:
+        if not no_more_close and s[i] == "<":
+            j = s.find(">", i + 1)
+            if j == -1:
+                no_more_close = True
+            elif j > i + 1:
+                i = j + 1
+                continue
+        out.append(s[i])
+        i += 1
+    return "".join(out)
 
 
 def _sanitize_build_name(raw: str) -> str:
     """Strip HTML tags and collapse whitespace."""
-    return " ".join(_HTML_TAG_RE.sub("", raw).split())
+    return " ".join(_strip_html_tags(raw).split())
 
 
 def _check_client_ban(client_id_hash: str, db: Session) -> None:
@@ -3320,7 +3342,7 @@ def _process_and_upload_avatar(image_bytes: bytes, ip_hash: str) -> str:
 
 
 def _sanitize_username(raw: str) -> str:
-    return " ".join(_HTML_TAG_RE.sub("", raw).split())[:30]
+    return " ".join(_strip_html_tags(raw).split())[:30]
 
 
 def _validate_avatar_url(url: str | None) -> str | None:
@@ -4599,7 +4621,7 @@ def post_build_comment(
         wait = int(_COMMENT_COOLDOWN - (now - last)) + 1
         raise HTTPException(status_code=429, detail=f"Please wait {wait}s before posting another comment.")
 
-    cleaned = _HTML_TAG_RE.sub("", content).strip()
+    cleaned = _strip_html_tags(content).strip()
     if not cleaned:
         raise HTTPException(status_code=422, detail="Comment cannot be empty.")
     if len(cleaned) > 280:
