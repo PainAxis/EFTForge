@@ -262,6 +262,12 @@ The EvoErgo concept was originally developed by **SpaceMonkey37**. EFTForge impl
 
 ---
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local dev setup, lint/test commands, and code style. Security vulnerabilities should be reported per [SECURITY.md](SECURITY.md) rather than as public issues.
+
+---
+
 ## License
 
 MIT - see [LICENSE](LICENSE) for details.

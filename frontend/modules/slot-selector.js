@@ -1648,7 +1648,8 @@ function renderAttachmentRows(items) {
         }
 
         if (entry.hasConflict) {
-            showToast(
+            replaceToast(
+                "attachment-conflict",
                 t("toast.attachmentConflict"),
                 `${item.name}\n${entry.conflictName}`
             );
@@ -2495,7 +2496,7 @@ function _buildComboRow(entry) {
         if (entry.conflict) {
             const { t } = EFTForge.lang;
             const conflictText = t(entry.conflict.reason_key) + (entry.conflict.reason_name ?? "");
-            showToast(t("toast.attachmentConflict"), `${parentItem.name}\n${conflictText}`);
+            replaceToast("attachment-conflict", t("toast.attachmentConflict"), `${parentItem.name}\n${conflictText}`);
             if (EFTForge.state.gridView) {
                 const conflictsWithGun = entry.conflict.conflicting_item_id === EFTForge.state.currentGun?.id;
                 if (conflictsWithGun) {

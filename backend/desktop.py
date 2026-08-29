@@ -249,10 +249,24 @@ def _items_fingerprint(db_path: str):
         conn.close()
 
 
+def _table_columns(conn, schema, table):
+    return [row[1] for row in conn.execute(f"PRAGMA {schema}.table_info({table})")]
+
+
 def _copy_scratch_into_live() -> None:
     """Replace the live tables' rows with the scratch DB's in one transaction,
     so queries see either the full old data or the full new data - never a
-    half-refilled table."""
+    half-refilled table.
+
+    Copies by explicit column NAME, not "SELECT *" position - the live table's
+    columns are in ALTER-TABLE-append order (i.e. always growing at the end),
+    which does not necessarily match the current model's declaration order in
+    scratch, so a positional copy can silently shuffle values into the wrong
+    columns. Only columns present in both tables are copied; a column that
+    exists solely in scratch (freshly added to the model, not yet migrated
+    into the live schema) is skipped for this run and picked up once main.py's
+    startup migration adds it to the live table.
+    """
     conn = sqlite3.connect(_LIVE_DB_PATH, timeout=10)
     try:
         conn.execute("ATTACH DATABASE ? AS scratch", (_SCRATCH_DB_PATH,))
@@ -260,7 +274,10 @@ def _copy_scratch_into_live() -> None:
         for table in _SYNC_TABLES:
             conn.execute(f"DELETE FROM {table}")
         for table in reversed(_SYNC_TABLES):
-            conn.execute(f"INSERT INTO {table} SELECT * FROM scratch.{table}")
+            live_cols = _table_columns(conn, "main", table)
+            scratch_cols = set(_table_columns(conn, "scratch", table))
+            cols = ", ".join(c for c in live_cols if c in scratch_cols)
+            conn.execute(f"INSERT INTO {table} ({cols}) SELECT {cols} FROM scratch.{table}")
         conn.commit()
     except Exception:
         conn.rollback()
