@@ -42,6 +42,12 @@ class OptimizeParams:
     ergo_weight: float = 1.0
     recoil_weight: float = 1.0
     price_weight: float = 0.0
+    # EvoErgo mode replaces the weighted ergo/recoil/price objective above with
+    # a tangent-sweep search for the build with the best true EED (see
+    # optimizer/milp.py). evo_ergo_k lets a caller pin a specific tangent slope
+    # instead of sweeping the default anchor set - mainly useful for tests.
+    use_evo_ergo: bool = False
+    evo_ergo_k: Optional[float] = None
     trader_levels: Optional[Dict[str, int]] = None
     flea_available: bool = True
     player_level: Optional[int] = None

@@ -65,6 +65,36 @@ class TestUnconstrainedOptimize:
         assert result["final_stats"] == expected
 
 
+class TestEvoErgoMode:
+    def test_solves_optimal(self, db):
+        result = optimize_weapon(db, M4A1_ID, OptimizeParams(use_evo_ergo=True))
+        assert result["status"] == "optimal"
+        assert "evo_ergo_delta" in result["final_stats"]
+
+    def test_beats_or_matches_plain_weighted_objective_on_eed(self, db):
+        """EvoErgo mode explicitly searches for the best ergo/weight tradeoff
+        (true EED), so it should never do worse on that specific metric than
+        the plain weighted objective, which doesn't optimize for it at all."""
+        plain = optimize_weapon(db, M4A1_ID, OptimizeParams())
+        evo = optimize_weapon(db, M4A1_ID, OptimizeParams(use_evo_ergo=True))
+        assert plain["status"] == "optimal"
+        assert evo["status"] == "optimal"
+        assert evo["final_stats"]["evo_ergo_delta"] >= plain["final_stats"]["evo_ergo_delta"]
+
+    def test_explicit_k_override_matches_manual_stats_call(self, db):
+        """A pinned evo_ergo_k should skip the sweep and solve once - just
+        confirms the override path runs and still reports real, consistent stats."""
+        result = optimize_weapon(db, M4A1_ID, OptimizeParams(use_evo_ergo=True, evo_ergo_k=0.15))
+        assert result["status"] == "optimal"
+
+        from models_items import Item
+
+        weapon = db.query(Item).filter(Item.id == M4A1_ID).first()
+        mods = {m.id: m for m in db.query(Item).filter(Item.id.in_(result["selected_items"])).all()}
+        expected = _compute_stats(weapon, result["selected_items"], mods)
+        assert result["final_stats"] == expected
+
+
 class TestSlotPairOrdering:
     def test_pairs_are_parent_before_child(self, db):
         """frontend/modules/build-manager.js's loadBuildFromPayload installs

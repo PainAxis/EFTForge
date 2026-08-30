@@ -143,6 +143,10 @@ window.EFTForge.optimizer = (function () {
 
             <div class="optimizer-field">
                 <label class="modal-label">${_t('optimizer.priorities')}</label>
+                <label class="optimizer-checkbox-row">
+                    <input type="checkbox" id="optimizer-use-evo-ergo">
+                    ${_t('optimizer.useEvoErgo')}
+                </label>
                 ${_sliderRow('optimizer-ergo-weight', _t('optimizer.ergonomics'), 1)}
                 ${_sliderRow('optimizer-recoil-weight', _t('optimizer.recoil'), 1)}
                 ${_sliderRow('optimizer-price-weight', _t('optimizer.price'), 0.3)}
@@ -231,6 +235,7 @@ window.EFTForge.optimizer = (function () {
         const state = window.EFTForge.state || {};
         const body = {
             weapon_id: weaponId,
+            use_evo_ergo: document.getElementById('optimizer-use-evo-ergo').checked,
             ergo_weight: Number(document.getElementById('optimizer-ergo-weight').value),
             recoil_weight: Number(document.getElementById('optimizer-recoil-weight').value),
             price_weight: Number(document.getElementById('optimizer-price-weight').value),

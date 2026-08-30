@@ -1926,6 +1926,8 @@ def build_optimize(
     player_level: int | None = Body(default=None),
     strength_level: int = Body(default=10),
     equip_ergo_modifier: float = Body(default=0.0),
+    use_evo_ergo: bool = Body(default=False),
+    evo_ergo_k: float | None = Body(default=None),
     db: Session = Depends(get_db),
 ):
     if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
@@ -1955,6 +1957,7 @@ def build_optimize(
         weapon_id, max_price, min_ergonomics, max_recoil_v, max_weight, min_mag_capacity, min_sighting_range,
         tuple(sorted(include_items)), tuple(sorted(exclude_items)), ergo_weight, recoil_weight, price_weight,
         tuple(sorted((trader_levels or {}).items())), flea_available, player_level, strength_level, equip_ergo_modifier,
+        use_evo_ergo, evo_ergo_k,
     )
     with _OPTIMIZE_CACHE_LOCK:
         cached = _OPTIMIZE_CACHE.get(_cache_key)
@@ -1978,6 +1981,8 @@ def build_optimize(
         player_level=player_level,
         strength_level=strength_level,
         equip_ergo_modifier=equip_ergo_modifier,
+        use_evo_ergo=use_evo_ergo,
+        evo_ergo_k=evo_ergo_k,
     )
     result = optimize_weapon(db, weapon_id, params)
 
