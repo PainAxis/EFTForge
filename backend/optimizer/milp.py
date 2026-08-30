@@ -1,6 +1,5 @@
-"""MVP MILP formulation: weapon + mods only (no presets-as-base, no
-Found-in-Raid fallback pricing, no multi-slot placement variables yet - see
-optimizer/solver.py's module docstring for what's deferred and why).
+"""MILP formulation: weapon + mods (no presets-as-base yet - see
+optimizer/solver.py's module docstring for what's still deferred and why).
 
 Solved with scipy.optimize.milp (HiGHS backend) - the same solver engine the
 original optimizer's WASM frontend already uses.
@@ -14,6 +13,13 @@ from scipy.optimize import milp, LinearConstraint, Bounds
 from stats import _compute_stats
 
 TIEBREAK = 0.01
+
+# Hard cap on a single HiGHS solve. A normal solve finishes in well under a
+# second; this only ever matters for a pathological case (an earlier attempt
+# at multi-slot placement variables produced a MILP that ran for 30+ minutes
+# without finishing). Without a cap, that kind of case would hang a backend
+# worker indefinitely instead of degrading gracefully.
+SOLVE_TIME_LIMIT_SECONDS = 120
 
 # Reference scales so the 0-1 priority sliders behave consistently regardless
 # of a weapon's absolute ergo/recoil/price magnitudes.
@@ -139,11 +145,17 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
     # 2. Dependency - an item needs at least one of its owning slots' owners
     # selected (or to sit directly on the weapon). Items reachable through more
     # than one parent are treated as "usable via any of them" (an OR over
-    # owners) rather than tracked with per-slot placement variables - this is
-    # the MVP's one known modeling gap: a multi-parent item can, in rare
-    # cases, get counted toward two different required-slot constraints at
-    # once even though it can only physically occupy one. Most attachments
-    # only have a single valid parent, so this doesn't affect the common case.
+    # owners) rather than tracked with per-slot placement variables. Tried a
+    # full placement-variable model (see git history) - it's the structurally
+    # correct fix (checked on the M4A1: 418 of 579 reachable attachments have
+    # more than one valid parent, so this is common, not a rare edge case),
+    # but it blew up solve time badly enough in testing (full suite went from
+    # single-digit seconds to 10+ minutes without finishing) that it's not
+    # viable without real solver-performance work (tighter symmetry-breaking,
+    # a solve time limit, or restricting placement vars to only the items that
+    # actually matter for a required-slot conflict). Reverted; the narrow
+    # correctness gap this leaves - a multi-parent item double-counting toward
+    # two different required-slot constraints at once - stays open.
     for item_id in item_ids:
         owners = {owner for _, owner in item_to_valid_slots.get(item_id, [])}
         if weapon_id in owners:
@@ -214,6 +226,7 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
     base_ergo = weapon.base_ergonomics or 0
     base_weight = weapon.weight or 0
     base_recoil_v = weapon.recoil_vertical
+    base_recoil_h = weapon.recoil_horizontal
 
     if params.max_price is not None:
         cb.le({idx[i]: prices[i]["price_rub"] for i in item_ids}, params.max_price)
@@ -226,6 +239,23 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
             {idx[i]: base_recoil_v * (mods[i].recoil_modifier or 0) for i in item_ids},
             params.max_recoil_v - base_recoil_v,
         )
+
+    # Vertical + horizontal combined - both scale by the same recoil_modifier
+    # sum per _compute_stats, so this is still affine in x given fixed bases.
+    if params.max_recoil_sum is not None and base_recoil_v is not None and base_recoil_h is not None:
+        base_sum = base_recoil_v + base_recoil_h
+        cb.le(
+            {idx[i]: base_sum * (mods[i].recoil_modifier or 0) for i in item_ids},
+            params.max_recoil_sum - base_sum,
+        )
+
+    if params.include_categories:
+        for group in params.include_categories:
+            group_set = set(group)
+            matching = [i for i in item_ids if group_set & set((mods[i].category_ids or "").split(","))]
+            if not matching:
+                raise _Infeasible(f"No available item matches required category group: {sorted(group_set)}.")
+            cb.ge({idx[i]: 1 for i in matching}, 1)
 
     if params.max_weight is not None:
         cb.le({idx[i]: (mods[i].weight or 0) for i in item_ids}, params.max_weight - base_weight)
@@ -310,7 +340,13 @@ def _solve_once(c, cb, n, item_ids, weapon_id, item_to_valid_slots, prices):
     bounds = Bounds(0, 1)
     integrality = np.ones(n)
 
-    res = milp(c, constraints=constraints, bounds=bounds, integrality=integrality)
+    res = milp(
+        c,
+        constraints=constraints,
+        bounds=bounds,
+        integrality=integrality,
+        options={"time_limit": SOLVE_TIME_LIMIT_SECONDS},
+    )
     if not res.success:
         return None
 
@@ -340,16 +376,22 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
         c = _weighted_objective(item_ids, idx, mods, prices, params, base_recoil_v)
         result = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices)
         if result is None:
-            return {"status": "infeasible", "reason": "No feasible build satisfies these constraints.",
-                    "selected_items": [], "slot_pairs": []}
+            return {
+                "status": "infeasible",
+                "reason": "No feasible build satisfies these constraints.",
+                "selected_items": [],
+                "slot_pairs": [],
+            }
         return result
 
     # EvoErgo mode: sweep tangent anchors, keep whichever candidate has the
     # best *true* (quadratic) EED - the tangent-line objectives are only an
     # approximation used to generate candidates the MILP can actually solve.
-    anchors = [params.evo_ergo_k] if params.evo_ergo_k is not None else [
-        _evo_ergo_k_for_anchor(a, params.equip_ergo_modifier) for a in EVO_ERGO_ERGO_ANCHORS
-    ]
+    anchors = (
+        [params.evo_ergo_k]
+        if params.evo_ergo_k is not None
+        else [_evo_ergo_k_for_anchor(a, params.equip_ergo_modifier) for a in EVO_ERGO_ERGO_ANCHORS]
+    )
 
     best = None
     best_eed = None
@@ -358,12 +400,17 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
         candidate = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices)
         if candidate is None:
             continue
-        eed = _compute_stats(weapon, candidate["selected_items"], mods, params.strength_level,
-                              params.equip_ergo_modifier)["evo_ergo_delta"]
+        eed = _compute_stats(
+            weapon, candidate["selected_items"], mods, params.strength_level, params.equip_ergo_modifier
+        )["evo_ergo_delta"]
         if best_eed is None or eed > best_eed:
             best, best_eed = candidate, eed
 
     if best is None:
-        return {"status": "infeasible", "reason": "No feasible build satisfies these constraints.",
-                "selected_items": [], "slot_pairs": []}
+        return {
+            "status": "infeasible",
+            "reason": "No feasible build satisfies these constraints.",
+            "selected_items": [],
+            "slot_pairs": [],
+        }
     return best

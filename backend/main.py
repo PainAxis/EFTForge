@@ -27,6 +27,7 @@ from models_traders import Trader
 from models_item_offers import ItemOffer  # noqa: F401 - registers table with Base.metadata
 from stats import _compute_stats
 from optimizer.solver import optimize_weapon, OptimizeParams
+from optimizer.gunsmith import get_gunsmith_tasks, solve_gunsmith_task
 from database_changelog import changelog_engine, ChangelogSessionLocal, ChangelogBase
 from models_stat_changelog import StatChangeLog  # noqa: F401 - registers table with ChangelogBase.metadata
 
@@ -232,6 +233,9 @@ def _migrate_items_db():
             conn.commit()
         if "velocity_modifier" not in existing:
             conn.execute(text("ALTER TABLE items ADD COLUMN velocity_modifier REAL"))
+            conn.commit()
+        if "category_ids" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN category_ids TEXT"))
             conn.commit()
 
 
@@ -1938,7 +1942,11 @@ def build_optimize(
         raise HTTPException(
             status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}"
         )
-    for weight_name, weight_val in (("ergo_weight", ergo_weight), ("recoil_weight", recoil_weight), ("price_weight", price_weight)):
+    for weight_name, weight_val in (
+        ("ergo_weight", ergo_weight),
+        ("recoil_weight", recoil_weight),
+        ("price_weight", price_weight),
+    ):
         if not (0 <= weight_val <= 1):
             raise HTTPException(status_code=422, detail=f"{weight_name} must be between 0 and 1")
     if trader_levels is not None:
@@ -1954,10 +1962,25 @@ def build_optimize(
         raise HTTPException(status_code=404, detail="Weapon not found")
 
     _cache_key = (
-        weapon_id, max_price, min_ergonomics, max_recoil_v, max_weight, min_mag_capacity, min_sighting_range,
-        tuple(sorted(include_items)), tuple(sorted(exclude_items)), ergo_weight, recoil_weight, price_weight,
-        tuple(sorted((trader_levels or {}).items())), flea_available, player_level, strength_level, equip_ergo_modifier,
-        use_evo_ergo, evo_ergo_k,
+        weapon_id,
+        max_price,
+        min_ergonomics,
+        max_recoil_v,
+        max_weight,
+        min_mag_capacity,
+        min_sighting_range,
+        tuple(sorted(include_items)),
+        tuple(sorted(exclude_items)),
+        ergo_weight,
+        recoil_weight,
+        price_weight,
+        tuple(sorted((trader_levels or {}).items())),
+        flea_available,
+        player_level,
+        strength_level,
+        equip_ergo_modifier,
+        use_evo_ergo,
+        evo_ergo_k,
     )
     with _OPTIMIZE_CACHE_LOCK:
         cached = _OPTIMIZE_CACHE.get(_cache_key)
@@ -1993,6 +2016,48 @@ def build_optimize(
                 del _OPTIMIZE_CACHE[k]
         _OPTIMIZE_CACHE[_cache_key] = result
 
+    return result
+
+
+@app.get("/build/gunsmith-tasks")
+def build_gunsmith_tasks(lang: str = "en", db: Session = Depends(get_db)):
+    return {"tasks": get_gunsmith_tasks(db, lang)}
+
+
+@app.post("/build/gunsmith-solve")
+def build_gunsmith_solve(
+    task_name: str = Body(...),
+    trader_levels: dict | None = Body(default=None),
+    flea_available: bool = Body(default=True),
+    player_level: int | None = Body(default=None),
+    strength_level: int = Body(default=10),
+    equip_ergo_modifier: float = Body(default=0.0),
+    db: Session = Depends(get_db),
+):
+    if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
+        raise HTTPException(
+            status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}"
+        )
+    if not (EQUIP_ERGO_MIN <= equip_ergo_modifier <= EQUIP_ERGO_MAX):
+        raise HTTPException(
+            status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}"
+        )
+    if trader_levels is not None:
+        for level in trader_levels.values():
+            if not (0 <= level <= 4):
+                raise HTTPException(status_code=422, detail="trader_levels values must be between 0 and 4")
+
+    result = solve_gunsmith_task(
+        db,
+        task_name,
+        trader_levels=trader_levels,
+        flea_available=flea_available,
+        player_level=player_level,
+        strength_level=strength_level,
+        equip_ergo_modifier=equip_ergo_modifier,
+    )
+    if result["status"] == "error":
+        raise HTTPException(status_code=404, detail=result["reason"])
     return result
 
 

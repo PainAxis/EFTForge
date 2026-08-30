@@ -709,6 +709,7 @@ def sync_items(sync_source: str = "scheduled"):
             sighting_range=sighting_range,
             base_ergonomics=base_ergonomics,
             weapon_category=weapon_category,
+            category_ids=",".join(item.get("categories") or []) or None,
             factory_ergonomics=None,
             factory_weight=None,
             factory_attachment_ids=",".join(preset_attachment_ids) if is_weapon else None,

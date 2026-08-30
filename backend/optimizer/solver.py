@@ -1,14 +1,19 @@
 """Top-level entry point for the weapon build optimizer.
 
-This is the MVP pass agreed with the user: weapon + mods only. Deliberately
-NOT yet handling, in order of how much they matter for a typical build:
-  - presets as an alternative "base" competing with the naked receiver
-  - Found-in-Raid fallback pricing for mods with no purchase offers
-  - multi-slot placement variables (see milp.py's dependency-constraint
-    comment for the narrow edge case this leaves)
-  - EvoErgo tangent-sweep mode and Tchebycheff scalarization ("Sweet Spot")
-  - category include/exclude filters
-These are follow-up work, not something this module silently fakes.
+What's deliberately not handled, and why:
+  - presets as an alternative "base" competing with the naked receiver - the
+    one remaining piece of the reference optimizer's model this doesn't cover
+  - multi-slot placement variables - attempted (a real gap: 418 of 579
+    reachable M4A1 attachments have more than one valid parent slot), but the
+    exact formulation blew up solve time badly enough in testing (full test
+    suite went from single-digit seconds to 10+ minutes without finishing)
+    that it's not viable without real solver-performance work first. Reverted;
+    see milp.py's dependency-constraint comment for the narrow correctness
+    gap this leaves.
+  - Tchebycheff scalarization ("Sweet Spot" mode) - skipped as low value
+    without a paired Explore/visualization feature
+Found-in-Raid fallback pricing (below) and category include filters and
+EvoErgo mode (optimizer/milp.py) are implemented.
 
 Every stat number this module reports comes from stats._compute_stats() -
 EFTForge's own, already-tested EED/overswing/arm-stamina/MOA formulas -
@@ -16,7 +21,7 @@ never a separately-derived formula, so the optimizer and the Combo
 Calculator always agree on what a given attachment set's stats are.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, List, Dict
 
 from models_items import Item
@@ -34,11 +39,16 @@ class OptimizeParams:
     max_price: Optional[float] = None
     min_ergonomics: Optional[float] = None
     max_recoil_v: Optional[float] = None
+    max_recoil_sum: Optional[float] = None  # vertical + horizontal combined - used by Gunsmith tasks
     max_weight: Optional[float] = None
     min_mag_capacity: Optional[int] = None
     min_sighting_range: Optional[float] = None
     include_items: Optional[List[str]] = None
     exclude_items: Optional[List[str]] = None
+    # Each inner list is an OR-group of raw tarkov.dev category ids - at least
+    # one selected item must match each group. Matches Item.category_ids
+    # (comma-separated raw category ids, populated by sync_tarkov_dev.py).
+    include_categories: Optional[List[List[str]]] = None
     ergo_weight: float = 1.0
     recoil_weight: float = 1.0
     price_weight: float = 0.0
@@ -78,9 +88,16 @@ def optimize_weapon(db, weapon_id: str, params: OptimizeParams) -> dict:
     for item_id in all_mod_ids:
         if item_id in exclude or item_id not in mods:
             continue
-        best = get_best_price(offers_map.get(item_id, []), params.trader_levels, params.flea_available, params.player_level)
+        raw_offers = offers_map.get(item_id, [])
+        best = get_best_price(raw_offers, params.trader_levels, params.flea_available, params.player_level)
         if best is None:
-            continue  # unpurchasable under current filters - MVP excludes it outright, no FiR fallback yet
+            if raw_offers:
+                continue  # has offers, just none accessible under the current trader/flea filters
+            # No trader or flea ever sells this at all - Found-in-Raid only.
+            # A player might already own one, so it's freely selectable at
+            # price 0 rather than excluded (matches the reference optimizer's
+            # is_fir_mod handling in weapon_optimizer.py).
+            best = {"price": 0, "currency": "RUB", "price_rub": 0, "vendor": None}
         candidate_ids.append(item_id)
         prices[item_id] = best
 

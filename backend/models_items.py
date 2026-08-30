@@ -25,6 +25,13 @@ class Item(Base):
     weapon_category = Column(String, index=True)
     is_weapon = Column(Boolean, default=False, index=True)
 
+    # Raw tarkov.dev category ids (item["categories"]), comma-separated like
+    # conflicting_item_ids below. weapon_category above is a derived, weapon-only
+    # display label; this is the full raw taxonomy membership, needed to match
+    # attachment items against category-based requirements (e.g. Gunsmith task
+    # "any suppressor or any muzzle brake").
+    category_ids = Column(Text, nullable=True)
+
     base_ergonomics = Column(Float)
 
     factory_ergonomics = Column(Float)

@@ -30,7 +30,9 @@ backend/.env
 .DS_Store
 Thumbs.db
 # Desktop app build artifacts
-backend/data/
+backend/data/*
+# Vendored Gunsmith task data (static reference content, not generated/local) - keep tracked
+!backend/data/gunsmith_tasks.json
 desktop/node_modules/
 frontend/node_modules/
 desktop/pyinstaller/build/

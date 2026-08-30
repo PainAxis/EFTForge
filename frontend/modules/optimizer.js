@@ -2,10 +2,9 @@ window.EFTForge = window.EFTForge || {};
 
 /* ============================================================
    WEAPON OPTIMIZER
-   MVP: single "Optimize" mode only (weighted ergo/recoil/price MILP
-   solve). Explore (Pareto curves) and Gunsmith (task-specific builds)
-   are separate follow-up tabs, added once their backend solver pieces
-   exist - see backend/optimizer/solver.py's module docstring.
+   Optimize and Gunsmith tabs. Explore (Pareto curves) is a separate
+   follow-up tab, added once its backend solver piece exists - see
+   backend/optimizer/solver.py's module docstring.
 
    Entry point is the gradient edge-tab on the attachment placeholder
    panel (see #optimizer-edge-tab in index.html), not a header nav
@@ -21,9 +20,26 @@ window.EFTForge = window.EFTForge || {};
 
 window.EFTForge.optimizer = (function () {
 
-    let _result = null;   // last successful /build/optimize response, or null
+    // Gunsmith tasks are being re-curated for the current wipe - the backend
+    // (GET /build/gunsmith-tasks, POST /build/gunsmith-solve) and this tab's
+    // UI are fully implemented and tested, just hidden from players until the
+    // task data is ready. Flip this back to true to re-expose it.
+    const GUNSMITH_ENABLED = false;
+
+    let _activeTab = 'optimize';  // 'optimize' | 'gunsmith'
+    let _result = null;   // last successful solve response, or null
     let _solving = false;
     let _error = null;
+
+    let _gunsmithTasks = null;      // cached GET /build/gunsmith-tasks response
+    let _gunsmithTasksPromise = null;
+
+    // Lets the user bail out of a slow solve instead of being stuck staring
+    // at "Solving...". This only abandons the fetch client-side - a solve
+    // already running on the server keeps running (a synchronous HiGHS call
+    // can't be interrupted mid-flight from outside), it just stops waiting
+    // on it and frees the drawer back up.
+    let _abortController = null;
 
     function _t(key) { return window.t ? window.t(key) : key; }
 
@@ -43,7 +59,7 @@ window.EFTForge.optimizer = (function () {
 
         _result = null;
         _error = null;
-        _renderForm();
+        _render();
     }
 
     function hidePanel() {
@@ -52,6 +68,9 @@ window.EFTForge.optimizer = (function () {
         if (overlay) overlay.classList.remove('visible');
         if (backdrop) backdrop.classList.remove('visible');
         document.getElementById('main-container')?.removeAttribute('inert');
+        // Otherwise a solve left running behind a closed drawer could still
+        // resolve later and pop a stale result into a future, unrelated session.
+        _abortController?.abort();
     }
 
     function onLangChange() {
@@ -60,7 +79,7 @@ window.EFTForge.optimizer = (function () {
 
         const overlay = document.getElementById('optimizer-overlay');
         if (!overlay || !overlay.classList.contains('visible')) return;
-        _renderForm();
+        _render();
     }
 
     function init() {
@@ -94,7 +113,68 @@ window.EFTForge.optimizer = (function () {
     }
 
     /* ===========================
-       FORM
+       SHARED HELPERS
+    =========================== */
+
+    function _creditHtml() {
+        const link = `<a href="https://ahaimk01.github.io/tarkov-weapon-optimizer/" target="_blank" rel="noopener noreferrer">${_t('optimizer.creditLinkText')}</a>`;
+        return window.tFmt ? window.tFmt('optimizer.creditText', { link }) : '';
+    }
+
+    function _escape(str) {
+        const div = document.createElement('div');
+        div.textContent = str == null ? '' : String(str);
+        return div.innerHTML;
+    }
+
+    function _numOrNull(id) {
+        const el = document.getElementById(id);
+        if (!el || el.value === '') return null;
+        const n = Number(el.value);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    function _switchTab(tab) {
+        _activeTab = tab;
+        _result = null;
+        _error = null;
+        _render();
+    }
+
+    /* ===========================
+       ROOT RENDER (tab strip + active tab's form)
+    =========================== */
+
+    function _render() {
+        const body = document.getElementById('optimizer-panel-body');
+        if (!body) return;
+
+        if (!GUNSMITH_ENABLED) _activeTab = 'optimize';
+
+        const tabStripHtml = GUNSMITH_ENABLED ? `
+            <div class="modal-row">
+                <button class="toggle-btn ${_activeTab === 'optimize' ? 'active' : ''}" id="optimizer-tab-optimize">${_t('optimizer.tabOptimize')}</button>
+                <button class="toggle-btn ${_activeTab === 'gunsmith' ? 'active' : ''}" id="optimizer-tab-gunsmith">${_t('optimizer.tabGunsmith')}</button>
+            </div>
+        ` : '';
+
+        body.innerHTML = `
+            ${tabStripHtml}
+            <div id="optimizer-tab-content"></div>
+            <div class="optimizer-credit">${_creditHtml()}</div>
+        `;
+
+        if (GUNSMITH_ENABLED) {
+            document.getElementById('optimizer-tab-optimize').addEventListener('click', () => _switchTab('optimize'));
+            document.getElementById('optimizer-tab-gunsmith').addEventListener('click', () => _switchTab('gunsmith'));
+        }
+
+        if (_activeTab === 'optimize') _renderOptimizeTab();
+        else _renderGunsmithTab();
+    }
+
+    /* ===========================
+       OPTIMIZE TAB
     =========================== */
 
     function _weaponOptionsHtml() {
@@ -120,22 +200,22 @@ window.EFTForge.optimizer = (function () {
         }).join('');
     }
 
-    function _creditHtml() {
-        const link = `<a href="https://ahaimk01.github.io/tarkov-weapon-optimizer/" target="_blank" rel="noopener noreferrer">${_t('optimizer.creditLinkText')}</a>`;
-        return window.tFmt ? window.tFmt('optimizer.creditText', { link }) : '';
+    function _sliderRow(id, label, defaultValue) {
+        return `
+            <div class="optimizer-slider-row">
+                <span class="stat-label" style="width:90px;">${label}</span>
+                <input type="range" id="${id}" min="0" max="1" step="0.05" value="${defaultValue}"
+                    oninput="document.getElementById('${id}-val').textContent = this.value">
+                <span class="optimizer-slider-value" id="${id}-val">${defaultValue}</span>
+            </div>
+        `;
     }
 
-    function _escape(str) {
-        const div = document.createElement('div');
-        div.textContent = str == null ? '' : String(str);
-        return div.innerHTML;
-    }
+    function _renderOptimizeTab() {
+        const content = document.getElementById('optimizer-tab-content');
+        if (!content) return;
 
-    function _renderForm() {
-        const body = document.getElementById('optimizer-panel-body');
-        if (!body) return;
-
-        body.innerHTML = `
+        content.innerHTML = `
             <div class="optimizer-field">
                 <label class="modal-label">${_t('optimizer.weapon')}</label>
                 <select id="optimizer-weapon" class="optimizer-input">${_weaponOptionsHtml()}</select>
@@ -193,37 +273,13 @@ window.EFTForge.optimizer = (function () {
             <button class="modal-btn primary full-width" id="optimizer-solve-btn">${_t('optimizer.solve')}</button>
 
             <div id="optimizer-result-container"></div>
-
-            <div class="optimizer-credit">${_creditHtml()}</div>
         `;
 
-        document.getElementById('optimizer-solve-btn').addEventListener('click', _solve);
+        document.getElementById('optimizer-solve-btn').addEventListener('click', _solveOptimize);
         _renderResult();
     }
 
-    function _sliderRow(id, label, defaultValue) {
-        return `
-            <div class="optimizer-slider-row">
-                <span class="stat-label" style="width:90px;">${label}</span>
-                <input type="range" id="${id}" min="0" max="1" step="0.05" value="${defaultValue}"
-                    oninput="document.getElementById('${id}-val').textContent = this.value">
-                <span class="optimizer-slider-value" id="${id}-val">${defaultValue}</span>
-            </div>
-        `;
-    }
-
-    function _numOrNull(id) {
-        const el = document.getElementById(id);
-        if (!el || el.value === '') return null;
-        const n = Number(el.value);
-        return Number.isFinite(n) ? n : null;
-    }
-
-    /* ===========================
-       SOLVE
-    =========================== */
-
-    async function _solve() {
+    async function _solveOptimize() {
         const weaponId = document.getElementById('optimizer-weapon').value;
         if (!weaponId) return;
 
@@ -251,11 +307,127 @@ window.EFTForge.optimizer = (function () {
             equip_ergo_modifier: state.currentEquipErgoModifier ?? 0,
         };
 
+        await _runSolve(`${EFTForge.config.API_BASE}/build/optimize`, body);
+    }
+
+    /* ===========================
+       GUNSMITH TAB
+    =========================== */
+
+    function _fetchGunsmithTasks() {
+        if (_gunsmithTasks) return Promise.resolve(_gunsmithTasks);
+        if (_gunsmithTasksPromise) return _gunsmithTasksPromise;
+
+        const lang = (window.EFTForge.state && window.EFTForge.state.lang) || 'en';
+        _gunsmithTasksPromise = fetch(`${EFTForge.config.API_BASE}/build/gunsmith-tasks?lang=${lang}`)
+            .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+            .then(data => { _gunsmithTasks = data.tasks; return _gunsmithTasks; })
+            .finally(() => { _gunsmithTasksPromise = null; });
+        return _gunsmithTasksPromise;
+    }
+
+    async function _renderGunsmithTab() {
+        const content = document.getElementById('optimizer-tab-content');
+        if (!content) return;
+
+        content.innerHTML = `<div class="optimizer-result">${_t('optimizer.loadingTasks')}</div>`;
+
+        let tasks;
         try {
-            const res = await fetch(`${EFTForge.config.API_BASE}/build/optimize`, {
+            tasks = await _fetchGunsmithTasks();
+        } catch {
+            content.innerHTML = `<div class="optimizer-result"><div class="optimizer-error">${_t('optimizer.tasksLoadFailed')}</div></div>`;
+            return;
+        }
+        if (_activeTab !== 'gunsmith') return; // user switched tabs while this was loading
+
+        const options = tasks.map(t => `<option value="${_escape(t.task_name)}">${_escape(t.task_name)}</option>`).join('');
+
+        content.innerHTML = `
+            <div class="optimizer-field">
+                <label class="modal-label">${_t('optimizer.task')}</label>
+                <select id="optimizer-gunsmith-task" class="optimizer-input">${options}</select>
+            </div>
+            <div id="optimizer-gunsmith-info"></div>
+            <label class="optimizer-checkbox-row">
+                <input type="checkbox" id="optimizer-gunsmith-flea-available" checked>
+                ${_t('optimizer.fleaAvailable')}
+            </label>
+            <button class="modal-btn primary full-width" id="optimizer-gunsmith-solve-btn">${_t('optimizer.solve')}</button>
+            <div id="optimizer-result-container"></div>
+        `;
+
+        const select = document.getElementById('optimizer-gunsmith-task');
+        select.addEventListener('change', () => _renderGunsmithTaskInfo(tasks));
+        _renderGunsmithTaskInfo(tasks);
+
+        document.getElementById('optimizer-gunsmith-solve-btn').addEventListener('click', _solveGunsmith);
+        _renderResult();
+    }
+
+    function _renderGunsmithTaskInfo(tasks) {
+        const select = document.getElementById('optimizer-gunsmith-task');
+        const info = document.getElementById('optimizer-gunsmith-info');
+        if (!select || !info) return;
+        const task = tasks.find(t => t.task_name === select.value);
+        if (!task) { info.innerHTML = ''; return; }
+
+        const c = task.constraints || {};
+        const constraintTags = Object.entries({
+            [_t('optimizer.minErgo')]: c.min_ergonomics,
+            [_t('optimizer.maxRecoilSum')]: c.max_recoil_sum,
+            [_t('optimizer.minMagCapacity')]: c.min_mag_capacity,
+            [_t('optimizer.minSightingRange')]: c.min_sighting_range,
+            [_t('optimizer.maxWeight')]: c.max_weight,
+        }).filter(([, v]) => v != null).map(([label, v]) => `<span class="stat-label">${label}: <span class="stat-value" style="display:inline;">${v}</span></span>`).join('');
+
+        const requiredNames = task.required_item_names.length
+            ? `<div class="stat-label">${_t('optimizer.requiredItems')}: ${task.required_item_names.map(_escape).join(', ')}</div>`
+            : '';
+
+        info.innerHTML = `
+            <div class="optimizer-result">
+                <div class="modal-label" style="margin:0;">${_escape(task.weapon_name)}</div>
+                ${constraintTags}
+                ${requiredNames}
+            </div>
+        `;
+    }
+
+    async function _solveGunsmith() {
+        const select = document.getElementById('optimizer-gunsmith-task');
+        const taskName = select?.value;
+        if (!taskName) return;
+
+        _solving = true;
+        _error = null;
+        _result = null;
+        _renderResult();
+
+        const state = window.EFTForge.state || {};
+        const body = {
+            task_name: taskName,
+            flea_available: document.getElementById('optimizer-gunsmith-flea-available').checked,
+            trader_levels: state.traderLevels || null,
+            strength_level: state.currentStrengthLevel ?? 10,
+            equip_ergo_modifier: state.currentEquipErgoModifier ?? 0,
+        };
+
+        await _runSolve(`${EFTForge.config.API_BASE}/build/gunsmith-solve`, body);
+    }
+
+    /* ===========================
+       SOLVE (shared) + RESULT
+    =========================== */
+
+    async function _runSolve(url, body) {
+        _abortController = new AbortController();
+        try {
+            const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
+                signal: _abortController.signal,
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
@@ -264,12 +436,17 @@ window.EFTForge.optimizer = (function () {
             } else {
                 _error = data.reason || _t('optimizer.infeasible');
             }
-        } catch {
-            _error = _t('optimizer.solveFailed');
+        } catch (err) {
+            _error = err.name === 'AbortError' ? _t('optimizer.cancelled') : _t('optimizer.solveFailed');
         } finally {
             _solving = false;
+            _abortController = null;
             _renderResult();
         }
+    }
+
+    function _cancelSolve() {
+        _abortController?.abort();
     }
 
     function _renderResult() {
@@ -277,7 +454,13 @@ window.EFTForge.optimizer = (function () {
         if (!container) return;
 
         if (_solving) {
-            container.innerHTML = `<div class="optimizer-result">${_t('optimizer.solving')}</div>`;
+            container.innerHTML = `
+                <div class="optimizer-result">
+                    <div>${_t('optimizer.solving')}</div>
+                    <button class="modal-btn full-width" id="optimizer-cancel-btn">${_t('modal.cancel')}</button>
+                </div>
+            `;
+            document.getElementById('optimizer-cancel-btn').addEventListener('click', _cancelSolve);
             return;
         }
         if (_error) {
