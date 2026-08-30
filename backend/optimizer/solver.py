@@ -1,7 +1,7 @@
 """Top-level entry point for the weapon build optimizer.
 
 What's deliberately not handled, and why:
-  - presets as an alternative "base" competing with the naked receiver - the
+  - presets as an alternative "base" competing with the base receiver - the
     one remaining piece of the reference optimizer's model this doesn't cover
   - multi-slot placement variables - attempted (a real gap: 418 of 579
     reachable M4A1 attachments have more than one valid parent slot), but the

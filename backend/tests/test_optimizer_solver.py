@@ -4,7 +4,11 @@ These run against the real, already-synced dev DB (backend/tarkov.db) rather
 than a fixture DB - the solver's correctness depends on real slot/conflict/
 offer data that isn't worth hand-modeling in a fixture, and every other build
 feature in this repo (Combo Calculator, etc.) is only ever exercised against
-real synced data too. Skipped automatically if that DB hasn't been synced yet.
+real synced data too. Skipped automatically if that DB hasn't been synced yet
+- CI never syncs one, and (deliberately) never sets IP_HASH_SECRET/
+ADMIN_API_KEY either, so `database`/`config` must not be imported at module
+level: config.py raises at import time when those are missing, which would
+crash collection before pytest ever gets to evaluate the skip marker below.
 
 Run with:  cd backend && python -m pytest tests/test_optimizer_solver.py
 """
@@ -13,17 +17,20 @@ import os
 
 import pytest
 
-from database import SessionLocal
-from stats import _compute_stats
-from optimizer.solver import optimize_weapon, OptimizeParams
-
 M4A1_ID = "5447a9cd4bdc2dbd208b4567"
 AK74N_ID = "5644bd2b4bdc2d3b4c8b4572"
 
+_HAS_DB = os.path.exists(os.path.join(os.path.dirname(__file__), "..", "tarkov.db"))
+
 pytestmark = pytest.mark.skipif(
-    not os.path.exists(os.path.join(os.path.dirname(__file__), "..", "tarkov.db")),
+    not _HAS_DB,
     reason="requires a synced tarkov.db - run sync_tarkov_dev.py first",
 )
+
+if _HAS_DB:
+    from database import SessionLocal
+    from stats import _compute_stats
+    from optimizer.solver import optimize_weapon, OptimizeParams
 
 
 @pytest.fixture

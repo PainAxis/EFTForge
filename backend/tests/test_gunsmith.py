@@ -1,6 +1,11 @@
 """Tests for Gunsmith mode (optimizer/gunsmith.py) - reuses the same MILP
 solver as Optimize mode with a task's constraints/required items/categories
 injected. Runs against the real synced dev DB, same as test_optimizer_solver.py.
+Skipped automatically if that DB hasn't been synced yet - CI never syncs one,
+and (deliberately) never sets IP_HASH_SECRET/ADMIN_API_KEY either, so
+`database` must not be imported at module level: config.py raises at import
+time when those are missing, which would crash collection before pytest ever
+gets to evaluate the skip marker below.
 
 Run with:  cd backend && python -m pytest tests/test_gunsmith.py
 """
@@ -9,13 +14,16 @@ import os
 
 import pytest
 
-from database import SessionLocal
-from optimizer.gunsmith import get_gunsmith_tasks, solve_gunsmith_task
+_HAS_DB = os.path.exists(os.path.join(os.path.dirname(__file__), "..", "tarkov.db"))
 
 pytestmark = pytest.mark.skipif(
-    not os.path.exists(os.path.join(os.path.dirname(__file__), "..", "tarkov.db")),
+    not _HAS_DB,
     reason="requires a synced tarkov.db - run sync_tarkov_dev.py first",
 )
+
+if _HAS_DB:
+    from database import SessionLocal
+    from optimizer.gunsmith import get_gunsmith_tasks, solve_gunsmith_task
 
 
 @pytest.fixture
