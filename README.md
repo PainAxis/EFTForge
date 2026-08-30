@@ -256,9 +256,11 @@ EFTForge will auto-load the build on page load and strip the parameter from the 
 
 ---
 
-## EvoErgo Credit
+## Credits & Acknowledgements
 
 The EvoErgo concept was originally developed by **SpaceMonkey37**. EFTForge implements and expands upon this system in a live simulation environment. This project would not have been possible without SpaceMonkey37's foundational theory.
+
+The constraint-based build optimizer (MILP solver, priority weighting, budget/trader-level filtering) is a native reimplementation inspired by **AhaiMk01**'s [Tarkov Weapon Mod Optimizer](https://github.com/AhaiMk01/tarkov-weapon-optimizer).
 
 ---
 

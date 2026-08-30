@@ -4246,6 +4246,8 @@ body[data-mobile="true"] .gun-card.mid-build {
 .att-table-close-btn:hover { color: #eee; }
 
 .attachment-placeholder {
+    position: relative;
+
     display: flex;
     align-items: center;
     justify-content: center;
@@ -4263,6 +4265,50 @@ body[data-mobile="true"] .gun-card.mid-build {
     text-align: center;
 
     height: calc(100% - 80px);
+}
+
+/* Optimizer entry point: a slim gradient bar docked to the placeholder's
+   right edge, expanding to reveal its label on hover. Opens the Optimizer
+   drawer (#optimizer-overlay) on click - see modules/optimizer.js. */
+.optimizer-edge-tab {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    bottom: 2px;
+    width: 24px;
+
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+
+    border-radius: 0 6px 6px 0;
+    background: linear-gradient(to left, rgba(245, 197, 66, 0.55), rgba(245, 197, 66, 0));
+    cursor: pointer;
+    opacity: 0.75;
+    transition: width 0.22s ease, opacity 0.22s ease, background 0.22s ease;
+}
+
+.optimizer-edge-tab:hover {
+    width: 130px;
+    opacity: 1;
+    background: linear-gradient(to left, rgba(245, 197, 66, 0.75), rgba(245, 197, 66, 0));
+}
+
+.optimizer-edge-tab-label {
+    writing-mode: horizontal-tb;
+    color: #1a1500;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding-right: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.15s ease 0.05s;
+}
+
+.optimizer-edge-tab:hover .optimizer-edge-tab-label {
+    opacity: 1;
 }
 
 .price-fetch-placeholder {
@@ -6635,6 +6681,166 @@ button.build-tag-chip.active {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* =============================================
+   OPTIMIZER DRAWER
+============================================= */
+
+#optimizer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 1100;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+#optimizer-backdrop.visible { opacity: 1; pointer-events: auto; }
+
+#optimizer-overlay {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: min(480px, 98vw);
+  background: #1a1a1a;
+  z-index: 1101;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  opacity: 0;
+  transition: transform 0.28s cubic-bezier(0.4,0,0.2,1), opacity 0.2s ease;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a #1a1a1a;
+}
+#optimizer-overlay::-webkit-scrollbar { width: 6px; }
+#optimizer-overlay::-webkit-scrollbar-track { background: #1a1a1a; }
+#optimizer-overlay::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
+#optimizer-overlay::-webkit-scrollbar-thumb:hover { background: #555; }
+#optimizer-overlay.visible { transform: translateX(0); opacity: 1; }
+
+.optimizer-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  background: #1a1a1a;
+  z-index: 5;
+}
+.optimizer-panel-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #f5c542;
+  text-transform: uppercase;
+}
+.optimizer-close-btn {
+  background: none; border: none; color: #aaa; font-size: 18px;
+  cursor: pointer; line-height: 1; padding: 4px 6px;
+}
+.optimizer-close-btn:hover { color: #fff; }
+
+.optimizer-panel-body {
+  flex: 1;
+  padding: 14px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.optimizer-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.optimizer-field-row {
+  display: flex;
+  gap: 10px;
+}
+.optimizer-field-row > .optimizer-field { flex: 1; min-width: 0; }
+
+.optimizer-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.optimizer-slider-row input[type="range"] { flex: 1; }
+.optimizer-slider-value {
+  width: 34px;
+  text-align: right;
+  font-size: 12px;
+  color: #ccc;
+  font-variant-numeric: tabular-nums;
+}
+
+.optimizer-input {
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #eee;
+  padding: 7px 9px;
+  font-size: 13px;
+  font-family: "Bender", Arial, sans-serif;
+  width: 100%;
+  box-sizing: border-box;
+}
+.optimizer-input:focus { outline: none; border-color: #f5c542; }
+
+.optimizer-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #ccc;
+  cursor: pointer;
+  user-select: none;
+}
+
+.optimizer-result {
+  background: #161616;
+  border: 1px solid #2e2e2e;
+  border-radius: 6px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.optimizer-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 12px;
+}
+.optimizer-stat-grid .stat-label { color: #888; font-size: 11px; }
+.optimizer-stat-grid .stat-value { color: #eee; font-size: 13px; font-weight: 700; text-align: right; }
+
+.optimizer-error {
+  color: #e74c3c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.optimizer-credit {
+  font-size: 11px;
+  color: #777;
+  line-height: 1.5;
+  background: #1c1c1c;
+  border: 1px solid #2e2e2e;
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+.optimizer-credit a {
+  color: #f5c542;
+  text-decoration: none;
+}
+.optimizer-credit a:hover {
+  text-decoration: underline;
 }
 
 /* ---- Disclaimer ---- */

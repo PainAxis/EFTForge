@@ -14,6 +14,7 @@ from models_slots import Slot
 from models_slot_allowed import SlotAllowedItem
 from models_traders import Trader
 from models_stat_changelog import StatChangeLog
+from models_item_offers import ItemOffer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -276,6 +277,60 @@ def _localize(overlay, token, default=None):
     return overlay.get(token, default)
 
 
+def _sync_item_offers(db, items_map, trader_norm_map):
+    """Populate item_offers with every trader offer (all loyalty levels, no
+    vendor exclusions - the optimizer needs Ref/Fence/Ragman available and
+    filters them per-request instead) plus one synthesized flea-market row per
+    item, mirroring how the original optimizer's jsonApiAdapter.ts synthesizes
+    flea pricing from the same fields since this JSON API has no flea entry
+    inside buyFromTrader itself.
+
+    Barter offers are skipped entirely - json.tarkov.dev doesn't expose them
+    (only the old, currently-down GraphQL endpoint did).
+    """
+    offer_rows = []
+    for item in items_map.values():
+        item_id = item["id"]
+        for offer in item.get("buyFromTrader") or []:
+            vendor = trader_norm_map.get(offer.get("trader"))
+            if not vendor:
+                continue
+            offer_rows.append(
+                ItemOffer(
+                    item_id=item_id,
+                    vendor_normalized=vendor,
+                    trader_level=offer.get("minTraderLevel"),
+                    price=offer.get("price"),
+                    currency=offer.get("currency"),
+                    price_rub=offer.get("priceRUB"),
+                    is_flea=False,
+                )
+            )
+
+        # Flea: no dedicated field on this API, so synthesize one row from the
+        # market-stats fields already on the item (same approach the optimizer's
+        # own adapter uses). Prefer avg24hPrice; fall back to lastLowPrice for
+        # items with too little recent flea activity to have a 24h average.
+        flea_price = item.get("avg24hPrice") or item.get("lastLowPrice")
+        if flea_price:
+            offer_rows.append(
+                ItemOffer(
+                    item_id=item_id,
+                    vendor_normalized="flea-market",
+                    trader_level=None,
+                    price=flea_price,
+                    currency="RUB",
+                    price_rub=flea_price,
+                    is_flea=True,
+                    min_level_flea=item.get("minLevelForFlea"),
+                )
+            )
+
+    db.bulk_save_objects(offer_rows)
+    db.commit()
+    logger.info("Item offers synced (%d rows).", len(offer_rows))
+
+
 def _sync_spt_hidden_stats(db):
     """
     Supplementary sync from a local SPT items.json.
@@ -369,6 +424,7 @@ def sync_items(sync_source: str = "scheduled"):
 
     logger.info("Clearing database...")
     db.query(SlotAllowedItem).delete()
+    db.query(ItemOffer).delete()
     db.query(Slot).delete()
     db.query(Item).delete()
     db.commit()
@@ -722,6 +778,7 @@ def sync_items(sync_source: str = "scheduled"):
                     parent_item_id=item["id"],
                     slot_name=_localize(en, slot.get("name"), slot.get("name")),
                     slot_game_name=slot.get("nameId"),
+                    required=bool(slot.get("required", False)),
                 )
             )
 
@@ -847,6 +904,15 @@ def sync_items(sync_source: str = "scheduled"):
         db.bulk_save_objects(trader_rows)
         db.commit()
         logger.info("Traders inserted (%d).", len(trader_rows))
+
+    # ------------------------------------------
+    # Full multi-trader/flea offer list, for the optimizer's budget and
+    # trader-loyalty-level constraints. Item.trader_price/trader_vendor below
+    # stay a separate, simpler "cheapest eligible offer" view for every other
+    # page - this table is additive, not a replacement.
+    # ------------------------------------------
+    logger.info("Syncing full item offer list...")
+    _sync_item_offers(db, items_map, trader_norm_map)
 
     # ------------------------------------------
     # Compute cheapest trader buy price per item from the already-fetched items.

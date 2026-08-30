@@ -183,6 +183,9 @@ var _hmt = _hmt || [];
                     </em></strong>
                 </span>
             </div>
+            <div id="optimizer-edge-tab" class="optimizer-edge-tab" onclick="EFTForge.optimizer.showPanel()">
+                <span class="optimizer-edge-tab-label" id="optimizer-edge-tab-label">Optimizer</span>
+            </div>
         </div>
 
         <div id="attachment-table-container"></div>
@@ -243,6 +246,16 @@ var _hmt = _hmt || [];
     </div>
   </div>
   <div class="leaderboard-body" id="leaderboard-body"></div>
+</div>
+
+<!-- OPTIMIZER BACKDROP + DRAWER -->
+<div id="optimizer-backdrop"></div>
+<div id="optimizer-overlay">
+  <div class="optimizer-panel-header">
+    <span class="optimizer-panel-title" id="optimizer-panel-title">OPTIMIZER</span>
+    <button class="optimizer-close-btn" id="optimizer-close-btn">&#x2715;</button>
+  </div>
+  <div class="optimizer-panel-body" id="optimizer-panel-body"></div>
 </div>
 
 <!-- AMMO TABLE BACKDROP + DRAWER -->
@@ -329,6 +342,7 @@ var _hmt = _hmt || [];
 <script src="modules/graph.js?v=16"></script>
 <script src="modules/build-manager.js?v=35"></script>
 <script src="modules/tab-manager.js?v=12"></script>
+<script src="modules/optimizer.js?v=1"></script>
 <script src="modules/profile.js?v=14"></script>
 <script src="app.js?v=46"></script>
 <script src="lzstring.min.js?v=22"></script>

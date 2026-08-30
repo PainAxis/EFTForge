@@ -24,6 +24,9 @@ from models_items import Item
 from models_slots import Slot
 from models_slot_allowed import SlotAllowedItem
 from models_traders import Trader
+from models_item_offers import ItemOffer  # noqa: F401 - registers table with Base.metadata
+from stats import _compute_stats
+from optimizer.solver import optimize_weapon, OptimizeParams
 from database_changelog import changelog_engine, ChangelogSessionLocal, ChangelogBase
 from models_stat_changelog import StatChangeLog  # noqa: F401 - registers table with ChangelogBase.metadata
 
@@ -237,6 +240,9 @@ def _migrate_slots_db():
         existing = {row[1] for row in conn.execute(text("PRAGMA table_info(slots)"))}
         if "slot_game_name" not in existing:
             conn.execute(text("ALTER TABLE slots ADD COLUMN slot_game_name TEXT"))
+            conn.commit()
+        if "required" not in existing:
+            conn.execute(text("ALTER TABLE slots ADD COLUMN required BOOLEAN DEFAULT 0"))
             conn.commit()
 
 
@@ -511,124 +517,6 @@ def _validate_pairs(pairs: list, db_main: Session) -> None:
 # ---------------------------------------------------
 # Shared calculation helpers (no DB access)
 # ---------------------------------------------------
-
-
-def _compute_stats(
-    base_item, current_ids: list, items_map: dict, strength_level: int = 10, equip_ergo_modifier: float = 0.0
-) -> dict:
-    """Compute build stats from pre-loaded items. No DB queries."""
-    factory_ids = base_item.factory_attachment_ids.split(",") if base_item.factory_attachment_ids else []
-    factory_set = set(factory_ids)
-    current_set = set(current_ids)
-    factory_intact = bool(factory_set) and factory_set.issubset(current_set)
-
-    receiver_ergo = base_item.base_ergonomics or 0
-    receiver_weight = base_item.weight or 0
-    factory_ergo = base_item.factory_ergonomics or receiver_ergo
-    factory_weight = base_item.factory_weight or receiver_weight
-
-    if factory_intact:
-        total_ergo = factory_ergo
-        total_weight = factory_weight
-        total_recoil_v = (
-            base_item.factory_recoil_vertical
-            if base_item.factory_recoil_vertical is not None
-            else base_item.recoil_vertical
-        )
-        total_recoil_h = (
-            base_item.factory_recoil_horizontal
-            if base_item.factory_recoil_horizontal is not None
-            else base_item.recoil_horizontal
-        )
-    else:
-        total_ergo = receiver_ergo
-        total_weight = receiver_weight
-        total_recoil_v = base_item.recoil_vertical
-        total_recoil_h = base_item.recoil_horizontal
-
-    total_recoil_modifier = 0.0
-    total_accuracy_mod = 0.0
-    total_velocity_mod = base_item.velocity_modifier or 0
-    barrel_coi = None  # installed barrel's centerOfImpact overrides the weapon base
-    heat_factor = 1.0
-    cooling_factor = 1.0
-    durability_burn_factor = 1.0
-    for att_id in current_ids:
-        att = items_map.get(att_id)
-        if not att:
-            continue
-        is_factory_att = att_id in factory_set
-        # Ergo/weight/recoil: skip factory attachments when factory_intact (pre-computed values used above)
-        if not (factory_intact and is_factory_att):
-            total_ergo += att.ergonomics_modifier or 0
-            total_weight += att.weight or 0
-            total_recoil_modifier += att.recoil_modifier or 0
-        # Accuracy: always process all installed attachments - there is no pre-computed factory accuracy value
-        if not att.is_weapon and att.center_of_impact is not None:
-            barrel_coi = att.center_of_impact
-        else:
-            total_accuracy_mod += att.accuracy_modifier or 0
-        # Muzzle velocity: summed percentage modifier (barrel + muzzle devices); applied to the
-        # loaded ammo's velocity, not overridden like accuracy's COI
-        total_velocity_mod += att.velocity_modifier or 0
-        # Heat/cooling/durability-burn are multipliers (not summed percentages) - default 1.0 for parts without the stat
-        if att.heat_factor is not None:
-            heat_factor *= att.heat_factor
-        if att.cooling_factor is not None:
-            cooling_factor *= att.cooling_factor
-        if att.durability_burn_factor is not None:
-            durability_burn_factor *= att.durability_burn_factor
-
-    if not factory_intact:
-        if total_recoil_v is not None:
-            total_recoil_v = round(total_recoil_v * (1 + total_recoil_modifier))
-        if total_recoil_h is not None:
-            total_recoil_h = round(total_recoil_h * (1 + total_recoil_modifier))
-
-    b = equip_ergo_modifier
-    E = total_ergo * (1 + b)
-    KG = 0.0007556 * (E**2) + 0.02736 * E + 2.9159
-    evo_weight = total_weight - KG
-    eed = -15 * evo_weight
-
-    arm_stamina = (
-        ((85.5 / (total_weight + 0.65)) + 9.15 + 0.06477 * total_ergo * (1 + b / 2))
-        / 1.04
-        * (1 + strength_level * 0.004)
-    )
-
-    # Effective sighting range: max scope sighting range installed, else weapon base
-    effective_sighting_range = base_item.sighting_range
-    for att_id in current_ids:
-        att = items_map.get(att_id)
-        if att and att.sighting_range is not None and att.sighting_range > 0:
-            if effective_sighting_range is None or att.sighting_range > effective_sighting_range:
-                effective_sighting_range = att.sighting_range
-
-    # Accuracy (MOA): barrel COI overrides weapon base; percentage mods apply on top
-    # barrel_coi takes priority over weapon's center_of_impact when a barrel is installed
-    base_coi = barrel_coi if barrel_coi is not None else base_item.center_of_impact
-    if base_coi is not None:
-        # MOA = 34.36 * COI; accuracy_modifier is a percent accuracy increase, so positive = smaller MOA
-        final_moa = round(34.36 * base_coi * (1 - total_accuracy_mod / 100), 2)
-    else:
-        final_moa = None
-
-    return {
-        "total_ergo": round(total_ergo, 2),
-        "total_weight": round(total_weight, 3),
-        "overswing": evo_weight > 0,
-        "evo_ergo_delta": round(eed, 2),
-        "recoil_vertical": total_recoil_v,
-        "recoil_horizontal": total_recoil_h,
-        "arm_stamina": round(arm_stamina, 1),
-        "sighting_range": effective_sighting_range,
-        "accuracy_moa": final_moa,
-        "heat_factor": round(heat_factor, 4),
-        "cooling_factor": round(cooling_factor, 4),
-        "durability_burn_factor": round(durability_burn_factor, 4),
-        "velocity_modifier_pct": round(total_velocity_mod, 4),
-    }
 
 
 def _dedup_by_stats(combos: list) -> list:
@@ -2004,6 +1892,103 @@ def combo_full(
     return StreamingResponse(
         _stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
+
+
+# ---------------------------------------------------
+# Weapon Optimizer (MILP solver) - MVP: weapon + mods only.
+# Presets-as-base, FiR fallback pricing, multi-slot placement variables,
+# EvoErgo sweep, Tchebycheff scalarization, and category filters are not
+# implemented yet - see optimizer/solver.py's module docstring.
+# ---------------------------------------------------
+
+_OPTIMIZE_CACHE: dict = {}
+_OPTIMIZE_CACHE_LOCK = threading.Lock()
+_OPTIMIZE_CACHE_MAX = 500
+MAX_INCLUDE_EXCLUDE_IDS = 100
+
+
+@app.post("/build/optimize")
+def build_optimize(
+    weapon_id: str = Body(...),
+    max_price: float | None = Body(default=None),
+    min_ergonomics: float | None = Body(default=None),
+    max_recoil_v: float | None = Body(default=None),
+    max_weight: float | None = Body(default=None),
+    min_mag_capacity: int | None = Body(default=None),
+    min_sighting_range: float | None = Body(default=None),
+    include_items: List[str] = Body(default=[]),
+    exclude_items: List[str] = Body(default=[]),
+    ergo_weight: float = Body(default=1.0),
+    recoil_weight: float = Body(default=1.0),
+    price_weight: float = Body(default=0.0),
+    trader_levels: dict | None = Body(default=None),
+    flea_available: bool = Body(default=True),
+    player_level: int | None = Body(default=None),
+    strength_level: int = Body(default=10),
+    equip_ergo_modifier: float = Body(default=0.0),
+    db: Session = Depends(get_db),
+):
+    if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
+        raise HTTPException(
+            status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}"
+        )
+    if not (EQUIP_ERGO_MIN <= equip_ergo_modifier <= EQUIP_ERGO_MAX):
+        raise HTTPException(
+            status_code=422, detail=f"equip_ergo_modifier must be between {EQUIP_ERGO_MIN} and {EQUIP_ERGO_MAX}"
+        )
+    for weight_name, weight_val in (("ergo_weight", ergo_weight), ("recoil_weight", recoil_weight), ("price_weight", price_weight)):
+        if not (0 <= weight_val <= 1):
+            raise HTTPException(status_code=422, detail=f"{weight_name} must be between 0 and 1")
+    if trader_levels is not None:
+        for level in trader_levels.values():
+            if not (0 <= level <= 4):
+                raise HTTPException(status_code=422, detail="trader_levels values must be between 0 and 4")
+
+    _cap_list("include_items", include_items, MAX_INCLUDE_EXCLUDE_IDS)
+    _cap_list("exclude_items", exclude_items, MAX_INCLUDE_EXCLUDE_IDS)
+
+    weapon = db.query(Item).filter(Item.id == weapon_id, Item.is_weapon == True).first()  # noqa: E712
+    if not weapon:
+        raise HTTPException(status_code=404, detail="Weapon not found")
+
+    _cache_key = (
+        weapon_id, max_price, min_ergonomics, max_recoil_v, max_weight, min_mag_capacity, min_sighting_range,
+        tuple(sorted(include_items)), tuple(sorted(exclude_items)), ergo_weight, recoil_weight, price_weight,
+        tuple(sorted((trader_levels or {}).items())), flea_available, player_level, strength_level, equip_ergo_modifier,
+    )
+    with _OPTIMIZE_CACHE_LOCK:
+        cached = _OPTIMIZE_CACHE.get(_cache_key)
+    if cached is not None:
+        return cached
+
+    params = OptimizeParams(
+        max_price=max_price,
+        min_ergonomics=min_ergonomics,
+        max_recoil_v=max_recoil_v,
+        max_weight=max_weight,
+        min_mag_capacity=min_mag_capacity,
+        min_sighting_range=min_sighting_range,
+        include_items=include_items or None,
+        exclude_items=exclude_items or None,
+        ergo_weight=ergo_weight,
+        recoil_weight=recoil_weight,
+        price_weight=price_weight,
+        trader_levels=trader_levels,
+        flea_available=flea_available,
+        player_level=player_level,
+        strength_level=strength_level,
+        equip_ergo_modifier=equip_ergo_modifier,
+    )
+    result = optimize_weapon(db, weapon_id, params)
+
+    with _OPTIMIZE_CACHE_LOCK:
+        if len(_OPTIMIZE_CACHE) >= _OPTIMIZE_CACHE_MAX:
+            keys = list(_OPTIMIZE_CACHE.keys())
+            for k in keys[: len(keys) // 2]:
+                del _OPTIMIZE_CACHE[k]
+        _OPTIMIZE_CACHE[_cache_key] = result
+
+    return result
 
 
 # ---------------------------------------------------

@@ -36,7 +36,7 @@ SCRATCH_DB = "tarkov_dev_sync_scratch.db"
 
 # Tables sync_tarkov_dev.py rewrites on every run. Order matters for the copy
 # below: children deleted before parents, parents inserted before children.
-_SYNC_TABLES = ("slot_allowed_items", "slots", "items", "traders")
+_SYNC_TABLES = ("slot_allowed_items", "slots", "item_offers", "items", "traders")
 
 
 def _items_fingerprint(db_path):
