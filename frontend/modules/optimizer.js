@@ -128,6 +128,11 @@ window.EFTForge.optimizer = (function () {
         const label = document.getElementById('optimizer-edge-tab-label');
         if (label) label.textContent = _t('optimizer.title');
 
+        // The panel header ships hardcoded as "OPTIMIZER" in index.html; sync it
+        // with the active language here (this also runs from init() on first paint).
+        const panelTitle = document.getElementById('optimizer-panel-title');
+        if (panelTitle) panelTitle.textContent = _t('optimizer.title');
+
         const overlay = document.getElementById('optimizer-overlay');
         if (!overlay || !overlay.classList.contains('visible')) return;
         _render();
@@ -408,15 +413,13 @@ window.EFTForge.optimizer = (function () {
 
     function _setUseEvoErgo(value) {
         _useEvoErgo = value;
-        document.getElementById('optimizer-evo-ergo-off-btn')?.classList.toggle('active', !value);
-        document.getElementById('optimizer-evo-ergo-on-btn')?.classList.toggle('active', value);
+        document.getElementById('optimizer-evo-ergo-toggle')?.classList.toggle('active', value);
         _renderWeightWidget();
     }
 
     function _setFleaAvailable(value) {
         _fleaAvailable = value;
-        document.getElementById('optimizer-flea-off-btn')?.classList.toggle('active', !value);
-        document.getElementById('optimizer-flea-on-btn')?.classList.toggle('active', value);
+        document.getElementById('optimizer-flea-toggle')?.classList.toggle('active', value);
         _refreshStatRanges();
     }
 
@@ -437,8 +440,7 @@ window.EFTForge.optimizer = (function () {
 
     function _setPreventOverswing(value) {
         _preventOverswing = value;
-        document.getElementById('optimizer-overswing-off-btn')?.classList.toggle('active', !value);
-        document.getElementById('optimizer-overswing-on-btn')?.classList.toggle('active', value);
+        document.getElementById('optimizer-overswing-toggle')?.classList.toggle('active', value);
     }
 
     /* ---------------------------
@@ -576,7 +578,7 @@ window.EFTForge.optimizer = (function () {
     --------------------------- */
 
     const CONSTRAINT_DEFS = [
-        { key: 'budget', label: 'optimizer.budget', min: 10000, max: 2000000, step: 10000, default: 200000 },
+        { key: 'budget', label: 'optimizer.budget', min: 10000, max: 2000000, step: 10000, default: 200000, unit: '₽' },
         { key: 'minErgo', label: 'optimizer.minErgo', min: 1, max: 100, step: 1, default: 40 },
     ];
 
@@ -648,7 +650,7 @@ window.EFTForge.optimizer = (function () {
         const weaponId = window.EFTForge.state?.currentGun?.id;
         if (!weaponId || _fetchingMoaFloor) return;
         _fetchingMoaFloor = true;
-        _renderConstraints();
+        _refreshMoaSliderIfMounted();
         const state = window.EFTForge.state || {};
         const body = {
             weapon_id: weaponId,
@@ -663,7 +665,18 @@ window.EFTForge.optimizer = (function () {
             .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
             .then(data => { _exactMoaFloor = data.floor; })
             .catch(() => { _exactMoaFloor = null; })
-            .finally(() => { _fetchingMoaFloor = false; _renderConstraints(); });
+            .finally(() => { _fetchingMoaFloor = false; _refreshMoaSliderIfMounted(); });
+    }
+
+    // Refreshes just the MOA slider's bounds/ticks (and its spinner) in place so a
+    // floor fetch never tears down and rebuilds the surrounding toggle pills - doing
+    // so would replace their DOM nodes mid-click and kill the compare-toggle's CSS
+    // transition (it animates a class change on a persisting element, not a fresh one).
+    function _refreshMoaSliderIfMounted() {
+        const detail = document.querySelector('[data-constraint-detail="maxSpread"]');
+        const wrap = detail?.querySelector('[data-moa-slider-wrap]');
+        if (wrap) _renderMoaSliderWrap(detail);
+        else _renderConstraints();
     }
 
     function _moaSliderMin() {
@@ -671,91 +684,172 @@ window.EFTForge.optimizer = (function () {
         return _moaRange ? _moaRange.min : 0;
     }
 
+    // Each constraint's markup is split into a static toggle-row (the compare-toggle
+    // pill, never rebuilt after its first render) and a `data-constraint-detail`
+    // slot that gets its innerHTML swapped on toggle. Keeping the pill itself alive
+    // across clicks is what lets its CSS transition animate the on/off state change.
+
     function _plainConstraintHtml(def) {
         const state = _constraintState[def.key];
         return `
-            <div class="optimizer-toggle-row">
-                <span class="stat-label">${_t(def.label)}</span>
-                <div class="optimizer-segmented" data-constraint="${def.key}">
-                    <button type="button" class="optimizer-segmented-btn ${!state.on ? 'active' : ''}" data-value="off">${_t('optimizer.off')}</button>
-                    <button type="button" class="optimizer-segmented-btn ${state.on ? 'active' : ''}" data-value="on">${_t('optimizer.on')}</button>
+            <div class="optimizer-constraint-item">
+                <div class="optimizer-toggle-row">
+                    <span class="stat-label">${_t(def.label)}</span>
+                    <button type="button" class="compare-toggle${state.on ? ' active' : ''}" data-constraint="${def.key}">
+                        <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
+                    </button>
                 </div>
+                <div data-constraint-detail="${def.key}">${_plainConstraintDetailHtml(def)}</div>
             </div>
-            ${state.on ? `
-                <div class="optimizer-constraint-slider-row" data-constraint-slider="${def.key}">
-                    <input type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${state.value}">
-                    <input type="number" class="optimizer-input" min="${def.min}" max="${def.max}" step="${def.step}" value="${state.value}">
-                </div>
-            ` : ''}
         `;
+    }
+
+    function _plainConstraintDetailHtml(def) {
+        const state = _constraintState[def.key];
+        if (!state.on) return '';
+        return `
+            <div class="optimizer-constraint-slider-row" data-constraint-slider="${def.key}">
+                <div class="optimizer-slider-track">
+                    <input type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${state.value}">
+                    <div class="optimizer-slider-ticks"><span>${def.min}</span><span>${def.max}</span></div>
+                </div>
+                <input type="number" class="optimizer-input" min="${def.min}" max="${def.max}" step="${def.step}" value="${state.value}">
+                ${def.unit ? `<span class="input-suffix">${def.unit}</span>` : ''}
+            </div>
+        `;
+    }
+
+    function _wirePlainConstraintDetail(def, detail) {
+        const row = detail.querySelector(`[data-constraint-slider="${def.key}"]`);
+        if (!row) return;
+        const [range, number] = row.querySelectorAll('input');
+        range.addEventListener('input', () => _setConstraintValue(def.key, Number(range.value)));
+        number.addEventListener('input', () => _setConstraintValue(def.key, Number(number.value)));
     }
 
     function _minMagHtml() {
         const state = _constraintState.minMag;
-        const toggleRow = `
-            <div class="optimizer-toggle-row">
-                <span class="stat-label">${_t('optimizer.minMagCapacity')}</span>
-                <div class="optimizer-segmented" data-constraint="minMag">
-                    <button type="button" class="optimizer-segmented-btn ${!state.on ? 'active' : ''}" data-value="off">${_t('optimizer.off')}</button>
-                    <button type="button" class="optimizer-segmented-btn ${state.on ? 'active' : ''}" data-value="on">${_t('optimizer.on')}</button>
+        return `
+            <div class="optimizer-constraint-item">
+                <div class="optimizer-toggle-row">
+                    <span class="stat-label">${_t('optimizer.minMagCapacity')}</span>
+                    <button type="button" class="compare-toggle${state.on ? ' active' : ''}" data-constraint="minMag">
+                        <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
+                    </button>
                 </div>
+                <div data-constraint-detail="minMag">${_minMagDetailHtml()}</div>
             </div>
         `;
-        if (!state.on) return toggleRow;
+    }
 
+    function _minMagDetailHtml() {
+        const state = _constraintState.minMag;
+        if (!state.on) return '';
         if (!_magCapacityValues) {
-            return toggleRow + `<div class="optimizer-filter-loading">${_t('optimizer.loadingMods')}</div>`;
+            return `<div class="optimizer-filter-loading">${_t('optimizer.loadingMods')}</div>`;
         }
         if (_magCapacityValues.length <= 1) {
             const only = _magCapacityValues[0] || 0;
-            return toggleRow + `<div class="optimizer-constraint-static">${only} ${_t('optimizer.roundsUnit')}</div>`;
+            return `<div class="optimizer-constraint-static">${only} ${_t('optimizer.roundsUnit')}</div>`;
         }
         const index = Math.max(0, _magCapacityValues.indexOf(state.value));
-        return toggleRow + `
+        return `
             <div class="optimizer-constraint-slider-row" data-mag-slider>
-                <input type="range" min="0" max="${_magCapacityValues.length - 1}" step="1" value="${index}">
-                <span class="optimizer-constraint-readout" data-mag-readout>${state.value} ${_t('optimizer.roundsUnit')}</span>
+                <div class="optimizer-slider-track">
+                    <input type="range" min="0" max="${_magCapacityValues.length - 1}" step="1" value="${index}">
+                    <div class="optimizer-slider-ticks" data-mag-ticks>
+                        ${_magCapacityValues.map((v, i) => `<span class="${i === index ? 'active' : ''}">${v}</span>`).join('')}
+                    </div>
+                </div>
             </div>
         `;
+    }
+
+    function _wireMinMagDetail(detail) {
+        const magSlider = detail.querySelector('[data-mag-slider] input[type="range"]');
+        magSlider?.addEventListener('input', () => _setMinMagIndex(Number(magSlider.value)));
     }
 
     function _maxSpreadHtml() {
         const state = _constraintState.maxSpread;
-        const toggleRow = `
-            <div class="optimizer-toggle-row">
-                <span class="stat-label">${_t('optimizer.maxSpread')}</span>
-                <div class="optimizer-segmented" data-constraint="maxSpread">
-                    <button type="button" class="optimizer-segmented-btn ${!state.on ? 'active' : ''}" data-value="off">${_t('optimizer.off')}</button>
-                    <button type="button" class="optimizer-segmented-btn ${state.on ? 'active' : ''}" data-value="on">${_t('optimizer.on')}</button>
+        return `
+            <div class="optimizer-constraint-item">
+                <div class="optimizer-toggle-row">
+                    <span class="stat-label">${_t('optimizer.maxSpread')}</span>
+                    <button type="button" class="compare-toggle${state.on ? ' active' : ''}" data-constraint="maxSpread">
+                        <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
+                    </button>
                 </div>
-            </div>
-        `;
-        if (!state.on) return toggleRow;
-
-        const min = _moaSliderMin();
-        const max = _moaRange ? Math.max(_moaRange.max, min + 0.01) : Math.max(min + 0.01, 20);
-        const spinner = _fetchingMoaFloor ? '<span class="optimizer-spinner"></span>' : '';
-        return toggleRow + `
-            <div class="optimizer-toggle-row">
-                <span class="stat-label" title="${_escape(_t('optimizer.exactSliderFloorTooltip'))}">${_t('optimizer.exactSliderFloor')} <span class="optimizer-help-icon">?</span></span>
-                <span style="display:flex;align-items:center;">
-                    <div class="optimizer-segmented" id="optimizer-exact-floor-toggle">
-                        <button type="button" class="optimizer-segmented-btn ${!_useExactMoaFloor ? 'active' : ''}" data-value="off">${_t('optimizer.off')}</button>
-                        <button type="button" class="optimizer-segmented-btn ${_useExactMoaFloor ? 'active' : ''}" data-value="on">${_t('optimizer.on')}</button>
-                    </div>
-                    ${spinner}
-                </span>
-            </div>
-            <div class="optimizer-constraint-slider-row" data-constraint-slider="maxSpread">
-                <input type="range" min="${min}" max="${max}" step="0.01" value="${state.value}">
-                <input type="number" class="optimizer-input" min="${min}" max="${max}" step="0.01" value="${state.value}">
+                <div data-constraint-detail="maxSpread">${_maxSpreadDetailHtml()}</div>
             </div>
         `;
     }
 
-    function _setConstraintOn(key, on) {
-        _constraintState[key].on = on;
-        _renderConstraints();
+    // The exact-floor sub-toggle lives outside `data-moa-slider-wrap` so a floor
+    // refetch (which only changes the slider's bounds/ticks) can replace the wrap's
+    // innerHTML without also tearing down - and thus un-animating - that pill.
+    function _maxSpreadDetailHtml() {
+        const state = _constraintState.maxSpread;
+        if (!state.on) return '';
+        return `
+            <div class="optimizer-toggle-row">
+                <span class="stat-label" title="${_escape(_t('optimizer.exactSliderFloorTooltip'))}">${_t('optimizer.exactSliderFloor')} <span class="optimizer-help-icon">?</span></span>
+                <span style="display:flex;align-items:center;">
+                    <button type="button" class="compare-toggle${_useExactMoaFloor ? ' active' : ''}" id="optimizer-exact-floor-toggle">
+                        <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
+                    </button>
+                    <span class="optimizer-spinner" data-moa-spinner style="${_fetchingMoaFloor ? '' : 'display:none;'}"></span>
+                </span>
+            </div>
+            <div data-moa-slider-wrap>${_moaSliderWrapHtml()}</div>
+        `;
+    }
+
+    function _moaSliderWrapHtml() {
+        const state = _constraintState.maxSpread;
+        const min = _moaSliderMin();
+        const max = _moaRange ? Math.max(_moaRange.max, min + 0.01) : Math.max(min + 0.01, 20);
+        return `
+            <div class="optimizer-constraint-slider-row" data-constraint-slider="maxSpread">
+                <div class="optimizer-slider-track">
+                    <input type="range" min="${min}" max="${max}" step="0.01" value="${state.value}">
+                    <div class="optimizer-slider-ticks"><span>${min.toFixed(2)}</span><span>${max.toFixed(2)}</span></div>
+                </div>
+                <input type="number" class="optimizer-input" min="${min}" max="${max}" step="0.01" value="${state.value}">
+                <span class="input-suffix">${_t('optimizer.moaUnit')}</span>
+            </div>
+        `;
+    }
+
+    function _wireMoaSliderWrap(detail) {
+        const row = detail.querySelector('[data-constraint-slider="maxSpread"]');
+        if (!row) return;
+        const [range, number] = row.querySelectorAll('input');
+        range.addEventListener('input', () => _setMaxSpreadValue(Number(range.value)));
+        number.addEventListener('input', () => _setMaxSpreadValue(Number(number.value)));
+    }
+
+    function _renderMoaSliderWrap(detail) {
+        const wrap = detail.querySelector('[data-moa-slider-wrap]');
+        if (wrap) {
+            wrap.innerHTML = _moaSliderWrapHtml();
+            _wireMoaSliderWrap(detail);
+        }
+        const spinner = detail.querySelector('[data-moa-spinner]');
+        if (spinner) spinner.style.display = _fetchingMoaFloor ? '' : 'none';
+    }
+
+    function _wireMaxSpreadDetail(detail) {
+        const exactFloorToggle = detail.querySelector('#optimizer-exact-floor-toggle');
+        exactFloorToggle?.addEventListener('click', () => {
+            const value = !_useExactMoaFloor;
+            _useExactMoaFloor = value;
+            localStorage.setItem('eftforge-optimizer-exact-moa-floor', String(value));
+            exactFloorToggle.classList.toggle('active', value);
+            if (value && _exactMoaFloor == null) _fetchExactMoaFloor();
+            else _renderMoaSliderWrap(detail);
+        });
+        _wireMoaSliderWrap(detail);
     }
 
     function _setConstraintValue(key, value) {
@@ -769,28 +863,11 @@ window.EFTForge.optimizer = (function () {
         number.value = state.value;
     }
 
-    function _setMinMagOn(on) {
-        _constraintState.minMag.on = on;
-        if (on && _magCapacityValues && _magCapacityValues.length && !_constraintState.minMag.value) {
-            _constraintState.minMag.value = _magCapacityValues[0];
-        }
-        _renderConstraints();
-    }
-
     function _setMinMagIndex(index) {
         if (!_magCapacityValues) return;
         _constraintState.minMag.value = _magCapacityValues[index];
-        const readout = document.querySelector('[data-mag-readout]');
-        if (readout) readout.textContent = `${_constraintState.minMag.value} ${_t('optimizer.roundsUnit')}`;
-    }
-
-    function _setMaxSpreadOn(on) {
-        _constraintState.maxSpread.on = on;
-        if (on) {
-            if (!_constraintState.maxSpread.value && _moaRange) _constraintState.maxSpread.value = _moaRange.max;
-            if (_useExactMoaFloor && _exactMoaFloor == null) _fetchExactMoaFloor();
-        }
-        _renderConstraints();
+        const ticks = document.querySelectorAll('[data-mag-ticks] span');
+        ticks.forEach((el, i) => el.classList.toggle('active', i === index));
     }
 
     function _setMaxSpreadValue(value) {
@@ -805,13 +882,6 @@ window.EFTForge.optimizer = (function () {
         number.value = state.value;
     }
 
-    function _setUseExactMoaFloor(value) {
-        _useExactMoaFloor = value;
-        localStorage.setItem('eftforge-optimizer-exact-moa-floor', String(value));
-        if (value && _exactMoaFloor == null) _fetchExactMoaFloor();
-        else _renderConstraints();
-    }
-
     function _constraintsHtml() {
         return CONSTRAINT_DEFS.map(_plainConstraintHtml).join('') + _minMagHtml() + _maxSpreadHtml();
     }
@@ -822,37 +892,44 @@ window.EFTForge.optimizer = (function () {
         el.innerHTML = _constraintsHtml();
 
         for (const def of CONSTRAINT_DEFS) {
-            const segmented = el.querySelector(`[data-constraint="${def.key}"]`);
-            segmented.querySelector('[data-value="off"]').addEventListener('click', () => _setConstraintOn(def.key, false));
-            segmented.querySelector('[data-value="on"]').addEventListener('click', () => _setConstraintOn(def.key, true));
-
-            const row = el.querySelector(`[data-constraint-slider="${def.key}"]`);
-            if (!row) continue;
-            const [range, number] = row.querySelectorAll('input');
-            range.addEventListener('input', () => _setConstraintValue(def.key, Number(range.value)));
-            number.addEventListener('input', () => _setConstraintValue(def.key, Number(number.value)));
+            const toggle = el.querySelector(`[data-constraint="${def.key}"]`);
+            const detail = el.querySelector(`[data-constraint-detail="${def.key}"]`);
+            toggle.addEventListener('click', () => {
+                const on = !_constraintState[def.key].on;
+                _constraintState[def.key].on = on;
+                toggle.classList.toggle('active', on);
+                detail.innerHTML = _plainConstraintDetailHtml(def);
+                _wirePlainConstraintDetail(def, detail);
+            });
+            _wirePlainConstraintDetail(def, detail);
         }
 
-        const magSegmented = el.querySelector('[data-constraint="minMag"]');
-        magSegmented.querySelector('[data-value="off"]').addEventListener('click', () => _setMinMagOn(false));
-        magSegmented.querySelector('[data-value="on"]').addEventListener('click', () => _setMinMagOn(true));
-        const magSlider = el.querySelector('[data-mag-slider] input[type="range"]');
-        magSlider?.addEventListener('input', () => _setMinMagIndex(Number(magSlider.value)));
+        const magToggle = el.querySelector('[data-constraint="minMag"]');
+        const magDetail = el.querySelector('[data-constraint-detail="minMag"]');
+        magToggle.addEventListener('click', () => {
+            const on = !_constraintState.minMag.on;
+            _constraintState.minMag.on = on;
+            if (on && _magCapacityValues && _magCapacityValues.length && !_constraintState.minMag.value) {
+                _constraintState.minMag.value = _magCapacityValues[0];
+            }
+            magToggle.classList.toggle('active', on);
+            magDetail.innerHTML = _minMagDetailHtml();
+            _wireMinMagDetail(magDetail);
+        });
+        _wireMinMagDetail(magDetail);
 
-        const spreadSegmented = el.querySelector('[data-constraint="maxSpread"]');
-        spreadSegmented.querySelector('[data-value="off"]').addEventListener('click', () => _setMaxSpreadOn(false));
-        spreadSegmented.querySelector('[data-value="on"]').addEventListener('click', () => _setMaxSpreadOn(true));
-        const spreadRow = el.querySelector('[data-constraint-slider="maxSpread"]');
-        if (spreadRow) {
-            const [range, number] = spreadRow.querySelectorAll('input');
-            range.addEventListener('input', () => _setMaxSpreadValue(Number(range.value)));
-            number.addEventListener('input', () => _setMaxSpreadValue(Number(number.value)));
-        }
-        const exactFloorToggle = el.querySelector('#optimizer-exact-floor-toggle');
-        if (exactFloorToggle) {
-            exactFloorToggle.querySelector('[data-value="off"]').addEventListener('click', () => _setUseExactMoaFloor(false));
-            exactFloorToggle.querySelector('[data-value="on"]').addEventListener('click', () => _setUseExactMoaFloor(true));
-        }
+        const spreadToggle = el.querySelector('[data-constraint="maxSpread"]');
+        const spreadDetail = el.querySelector('[data-constraint-detail="maxSpread"]');
+        spreadToggle.addEventListener('click', () => {
+            const on = !_constraintState.maxSpread.on;
+            _constraintState.maxSpread.on = on;
+            if (on && !_constraintState.maxSpread.value && _moaRange) _constraintState.maxSpread.value = _moaRange.max;
+            spreadToggle.classList.toggle('active', on);
+            spreadDetail.innerHTML = _maxSpreadDetailHtml();
+            _wireMaxSpreadDetail(spreadDetail);
+            if (on && _useExactMoaFloor && _exactMoaFloor == null) _fetchExactMoaFloor();
+        });
+        _wireMaxSpreadDetail(spreadDetail);
     }
 
     function _renderOptimizeTab() {
@@ -894,10 +971,9 @@ window.EFTForge.optimizer = (function () {
                     </div>
                     <div class="optimizer-toggle-row">
                         <span class="stat-label">${_t('optimizer.useEvoErgo')}</span>
-                        <div class="optimizer-segmented">
-                            <button type="button" class="optimizer-segmented-btn ${!_useEvoErgo ? 'active' : ''}" id="optimizer-evo-ergo-off-btn">${_t('optimizer.off')}</button>
-                            <button type="button" class="optimizer-segmented-btn ${_useEvoErgo ? 'active' : ''}" id="optimizer-evo-ergo-on-btn">${_t('optimizer.on')}</button>
-                        </div>
+                        <button type="button" class="compare-toggle${_useEvoErgo ? ' active' : ''}" id="optimizer-evo-ergo-toggle">
+                            <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
+                        </button>
                     </div>
                     <div class="optimizer-toggle-row">
                         <span class="stat-label">${_t('optimizer.weightUiLabel')}</span>
@@ -915,10 +991,9 @@ window.EFTForge.optimizer = (function () {
                 <div class="optimizer-section-body" data-section-body style="${_sectionOpen.constraints ? '' : 'display:none;'}">
                     <div class="optimizer-toggle-row">
                         <span class="stat-label">${_t('optimizer.preventOverswing')}</span>
-                        <div class="optimizer-segmented">
-                            <button type="button" class="optimizer-segmented-btn ${!_preventOverswing ? 'active' : ''}" id="optimizer-overswing-off-btn">${_t('optimizer.off')}</button>
-                            <button type="button" class="optimizer-segmented-btn ${_preventOverswing ? 'active' : ''}" id="optimizer-overswing-on-btn">${_t('optimizer.on')}</button>
-                        </div>
+                        <button type="button" class="compare-toggle${_preventOverswing ? ' active' : ''}" id="optimizer-overswing-toggle">
+                            <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
+                        </button>
                     </div>
                     <div id="optimizer-constraints-widget"></div>
                 </div>
@@ -936,10 +1011,9 @@ window.EFTForge.optimizer = (function () {
                 <div class="optimizer-section-body" data-section-body style="${_sectionOpen.market ? '' : 'display:none;'}">
                     <div class="optimizer-toggle-row">
                         <span class="stat-label">${_t('optimizer.fleaAvailable')}</span>
-                        <div class="optimizer-segmented">
-                            <button type="button" class="optimizer-segmented-btn ${!_fleaAvailable ? 'active' : ''}" id="optimizer-flea-off-btn">${_t('optimizer.off')}</button>
-                            <button type="button" class="optimizer-segmented-btn ${_fleaAvailable ? 'active' : ''}" id="optimizer-flea-on-btn">${_t('optimizer.on')}</button>
-                        </div>
+                        <button type="button" class="compare-toggle${_fleaAvailable ? ' active' : ''}" id="optimizer-flea-toggle">
+                            <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
+                        </button>
                     </div>
                     <div id="optimizer-trader-access-widget"></div>
                 </div>
@@ -957,15 +1031,13 @@ window.EFTForge.optimizer = (function () {
         document.getElementById('optimizer-preset-performance').addEventListener('click', () => _setWeights(48, 48, 2));
         document.getElementById('optimizer-preset-recoil-focus').addEventListener('click', () => _setWeights(20, 70, 10));
         document.getElementById('optimizer-preset-ergo-focus').addEventListener('click', () => _setWeights(70, 20, 10));
-        document.getElementById('optimizer-evo-ergo-off-btn').addEventListener('click', () => _setUseEvoErgo(false));
-        document.getElementById('optimizer-evo-ergo-on-btn').addEventListener('click', () => _setUseEvoErgo(true));
+        document.getElementById('optimizer-evo-ergo-toggle').addEventListener('click', () => _setUseEvoErgo(!_useEvoErgo));
         document.getElementById('optimizer-weight-ui-sliders-btn').addEventListener('click', () => _setWeightUiMode('sliders'));
         document.getElementById('optimizer-weight-ui-triangle-btn').addEventListener('click', () => _setWeightUiMode('triangle'));
         _renderWeightWidget();
         _wireSection('weight', () => _setWeights(33, 34, 33));
 
-        document.getElementById('optimizer-overswing-off-btn').addEventListener('click', () => _setPreventOverswing(false));
-        document.getElementById('optimizer-overswing-on-btn').addEventListener('click', () => _setPreventOverswing(true));
+        document.getElementById('optimizer-overswing-toggle').addEventListener('click', () => _setPreventOverswing(!_preventOverswing));
         _renderConstraints();
         if (weaponId) {
             _fetchStatRanges(weaponId).then(ranges => {
@@ -987,8 +1059,7 @@ window.EFTForge.optimizer = (function () {
             _renderModFilterWidget();
         });
 
-        document.getElementById('optimizer-flea-off-btn').addEventListener('click', () => _setFleaAvailable(false));
-        document.getElementById('optimizer-flea-on-btn').addEventListener('click', () => _setFleaAvailable(true));
+        document.getElementById('optimizer-flea-toggle').addEventListener('click', () => _setFleaAvailable(!_fleaAvailable));
         _wireSection('market', () => {
             _setFleaAvailable(true);
             resetTraderLevels();
@@ -1070,10 +1141,12 @@ window.EFTForge.optimizer = (function () {
                 <select id="optimizer-gunsmith-task" class="optimizer-input">${options}</select>
             </div>
             <div id="optimizer-gunsmith-info"></div>
-            <label class="optimizer-checkbox-row">
-                <input type="checkbox" id="optimizer-gunsmith-flea-available" checked>
-                ${_t('optimizer.fleaAvailable')}
-            </label>
+            <div class="optimizer-toggle-row">
+                <span class="stat-label">${_t('optimizer.fleaAvailable')}</span>
+                <button type="button" class="compare-toggle active" id="optimizer-gunsmith-flea-available">
+                    <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
+                </button>
+            </div>
             <button class="modal-btn primary full-width" id="optimizer-gunsmith-solve-btn">${_t('optimizer.solve')}</button>
             <div id="optimizer-result-container"></div>
         `;
@@ -1082,6 +1155,9 @@ window.EFTForge.optimizer = (function () {
         select.addEventListener('change', () => _renderGunsmithTaskInfo(tasks));
         _renderGunsmithTaskInfo(tasks);
 
+        document.getElementById('optimizer-gunsmith-flea-available').addEventListener('click', (e) => {
+            e.currentTarget.classList.toggle('active');
+        });
         document.getElementById('optimizer-gunsmith-solve-btn').addEventListener('click', _solveGunsmith);
         _renderResult();
     }
@@ -1128,7 +1204,7 @@ window.EFTForge.optimizer = (function () {
         const state = window.EFTForge.state || {};
         const body = {
             task_name: taskName,
-            flea_available: document.getElementById('optimizer-gunsmith-flea-available').checked,
+            flea_available: document.getElementById('optimizer-gunsmith-flea-available').classList.contains('active'),
             trader_levels: state.traderLevels || null,
             strength_level: state.currentStrengthLevel ?? 10,
             equip_ergo_modifier: state.currentEquipErgoModifier ?? 0,

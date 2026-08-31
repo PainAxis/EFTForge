@@ -4267,21 +4267,25 @@ body[data-mobile="true"] .gun-card.mid-build {
     height: calc(100% - 80px);
 }
 
-/* Optimizer entry point: a slim gradient bar docked to the placeholder's
-   right edge, expanding to reveal its label on hover. Opens the Optimizer
-   drawer (#optimizer-overlay) on click - see modules/optimizer.js. */
+/* Optimizer entry point: a slim gradient rail pinned to the absolute right edge
+   of the viewport, expanding to reveal its label on hover. Opens the Optimizer
+   drawer (#optimizer-overlay) on click - see modules/optimizer.js.
+   position: fixed docks it to the viewport regardless of the placeholder's
+   margins or the panel's padding. Its z-index sits below the opaque header (100)
+   and tab bar (99) so that chrome covers the rail's top and it visually begins
+   at the panel, while staying under the drawer backdrop (1100). */
 .optimizer-edge-tab {
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    bottom: 2px;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
     width: 24px;
+    z-index: 50;
 
     display: flex;
     align-items: center;
     justify-content: flex-end;
 
-    border-radius: 0 6px 6px 0;
     background: linear-gradient(to left, rgba(245, 197, 66, 0.55), rgba(245, 197, 66, 0));
     cursor: pointer;
     opacity: 0.75;
@@ -6604,6 +6608,11 @@ button.build-tag-chip.active {
     min-width: unset;
     max-width: unset;
   }
+  #optimizer-overlay {
+    width: 100%;
+    min-width: unset;
+    max-width: unset;
+  }
   .tracker-controls { padding: 6px 10px; flex-wrap: wrap; }
   .tracker-type-filter { width: 100%; }
   .tracker-filter-btn { flex: 1; }
@@ -6701,7 +6710,9 @@ button.build-tag-chip.active {
 #optimizer-overlay {
   position: fixed;
   top: 0; right: 0; bottom: 0;
-  width: min(480px, 98vw);
+  width: 72%;
+  min-width: 620px;
+  max-width: 1100px;
   background: #1a1a1a;
   z-index: 1101;
   display: flex;
@@ -6757,12 +6768,27 @@ button.build-tag-chip.active {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* Establish an explicit base so unstyled labels (.stat-label) stop
+     inheriting the 16px browser default and out-sizing the section titles. */
+  font-size: 13px;
 }
 
 .optimizer-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+}
+
+/* The weapon field reads as caption -> value: a small, quiet uppercase
+   caption sitting above the prominent weapon name, matching the site's
+   stat caption pattern rather than the heavier global .modal-label. */
+#optimizer-tab-content .modal-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #666;
+  margin-bottom: 0;
 }
 
 .optimizer-field-row {
@@ -6787,6 +6813,9 @@ button.build-tag-chip.active {
   user-select: none;
 }
 .optimizer-section-header:hover { background: #1c1c1c; }
+/* A divider under the header (only when expanded) makes each section read as
+   a titled band, reinforcing that the yellow header outranks the rows below. */
+.optimizer-section.open .optimizer-section-header { border-bottom: 1px solid #242424; }
 
 .optimizer-section-chevron {
   display: inline-flex;
@@ -6801,8 +6830,9 @@ button.build-tag-chip.active {
   flex: 1;
   font-size: 13px;
   font-weight: 700;
-  color: #eee;
-  letter-spacing: 0.3px;
+  color: #f5c542;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
 }
 
 .optimizer-section-reset-btn {
@@ -6818,7 +6848,7 @@ button.build-tag-chip.active {
 .optimizer-section-reset-btn:hover { color: #f5c542; }
 
 .optimizer-section-body {
-  padding: 0 14px 14px;
+  padding: 12px 14px 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -6831,9 +6861,25 @@ button.build-tag-chip.active {
 }
 .optimizer-weight-slider-row .stat-label {
   font-size: 12px;
+  font-weight: 600;
+  color: #cfcfcf;
   font-variant-numeric: tabular-nums;
 }
-.optimizer-weight-slider-row input[type="range"] { width: 100%; }
+
+/* Control-label tier: every per-option label (Use EvoErgo, Budget, Prevent
+   Overswing, Consider Flea Market, constraint names...) shares one size and
+   weight so the rows read as a single, even rank below the section header. */
+#optimizer-tab-content .optimizer-toggle-row > .stat-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #d8d8d8;
+}
+.optimizer-weight-slider-row input[type="range"] {
+  display: block;
+  width: 100%;
+  accent-color: #f5c542;
+  cursor: pointer;
+}
 
 .optimizer-preset-row {
   display: flex;
@@ -6861,23 +6907,59 @@ button.build-tag-chip.active {
   gap: 12px;
 }
 
+/* Each constraint is a label row plus a detail slot that only fills in once the
+   constraint is switched on. Grouping them into an item and spacing the items on
+   the widget (instead of letting the flush-stacked rows collapse together) gives
+   the constraints the same even rhythm as the rest of the drawer, while keeping
+   each slider tucked under its own label. */
+#optimizer-constraints-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .optimizer-constraint-slider-row {
   display: flex;
   align-items: center;
   gap: 10px;
   margin: -2px 0 4px;
 }
-.optimizer-constraint-slider-row input[type="range"] { flex: 1; }
-.optimizer-constraint-slider-row input[type="number"] { width: 90px; flex-shrink: 0; }
-
-.optimizer-constraint-readout {
-  width: 90px;
+.optimizer-slider-track { flex: 1; min-width: 0; }
+.optimizer-slider-track input[type="range"] { display: block; width: 100%; accent-color: #f5c542; cursor: pointer; }
+.optimizer-constraint-slider-row input[type="number"] {
+  width: 100px;
   flex-shrink: 0;
-  text-align: right;
-  font-size: 12px;
-  color: #ccc;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  color: #eee;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-family: "Bender", Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  appearance: textfield;
+}
+.optimizer-constraint-slider-row input[type="number"]::-webkit-outer-spin-button,
+.optimizer-constraint-slider-row input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+.optimizer-constraint-slider-row input[type="number"]:invalid,
+.optimizer-constraint-slider-row input[type="number"]:invalid:focus {
+  border-color: #d64545;
+  color: #ff6b6b;
+  box-shadow: none;
+}
+
+.optimizer-slider-ticks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-size: 11px;
+  color: #777;
   font-variant-numeric: tabular-nums;
 }
+.optimizer-slider-ticks span.active { color: #f5c542; font-weight: 700; }
 
 .optimizer-constraint-static {
   font-size: 12px;
@@ -6911,6 +6993,10 @@ button.build-tag-chip.active {
 @keyframes optimizer-spin {
   to { transform: rotate(360deg); }
 }
+
+#optimizer-overlay .compare-toggle.active { color: #f5c542; }
+#optimizer-overlay .compare-toggle.active .compare-toggle-track { background: #1e1800; border-color: #f5c542; }
+#optimizer-overlay .compare-toggle.active .compare-toggle-knob  { background: #f5c542; }
 
 .optimizer-segmented {
   display: flex;
@@ -6968,19 +7054,9 @@ button.build-tag-chip.active {
 
 .optimizer-current-weapon {
   color: #f5c542;
-  font-size: 14px;
-  font-weight: 600;
-  padding: 4px 0;
-}
-
-.optimizer-checkbox-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: #ccc;
-  cursor: pointer;
-  user-select: none;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 2px 0;
 }
 
 .optimizer-filter-group {
