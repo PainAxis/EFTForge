@@ -34,6 +34,57 @@ window.EFTForge.optimizer = (function () {
     let _gunsmithTasks = null;      // cached GET /build/gunsmith-tasks response
     let _gunsmithTasksPromise = null;
 
+    // Priority weights, 0-100 each. They don't need to sum to 100 - the solver
+    // (milp.py's _weighted_objective) only compares their ratio after scaling
+    // each axis by its own price/recoil range, so this is purely a display
+    // convention borrowed from the reference optimizer's ternary plot.
+    let _ergoWeight = 33;
+    let _recoilWeight = 34;
+    let _priceWeight = 33;
+    let _useEvoErgo = false;
+    let _weightUiMode = localStorage.getItem('eftforge-optimizer-weight-ui') || 'triangle'; // 'triangle' | 'sliders'
+    let _fleaAvailable = true;
+    let _preventOverswing = false;
+
+    // Mod Filter (GET /build/mods) - cached per weapon+lang so switching tabs
+    // or re-rendering doesn't refetch.
+    let _modFilterData = null;      // { weaponId, lang, mods: [{id,name,icon}] }
+    let _modFilterPromise = null;
+    let _includedModIds = [];
+    let _excludedModIds = [];
+    let _modSearch = '';
+
+    // Collapsible section state, matching the reference optimizer's Collapse
+    // defaultActiveKey behavior (Weight Adjustment and Hard Constraints start
+    // open; Mod Filter and Market & Trader Access start collapsed).
+    let _sectionOpen = { weight: true, constraints: true, modFilter: false, market: false };
+
+    function _sectionHeaderHtml(id, titleKey) {
+        return `
+            <div class="optimizer-section-header" data-section-toggle="${id}">
+                <span class="optimizer-section-chevron">&#9656;</span>
+                <span class="optimizer-section-title">${_t(titleKey)}</span>
+                <button type="button" class="optimizer-section-reset-btn" data-section-reset="${id}" title="${_escape(_t('optimizer.resetSection'))}">&#8635;</button>
+            </div>
+        `;
+    }
+
+    function _toggleSection(id) {
+        _sectionOpen[id] = !_sectionOpen[id];
+        const section = document.querySelector(`.optimizer-section[data-section="${id}"]`);
+        const body = section?.querySelector('[data-section-body]');
+        if (section) section.classList.toggle('open', _sectionOpen[id]);
+        if (body) body.style.display = _sectionOpen[id] ? '' : 'none';
+    }
+
+    function _wireSection(id, onReset) {
+        document.querySelector(`[data-section-toggle="${id}"]`)?.addEventListener('click', () => _toggleSection(id));
+        document.querySelector(`[data-section-reset="${id}"]`)?.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            onReset();
+        });
+    }
+
     // Lets the user bail out of a slow solve instead of being stuck staring
     // at "Solving...". This only abandons the fetch client-side - a solve
     // already running on the server keeps running (a synchronous HiGHS call
@@ -127,13 +178,6 @@ window.EFTForge.optimizer = (function () {
         return div.innerHTML;
     }
 
-    function _numOrNull(id) {
-        const el = document.getElementById(id);
-        if (!el || el.value === '') return null;
-        const n = Number(el.value);
-        return Number.isFinite(n) ? n : null;
-    }
-
     function _switchTab(tab) {
         _activeTab = tab;
         _result = null;
@@ -177,97 +221,728 @@ window.EFTForge.optimizer = (function () {
        OPTIMIZE TAB
     =========================== */
 
-    function _weaponOptionsHtml() {
-        const guns = (window.EFTForge.state && window.EFTForge.state.allGuns) || [];
-        const currentId = window.EFTForge.state.currentGun ? window.EFTForge.state.currentGun.id : null;
+    /* ---------------------------
+       Ternary weight-control widget
+       Layout math ported from the reference optimizer's TernaryPlot.tsx.
+    --------------------------- */
 
-        const byCategory = {};
-        for (const gun of guns) {
-            const cat = gun.weapon_category || 'Primary';
-            (byCategory[cat] = byCategory[cat] || []).push(gun);
+    const TP_WIDTH = 300, TP_PAD_X = 50, TP_PAD_TOP = 38, TP_PAD_BOTTOM = 25;
+    const TP_SIDE = TP_WIDTH - TP_PAD_X * 2;
+    const TP_TRI_H = TP_SIDE * (Math.sqrt(3) / 2);
+    const TP_HEIGHT = TP_PAD_TOP + TP_TRI_H + TP_PAD_BOTTOM;
+    const TP_TOP = { x: TP_WIDTH / 2, y: TP_PAD_TOP };
+    const TP_LEFT = { x: TP_PAD_X, y: TP_PAD_TOP + TP_TRI_H };
+    const TP_RIGHT = { x: TP_WIDTH - TP_PAD_X, y: TP_PAD_TOP + TP_TRI_H };
+
+    function _tpToSvg(ergo, recoil, price) {
+        const total = ergo + recoil + price;
+        const e = ergo / total, r = recoil / total, p = price / total;
+        return {
+            x: e * TP_TOP.x + r * TP_RIGHT.x + p * TP_LEFT.x,
+            y: e * TP_TOP.y + r * TP_RIGHT.y + p * TP_LEFT.y,
+        };
+    }
+
+    function _tpToBarycentric(x, y) {
+        const x1 = TP_TOP.x - TP_LEFT.x, y1 = TP_TOP.y - TP_LEFT.y;
+        const x2 = TP_RIGHT.x - TP_LEFT.x, y2 = TP_RIGHT.y - TP_LEFT.y;
+        const xp = x - TP_LEFT.x, yp = y - TP_LEFT.y;
+        const det = x1 * y2 - x2 * y1;
+        const e = (xp * y2 - yp * x2) / det;
+        const r = (x1 * yp - y1 * xp) / det;
+        const p = 1 - e - r;
+        return {
+            e: Math.max(0, Math.min(1, e)),
+            r: Math.max(0, Math.min(1, r)),
+            p: Math.max(0, Math.min(1, p)),
+        };
+    }
+
+    function _tpGridLinesHtml() {
+        const lines = [];
+        for (let i = 1; i < 10; i++) {
+            const t = i / 10;
+            const segs = [
+                [_tpToSvg(1 - t, t, 0), _tpToSvg(1 - t, 0, t)],
+                [_tpToSvg(t, 0, 1 - t), _tpToSvg(0, t, 1 - t)],
+                [_tpToSvg(t, 1 - t, 0), _tpToSvg(0, 1 - t, t)],
+            ];
+            for (const [a, b] of segs) {
+                lines.push(`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#333" stroke-width="0.5" />`);
+            }
         }
-        const order = (window.EFTForge.config && window.EFTForge.config.CLASS_ORDER) || Object.keys(byCategory);
-        const categories = [...new Set([...order, ...Object.keys(byCategory)])].filter(c => byCategory[c]);
+        return lines.join('');
+    }
 
-        return categories.map(cat => {
-            const options = byCategory[cat]
-                .slice()
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map(g => `<option value="${g.id}" ${g.id === currentId ? 'selected' : ''}>${_escape(g.name)}</option>`)
-                .join('');
-            const label = (window.EFTForge.config && window.EFTForge.config.CLASS_DISPLAY_NAMES[cat]) || cat;
-            return `<optgroup label="${_escape(label)}">${options}</optgroup>`;
+    function _ergoAxisLabel() {
+        return _useEvoErgo ? _t('optimizer.evoErgoShort') : _t('optimizer.ergonomics');
+    }
+
+    function _setWeights(ergo, recoil, price) {
+        _ergoWeight = ergo;
+        _recoilWeight = recoil;
+        _priceWeight = price;
+        _updateWeightVisuals();
+    }
+
+    function _updateWeightVisuals() {
+        const total = _ergoWeight + _recoilWeight + _priceWeight;
+        const pctErgo = total > 0 ? Math.round(_ergoWeight / total * 100) : 33;
+        const pctRecoil = total > 0 ? Math.round(_recoilWeight / total * 100) : 34;
+        const pctPrice = total > 0 ? 100 - pctErgo - pctRecoil : 33;
+
+        const point = document.getElementById('optimizer-tp-point');
+        if (point) {
+            const svgPos = _tpToSvg(_ergoWeight, _recoilWeight, _priceWeight);
+            point.setAttribute('cx', svgPos.x);
+            point.setAttribute('cy', svgPos.y);
+        }
+        const pctErgoEl = document.getElementById('optimizer-tp-pct-ergo');
+        const pctRecoilEl = document.getElementById('optimizer-tp-pct-recoil');
+        const pctPriceEl = document.getElementById('optimizer-tp-pct-price');
+        if (pctErgoEl) pctErgoEl.textContent = `${pctErgo}%`;
+        if (pctRecoilEl) pctRecoilEl.textContent = `${pctRecoil}%`;
+        if (pctPriceEl) pctPriceEl.textContent = `${pctPrice}%`;
+
+        const ergoSlider = document.getElementById('optimizer-ergo-weight');
+        const recoilSlider = document.getElementById('optimizer-recoil-weight');
+        const priceSlider = document.getElementById('optimizer-price-weight');
+        if (ergoSlider) ergoSlider.value = _ergoWeight;
+        if (recoilSlider) recoilSlider.value = _recoilWeight;
+        if (priceSlider) priceSlider.value = _priceWeight;
+        const ergoLabel = document.getElementById('optimizer-ergo-weight-label');
+        const recoilLabel = document.getElementById('optimizer-recoil-weight-label');
+        const priceLabel = document.getElementById('optimizer-price-weight-label');
+        if (ergoLabel) ergoLabel.textContent = `${_ergoAxisLabel()}: ${_ergoWeight} (${pctErgo}%)`;
+        if (recoilLabel) recoilLabel.textContent = `${_t('optimizer.recoil')}: ${_recoilWeight} (${pctRecoil}%)`;
+        if (priceLabel) priceLabel.textContent = `${_t('optimizer.price')}: ${_priceWeight} (${pctPrice}%)`;
+    }
+
+    function _tpApplyPoint(clientX, clientY) {
+        const svg = document.getElementById('optimizer-tp-svg');
+        if (!svg) return;
+        const rect = svg.getBoundingClientRect();
+        const x = (clientX - rect.left) * (TP_WIDTH / rect.width);
+        const y = (clientY - rect.top) * (TP_HEIGHT / rect.height);
+        const { e, r, p } = _tpToBarycentric(x, y);
+        const total = e + r + p;
+        const ergoNorm = Math.round((e / total) * 100);
+        const recoilNorm = Math.round((r / total) * 100);
+        const priceNorm = 100 - ergoNorm - recoilNorm;
+        _setWeights(ergoNorm, recoilNorm, priceNorm);
+    }
+
+    function _tpHandleMouseDown(ev) {
+        ev.preventDefault();
+        const svg = document.getElementById('optimizer-tp-svg');
+        if (svg) svg.style.cursor = 'grabbing';
+        _tpApplyPoint(ev.clientX, ev.clientY);
+        const handleMove = (moveEv) => _tpApplyPoint(moveEv.clientX, moveEv.clientY);
+        const handleUp = () => {
+            if (svg) svg.style.cursor = 'crosshair';
+            window.removeEventListener('mousemove', handleMove);
+            window.removeEventListener('mouseup', handleUp);
+        };
+        window.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', handleUp);
+    }
+
+    function _weightWidgetHtml() {
+        if (_weightUiMode === 'sliders') {
+            return `
+                <div class="optimizer-weight-slider-row">
+                    <span class="stat-label" id="optimizer-ergo-weight-label"></span>
+                    <input type="range" id="optimizer-ergo-weight" min="0" max="100" step="1" value="${_ergoWeight}">
+                </div>
+                <div class="optimizer-weight-slider-row">
+                    <span class="stat-label" id="optimizer-recoil-weight-label"></span>
+                    <input type="range" id="optimizer-recoil-weight" min="0" max="100" step="1" value="${_recoilWeight}">
+                </div>
+                <div class="optimizer-weight-slider-row">
+                    <span class="stat-label" id="optimizer-price-weight-label"></span>
+                    <input type="range" id="optimizer-price-weight" min="0" max="100" step="1" value="${_priceWeight}">
+                </div>
+            `;
+        }
+        return `
+            <svg id="optimizer-tp-svg" viewBox="0 0 ${TP_WIDTH} ${TP_HEIGHT}" class="optimizer-ternary-svg">
+                <polygon points="${TP_TOP.x},${TP_TOP.y} ${TP_RIGHT.x},${TP_RIGHT.y} ${TP_LEFT.x},${TP_LEFT.y}"
+                    fill="#111" stroke="#444" stroke-width="1.5" />
+                <g>${_tpGridLinesHtml()}</g>
+                <g class="optimizer-tp-labels">
+                    <text x="${TP_TOP.x}" y="${TP_TOP.y - 22}" text-anchor="middle" class="optimizer-tp-pct optimizer-tp-ergo" id="optimizer-tp-pct-ergo"></text>
+                    <text x="${TP_TOP.x}" y="${TP_TOP.y - 6}" text-anchor="middle" class="optimizer-tp-corner optimizer-tp-ergo">${_ergoAxisLabel()}</text>
+                    <text x="${TP_RIGHT.x + 15}" y="${TP_RIGHT.y + 4}" class="optimizer-tp-corner optimizer-tp-recoil">${_t('optimizer.recoil')}</text>
+                    <text x="${TP_RIGHT.x + 15}" y="${TP_RIGHT.y + 18}" class="optimizer-tp-pct optimizer-tp-recoil" id="optimizer-tp-pct-recoil"></text>
+                    <text x="${TP_LEFT.x - 15}" y="${TP_LEFT.y + 4}" text-anchor="end" class="optimizer-tp-corner optimizer-tp-price">${_t('optimizer.price')}</text>
+                    <text x="${TP_LEFT.x - 15}" y="${TP_LEFT.y + 18}" text-anchor="end" class="optimizer-tp-pct optimizer-tp-price" id="optimizer-tp-pct-price"></text>
+                </g>
+                <circle id="optimizer-tp-point" r="6" class="optimizer-tp-point" />
+            </svg>
+        `;
+    }
+
+    function _renderWeightWidget() {
+        const el = document.getElementById('optimizer-weight-widget');
+        if (!el) return;
+        el.innerHTML = _weightWidgetHtml();
+
+        if (_weightUiMode === 'sliders') {
+            document.getElementById('optimizer-ergo-weight').addEventListener('input', (e) => _setWeights(Number(e.target.value), _recoilWeight, _priceWeight));
+            document.getElementById('optimizer-recoil-weight').addEventListener('input', (e) => _setWeights(_ergoWeight, Number(e.target.value), _priceWeight));
+            document.getElementById('optimizer-price-weight').addEventListener('input', (e) => _setWeights(_ergoWeight, _recoilWeight, Number(e.target.value)));
+        } else {
+            document.getElementById('optimizer-tp-svg').addEventListener('mousedown', _tpHandleMouseDown);
+        }
+        _updateWeightVisuals();
+    }
+
+    function _setWeightUiMode(mode) {
+        if (mode === _weightUiMode) return;
+        _weightUiMode = mode;
+        localStorage.setItem('eftforge-optimizer-weight-ui', mode);
+        document.getElementById('optimizer-weight-ui-sliders-btn')?.classList.toggle('active', mode === 'sliders');
+        document.getElementById('optimizer-weight-ui-triangle-btn')?.classList.toggle('active', mode === 'triangle');
+        _renderWeightWidget();
+    }
+
+    function _setUseEvoErgo(value) {
+        _useEvoErgo = value;
+        document.getElementById('optimizer-evo-ergo-off-btn')?.classList.toggle('active', !value);
+        document.getElementById('optimizer-evo-ergo-on-btn')?.classList.toggle('active', value);
+        _renderWeightWidget();
+    }
+
+    function _setFleaAvailable(value) {
+        _fleaAvailable = value;
+        document.getElementById('optimizer-flea-off-btn')?.classList.toggle('active', !value);
+        document.getElementById('optimizer-flea-on-btn')?.classList.toggle('active', value);
+        _refreshStatRanges();
+    }
+
+    // Budget's achievable range depends on which items are purchasable at all
+    // right now, so a Flea/Trader Access change invalidates the cached
+    // GET /build/stat-ranges response and re-applies the fresh one.
+    function _refreshStatRanges() {
+        const weaponId = window.EFTForge.state?.currentGun?.id;
+        if (!weaponId) return;
+        _statRanges = null;
+        _exactMoaFloor = null;
+        _fetchStatRanges(weaponId).then(ranges => {
+            _applyStatRanges(ranges);
+            if (_useExactMoaFloor && _constraintState.maxSpread?.on) _fetchExactMoaFloor();
+            else _renderConstraints();
+        }).catch(() => {});
+    }
+
+    function _setPreventOverswing(value) {
+        _preventOverswing = value;
+        document.getElementById('optimizer-overswing-off-btn')?.classList.toggle('active', !value);
+        document.getElementById('optimizer-overswing-on-btn')?.classList.toggle('active', value);
+    }
+
+    /* ---------------------------
+       Trader Access - reuses the price panel's own trader-levels widget
+       (stats-panel.js) so a change here updates the exact same
+       EFTForge.state.traderLevels everywhere else, instead of maintaining a
+       second copy of that state.
+    --------------------------- */
+
+    function _renderTraderAccessWidget() {
+        const el = document.getElementById('optimizer-trader-access-widget');
+        if (!el) return;
+        el.innerHTML = traderLevelsBodyHtml();
+        attachTraderLevelsListeners(el);
+    }
+
+    function onTraderLevelsChange() {
+        _renderTraderAccessWidget();
+        _refreshStatRanges();
+    }
+
+    /* ---------------------------
+       Mod Filter - force-include/exclude a specific item from the solve,
+       via GET /build/mods (reachable mods for the current weapon).
+    --------------------------- */
+
+    function _fetchModFilterData(weaponId) {
+        const lang = (window.EFTForge.state && window.EFTForge.state.lang) || 'en';
+        if (_modFilterData && _modFilterData.weaponId === weaponId && _modFilterData.lang === lang) {
+            return Promise.resolve(_modFilterData);
+        }
+        if (_modFilterPromise) return _modFilterPromise;
+        _modFilterPromise = fetch(`${EFTForge.config.API_BASE}/build/mods?weapon_id=${weaponId}&lang=${lang}`)
+            .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+            .then(data => {
+                _modFilterData = { weaponId, lang, mods: data.mods };
+                return _modFilterData;
+            })
+            .finally(() => { _modFilterPromise = null; });
+        return _modFilterPromise;
+    }
+
+    function _filterTagsHtml(ids, lookup, cls) {
+        return ids.map(id => {
+            const name = lookup.find(x => x.id === id)?.name || id;
+            const sign = cls === 'include' ? '+' : '-';
+            return `<span class="optimizer-filter-tag optimizer-filter-tag-${cls}" data-remove-id="${_escape(id)}">${sign} ${_escape(name)} &times;</span>`;
         }).join('');
     }
 
-    function _sliderRow(id, label, defaultValue) {
+    function _modFilterHtml() {
+        const modTags = _filterTagsHtml(_includedModIds, _modFilterData.mods, 'include')
+            + _filterTagsHtml(_excludedModIds, _modFilterData.mods, 'exclude');
+
         return `
-            <div class="optimizer-slider-row">
-                <span class="stat-label" style="width:90px;">${label}</span>
-                <input type="range" id="${id}" min="0" max="1" step="0.05" value="${defaultValue}"
-                    oninput="document.getElementById('${id}-val').textContent = this.value">
-                <span class="optimizer-slider-value" id="${id}-val">${defaultValue}</span>
+            <div class="optimizer-filter-group">
+                <span class="optimizer-filter-hint">${_t('optimizer.filterByItemHint')}</span>
+                <div class="optimizer-filter-search-wrap">
+                    <input type="text" class="optimizer-input" id="optimizer-mod-search" placeholder="${_t('optimizer.searchMods')}" autocomplete="off" value="${_escape(_modSearch)}">
+                    <div class="optimizer-filter-results" id="optimizer-mod-results"></div>
+                </div>
+                <div class="optimizer-filter-tags">${modTags}</div>
             </div>
         `;
+    }
+
+    function _renderModResults() {
+        const el = document.getElementById('optimizer-mod-results');
+        if (!el) return;
+        const q = _modSearch.trim().toLowerCase();
+        if (!q) { el.innerHTML = ''; return; }
+        const matches = _modFilterData.mods
+            .filter(m => !_includedModIds.includes(m.id) && !_excludedModIds.includes(m.id) && (m.name || '').toLowerCase().includes(q))
+            .slice(0, 8);
+        if (!matches.length) {
+            el.innerHTML = `<div class="optimizer-filter-empty">${_t('optimizer.noMatches')}</div>`;
+            return;
+        }
+        el.innerHTML = matches.map(m => `
+            <div class="optimizer-filter-result-row">
+                <img class="optimizer-filter-result-icon" src="${_escape(m.icon || '')}" onerror="this.style.visibility='hidden'">
+                <span>${_escape(m.name)}</span>
+                <span class="optimizer-filter-result-actions">
+                    <button type="button" class="optimizer-filter-add-btn optimizer-filter-add-include" data-add-include="${_escape(m.id)}">+</button>
+                    <button type="button" class="optimizer-filter-add-btn optimizer-filter-add-exclude" data-add-exclude="${_escape(m.id)}">-</button>
+                </span>
+            </div>
+        `).join('');
+        el.querySelectorAll('[data-add-include]').forEach(btn => btn.addEventListener('click', () => {
+            _includedModIds.push(btn.dataset.addInclude);
+            _modSearch = '';
+            _renderModFilterWidget();
+        }));
+        el.querySelectorAll('[data-add-exclude]').forEach(btn => btn.addEventListener('click', () => {
+            _excludedModIds.push(btn.dataset.addExclude);
+            _modSearch = '';
+            _renderModFilterWidget();
+        }));
+    }
+
+    function _renderModFilterWidget() {
+        const el = document.getElementById('optimizer-mod-filter-widget');
+        if (!el) return;
+
+        const weaponId = window.EFTForge.state?.currentGun?.id;
+        if (!_modFilterData || _modFilterData.weaponId !== weaponId) {
+            el.innerHTML = `<div class="optimizer-filter-loading">${_t('optimizer.loadingMods')}</div>`;
+            if (!weaponId) return;
+            _fetchModFilterData(weaponId).then(() => _renderModFilterWidget()).catch(() => {
+                el.innerHTML = `<div class="optimizer-error">${_t('optimizer.modsLoadFailed')}</div>`;
+            });
+            return;
+        }
+
+        el.innerHTML = _modFilterHtml();
+
+        const modInput = document.getElementById('optimizer-mod-search');
+        modInput.addEventListener('input', () => { _modSearch = modInput.value; _renderModResults(); });
+        _renderModResults();
+
+        el.querySelectorAll('[data-remove-id]').forEach(tag => tag.addEventListener('click', () => {
+            const id = tag.dataset.removeId;
+            _includedModIds = _includedModIds.filter(m => m !== id);
+            _excludedModIds = _excludedModIds.filter(m => m !== id);
+            _renderModFilterWidget();
+        }));
+    }
+
+    /* ---------------------------
+       Hard constraints - on/off toggle + slider, mirroring the reference
+       optimizer's WeightAdjuster.tsx constraints panel. Fixed ranges here
+       match the reference exactly (it doesn't compute these dynamically
+       either) - only min_mag_capacity and max_moa get a per-weapon dynamic
+       range there, via availableMagCapacities/moaRange in its App.tsx.
+    --------------------------- */
+
+    const CONSTRAINT_DEFS = [
+        { key: 'budget', label: 'optimizer.budget', min: 10000, max: 2000000, step: 10000, default: 200000 },
+        { key: 'minErgo', label: 'optimizer.minErgo', min: 1, max: 100, step: 1, default: 40 },
+    ];
+
+    let _constraintState = {};
+    let _magCapacityValues = null;   // [10, 20, 30, ...] - GET /build/stat-ranges' mag_capacity.values, sorted
+    let _moaRange = null;            // { min, max } - GET /build/stat-ranges' fast/approximate moa range
+    let _exactMoaFloor = null;       // number | null - GET /build/moa-floor result, fetched on demand
+    let _fetchingMoaFloor = false;
+    let _useExactMoaFloor = localStorage.getItem('eftforge-optimizer-exact-moa-floor') !== 'false';
+    let _statRanges = null;          // { weaponId, ranges } - GET /build/stat-ranges response, cached per weapon
+    let _statRangesPromise = null;
+
+    function _resetConstraintValues() {
+        _constraintState = {};
+        for (const def of CONSTRAINT_DEFS) _constraintState[def.key] = { on: false, value: def.default };
+        _constraintState.minMag = { on: false, value: 0 };
+        _constraintState.maxSpread = { on: false, value: 0 };
+    }
+
+    // Full reset for opening the panel on a (possibly different) weapon -
+    // also drops the cached per-weapon ranges, unlike _resetConstraintValues()
+    // which the "reset section" button uses (same weapon, no need to refetch).
+    function _resetConstraintState() {
+        _resetConstraintValues();
+        _magCapacityValues = null;
+        _moaRange = null;
+        _exactMoaFloor = null;
+        _fetchingMoaFloor = false;
+    }
+
+    function _applyStatRanges(ranges) {
+        _magCapacityValues = (ranges && ranges.mag_capacity && ranges.mag_capacity.values) || null;
+        _moaRange = (ranges && ranges.moa) || null;
+        // If the user toggled either constraint on before this fetch resolved,
+        // it was left at its placeholder value (0) - backfill it now so the
+        // slider and its readout agree instead of showing "0" at rest.
+        if (_constraintState.minMag?.on && !_constraintState.minMag.value && _magCapacityValues?.length) {
+            _constraintState.minMag.value = _magCapacityValues[0];
+        }
+        if (_constraintState.maxSpread?.on && !_constraintState.maxSpread.value && _moaRange) {
+            _constraintState.maxSpread.value = _moaRange.max;
+        }
+    }
+
+    function _fetchStatRanges(weaponId) {
+        if (_statRanges && _statRanges.weaponId === weaponId) return Promise.resolve(_statRanges.ranges);
+        if (_statRangesPromise) return _statRangesPromise;
+        const state = window.EFTForge.state || {};
+        const body = {
+            weapon_id: weaponId,
+            trader_levels: state.traderLevels || null,
+            flea_available: _fleaAvailable,
+        };
+        _statRangesPromise = fetch(`${EFTForge.config.API_BASE}/build/stat-ranges`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        })
+            .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+            .then(data => {
+                _statRanges = { weaponId, ranges: data.ranges };
+                return _statRanges.ranges;
+            })
+            .finally(() => { _statRangesPromise = null; });
+        return _statRangesPromise;
+    }
+
+    function _fetchExactMoaFloor() {
+        const weaponId = window.EFTForge.state?.currentGun?.id;
+        if (!weaponId || _fetchingMoaFloor) return;
+        _fetchingMoaFloor = true;
+        _renderConstraints();
+        const state = window.EFTForge.state || {};
+        const body = {
+            weapon_id: weaponId,
+            trader_levels: state.traderLevels || null,
+            flea_available: _fleaAvailable,
+        };
+        fetch(`${EFTForge.config.API_BASE}/build/moa-floor`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        })
+            .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+            .then(data => { _exactMoaFloor = data.floor; })
+            .catch(() => { _exactMoaFloor = null; })
+            .finally(() => { _fetchingMoaFloor = false; _renderConstraints(); });
+    }
+
+    function _moaSliderMin() {
+        if (_useExactMoaFloor && _exactMoaFloor != null) return _exactMoaFloor;
+        return _moaRange ? _moaRange.min : 0;
+    }
+
+    function _plainConstraintHtml(def) {
+        const state = _constraintState[def.key];
+        return `
+            <div class="optimizer-toggle-row">
+                <span class="stat-label">${_t(def.label)}</span>
+                <div class="optimizer-segmented" data-constraint="${def.key}">
+                    <button type="button" class="optimizer-segmented-btn ${!state.on ? 'active' : ''}" data-value="off">${_t('optimizer.off')}</button>
+                    <button type="button" class="optimizer-segmented-btn ${state.on ? 'active' : ''}" data-value="on">${_t('optimizer.on')}</button>
+                </div>
+            </div>
+            ${state.on ? `
+                <div class="optimizer-constraint-slider-row" data-constraint-slider="${def.key}">
+                    <input type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${state.value}">
+                    <input type="number" class="optimizer-input" min="${def.min}" max="${def.max}" step="${def.step}" value="${state.value}">
+                </div>
+            ` : ''}
+        `;
+    }
+
+    function _minMagHtml() {
+        const state = _constraintState.minMag;
+        const toggleRow = `
+            <div class="optimizer-toggle-row">
+                <span class="stat-label">${_t('optimizer.minMagCapacity')}</span>
+                <div class="optimizer-segmented" data-constraint="minMag">
+                    <button type="button" class="optimizer-segmented-btn ${!state.on ? 'active' : ''}" data-value="off">${_t('optimizer.off')}</button>
+                    <button type="button" class="optimizer-segmented-btn ${state.on ? 'active' : ''}" data-value="on">${_t('optimizer.on')}</button>
+                </div>
+            </div>
+        `;
+        if (!state.on) return toggleRow;
+
+        if (!_magCapacityValues) {
+            return toggleRow + `<div class="optimizer-filter-loading">${_t('optimizer.loadingMods')}</div>`;
+        }
+        if (_magCapacityValues.length <= 1) {
+            const only = _magCapacityValues[0] || 0;
+            return toggleRow + `<div class="optimizer-constraint-static">${only} ${_t('optimizer.roundsUnit')}</div>`;
+        }
+        const index = Math.max(0, _magCapacityValues.indexOf(state.value));
+        return toggleRow + `
+            <div class="optimizer-constraint-slider-row" data-mag-slider>
+                <input type="range" min="0" max="${_magCapacityValues.length - 1}" step="1" value="${index}">
+                <span class="optimizer-constraint-readout" data-mag-readout>${state.value} ${_t('optimizer.roundsUnit')}</span>
+            </div>
+        `;
+    }
+
+    function _maxSpreadHtml() {
+        const state = _constraintState.maxSpread;
+        const toggleRow = `
+            <div class="optimizer-toggle-row">
+                <span class="stat-label">${_t('optimizer.maxSpread')}</span>
+                <div class="optimizer-segmented" data-constraint="maxSpread">
+                    <button type="button" class="optimizer-segmented-btn ${!state.on ? 'active' : ''}" data-value="off">${_t('optimizer.off')}</button>
+                    <button type="button" class="optimizer-segmented-btn ${state.on ? 'active' : ''}" data-value="on">${_t('optimizer.on')}</button>
+                </div>
+            </div>
+        `;
+        if (!state.on) return toggleRow;
+
+        const min = _moaSliderMin();
+        const max = _moaRange ? Math.max(_moaRange.max, min + 0.01) : Math.max(min + 0.01, 20);
+        const spinner = _fetchingMoaFloor ? '<span class="optimizer-spinner"></span>' : '';
+        return toggleRow + `
+            <div class="optimizer-toggle-row">
+                <span class="stat-label" title="${_escape(_t('optimizer.exactSliderFloorTooltip'))}">${_t('optimizer.exactSliderFloor')} <span class="optimizer-help-icon">?</span></span>
+                <span style="display:flex;align-items:center;">
+                    <div class="optimizer-segmented" id="optimizer-exact-floor-toggle">
+                        <button type="button" class="optimizer-segmented-btn ${!_useExactMoaFloor ? 'active' : ''}" data-value="off">${_t('optimizer.off')}</button>
+                        <button type="button" class="optimizer-segmented-btn ${_useExactMoaFloor ? 'active' : ''}" data-value="on">${_t('optimizer.on')}</button>
+                    </div>
+                    ${spinner}
+                </span>
+            </div>
+            <div class="optimizer-constraint-slider-row" data-constraint-slider="maxSpread">
+                <input type="range" min="${min}" max="${max}" step="0.01" value="${state.value}">
+                <input type="number" class="optimizer-input" min="${min}" max="${max}" step="0.01" value="${state.value}">
+            </div>
+        `;
+    }
+
+    function _setConstraintOn(key, on) {
+        _constraintState[key].on = on;
+        _renderConstraints();
+    }
+
+    function _setConstraintValue(key, value) {
+        const def = CONSTRAINT_DEFS.find(d => d.key === key);
+        const state = _constraintState[key];
+        state.value = Math.min(def.max, Math.max(def.min, value));
+        const row = document.querySelector(`[data-constraint-slider="${key}"]`);
+        if (!row) return;
+        const [range, number] = row.querySelectorAll('input');
+        range.value = state.value;
+        number.value = state.value;
+    }
+
+    function _setMinMagOn(on) {
+        _constraintState.minMag.on = on;
+        if (on && _magCapacityValues && _magCapacityValues.length && !_constraintState.minMag.value) {
+            _constraintState.minMag.value = _magCapacityValues[0];
+        }
+        _renderConstraints();
+    }
+
+    function _setMinMagIndex(index) {
+        if (!_magCapacityValues) return;
+        _constraintState.minMag.value = _magCapacityValues[index];
+        const readout = document.querySelector('[data-mag-readout]');
+        if (readout) readout.textContent = `${_constraintState.minMag.value} ${_t('optimizer.roundsUnit')}`;
+    }
+
+    function _setMaxSpreadOn(on) {
+        _constraintState.maxSpread.on = on;
+        if (on) {
+            if (!_constraintState.maxSpread.value && _moaRange) _constraintState.maxSpread.value = _moaRange.max;
+            if (_useExactMoaFloor && _exactMoaFloor == null) _fetchExactMoaFloor();
+        }
+        _renderConstraints();
+    }
+
+    function _setMaxSpreadValue(value) {
+        const min = _moaSliderMin();
+        const max = _moaRange ? Math.max(_moaRange.max, min + 0.01) : Math.max(min + 0.01, 20);
+        const state = _constraintState.maxSpread;
+        state.value = Math.min(max, Math.max(min, value));
+        const row = document.querySelector('[data-constraint-slider="maxSpread"]');
+        if (!row) return;
+        const [range, number] = row.querySelectorAll('input');
+        range.value = state.value;
+        number.value = state.value;
+    }
+
+    function _setUseExactMoaFloor(value) {
+        _useExactMoaFloor = value;
+        localStorage.setItem('eftforge-optimizer-exact-moa-floor', String(value));
+        if (value && _exactMoaFloor == null) _fetchExactMoaFloor();
+        else _renderConstraints();
+    }
+
+    function _constraintsHtml() {
+        return CONSTRAINT_DEFS.map(_plainConstraintHtml).join('') + _minMagHtml() + _maxSpreadHtml();
+    }
+
+    function _renderConstraints() {
+        const el = document.getElementById('optimizer-constraints-widget');
+        if (!el) return;
+        el.innerHTML = _constraintsHtml();
+
+        for (const def of CONSTRAINT_DEFS) {
+            const segmented = el.querySelector(`[data-constraint="${def.key}"]`);
+            segmented.querySelector('[data-value="off"]').addEventListener('click', () => _setConstraintOn(def.key, false));
+            segmented.querySelector('[data-value="on"]').addEventListener('click', () => _setConstraintOn(def.key, true));
+
+            const row = el.querySelector(`[data-constraint-slider="${def.key}"]`);
+            if (!row) continue;
+            const [range, number] = row.querySelectorAll('input');
+            range.addEventListener('input', () => _setConstraintValue(def.key, Number(range.value)));
+            number.addEventListener('input', () => _setConstraintValue(def.key, Number(number.value)));
+        }
+
+        const magSegmented = el.querySelector('[data-constraint="minMag"]');
+        magSegmented.querySelector('[data-value="off"]').addEventListener('click', () => _setMinMagOn(false));
+        magSegmented.querySelector('[data-value="on"]').addEventListener('click', () => _setMinMagOn(true));
+        const magSlider = el.querySelector('[data-mag-slider] input[type="range"]');
+        magSlider?.addEventListener('input', () => _setMinMagIndex(Number(magSlider.value)));
+
+        const spreadSegmented = el.querySelector('[data-constraint="maxSpread"]');
+        spreadSegmented.querySelector('[data-value="off"]').addEventListener('click', () => _setMaxSpreadOn(false));
+        spreadSegmented.querySelector('[data-value="on"]').addEventListener('click', () => _setMaxSpreadOn(true));
+        const spreadRow = el.querySelector('[data-constraint-slider="maxSpread"]');
+        if (spreadRow) {
+            const [range, number] = spreadRow.querySelectorAll('input');
+            range.addEventListener('input', () => _setMaxSpreadValue(Number(range.value)));
+            number.addEventListener('input', () => _setMaxSpreadValue(Number(number.value)));
+        }
+        const exactFloorToggle = el.querySelector('#optimizer-exact-floor-toggle');
+        if (exactFloorToggle) {
+            exactFloorToggle.querySelector('[data-value="off"]').addEventListener('click', () => _setUseExactMoaFloor(false));
+            exactFloorToggle.querySelector('[data-value="on"]').addEventListener('click', () => _setUseExactMoaFloor(true));
+        }
     }
 
     function _renderOptimizeTab() {
         const content = document.getElementById('optimizer-tab-content');
         if (!content) return;
 
+        _ergoWeight = 33;
+        _recoilWeight = 34;
+        _priceWeight = 33;
+        _useEvoErgo = false;
+        _fleaAvailable = true;
+        _preventOverswing = false;
+        _resetConstraintState();
+        _includedModIds = [];
+        _excludedModIds = [];
+        _modSearch = '';
+
+        const currentGun = window.EFTForge.state && window.EFTForge.state.currentGun;
+        const gunName = currentGun ? currentGun.name : '';
+        const weaponId = currentGun ? currentGun.id : null;
+
         content.innerHTML = `
             <div class="optimizer-field">
                 <label class="modal-label">${_t('optimizer.weapon')}</label>
-                <select id="optimizer-weapon" class="optimizer-input">${_weaponOptionsHtml()}</select>
+                <div class="optimizer-current-weapon">${_escape(gunName)}</div>
             </div>
 
-            <div class="optimizer-field">
-                <label class="modal-label">${_t('optimizer.priorities')}</label>
-                <label class="optimizer-checkbox-row">
-                    <input type="checkbox" id="optimizer-use-evo-ergo">
-                    ${_t('optimizer.useEvoErgo')}
-                </label>
-                ${_sliderRow('optimizer-ergo-weight', _t('optimizer.ergonomics'), 1)}
-                ${_sliderRow('optimizer-recoil-weight', _t('optimizer.recoil'), 1)}
-                ${_sliderRow('optimizer-price-weight', _t('optimizer.price'), 0.3)}
+            <div class="optimizer-section${_sectionOpen.weight ? ' open' : ''}" data-section="weight">
+                ${_sectionHeaderHtml('weight', 'optimizer.weightAdjustment')}
+                <div class="optimizer-section-body" data-section-body style="${_sectionOpen.weight ? '' : 'display:none;'}">
+                    <div class="optimizer-preset-row">
+                        <button type="button" class="optimizer-preset-btn" id="optimizer-preset-recoil">${_t('optimizer.presetRecoil')}</button>
+                        <button type="button" class="optimizer-preset-btn" id="optimizer-preset-ergo">${_t('optimizer.presetErgo')}</button>
+                        <button type="button" class="optimizer-preset-btn" id="optimizer-preset-balanced">${_t('optimizer.presetBalanced')}</button>
+                        <button type="button" class="optimizer-preset-btn" id="optimizer-preset-min-operable">${_t('optimizer.presetMinOperable')}</button>
+                        <button type="button" class="optimizer-preset-btn" id="optimizer-preset-performance">${_t('optimizer.presetPerformance')}</button>
+                        <button type="button" class="optimizer-preset-btn" id="optimizer-preset-recoil-focus">${_t('optimizer.presetRecoilFocus')}</button>
+                        <button type="button" class="optimizer-preset-btn" id="optimizer-preset-ergo-focus">${_t('optimizer.presetErgoFocus')}</button>
+                    </div>
+                    <div class="optimizer-toggle-row">
+                        <span class="stat-label">${_t('optimizer.useEvoErgo')}</span>
+                        <div class="optimizer-segmented">
+                            <button type="button" class="optimizer-segmented-btn ${!_useEvoErgo ? 'active' : ''}" id="optimizer-evo-ergo-off-btn">${_t('optimizer.off')}</button>
+                            <button type="button" class="optimizer-segmented-btn ${_useEvoErgo ? 'active' : ''}" id="optimizer-evo-ergo-on-btn">${_t('optimizer.on')}</button>
+                        </div>
+                    </div>
+                    <div class="optimizer-toggle-row">
+                        <span class="stat-label">${_t('optimizer.weightUiLabel')}</span>
+                        <div class="optimizer-segmented">
+                            <button type="button" class="optimizer-segmented-btn ${_weightUiMode === 'sliders' ? 'active' : ''}" id="optimizer-weight-ui-sliders-btn">${_t('optimizer.weightUiSliders')}</button>
+                            <button type="button" class="optimizer-segmented-btn ${_weightUiMode === 'triangle' ? 'active' : ''}" id="optimizer-weight-ui-triangle-btn">${_t('optimizer.weightUiTriangle')}</button>
+                        </div>
+                    </div>
+                    <div id="optimizer-weight-widget"></div>
+                </div>
             </div>
 
-            <div class="optimizer-field">
-                <label class="modal-label">${_t('optimizer.constraints')}</label>
-                <div class="optimizer-field-row">
-                    <div class="optimizer-field">
-                        <span class="stat-label">${_t('optimizer.budget')}</span>
-                        <input id="optimizer-max-price" type="number" min="0" class="optimizer-input" placeholder="${_t('optimizer.noLimit')}">
+            <div class="optimizer-section${_sectionOpen.constraints ? ' open' : ''}" data-section="constraints">
+                ${_sectionHeaderHtml('constraints', 'optimizer.constraints')}
+                <div class="optimizer-section-body" data-section-body style="${_sectionOpen.constraints ? '' : 'display:none;'}">
+                    <div class="optimizer-toggle-row">
+                        <span class="stat-label">${_t('optimizer.preventOverswing')}</span>
+                        <div class="optimizer-segmented">
+                            <button type="button" class="optimizer-segmented-btn ${!_preventOverswing ? 'active' : ''}" id="optimizer-overswing-off-btn">${_t('optimizer.off')}</button>
+                            <button type="button" class="optimizer-segmented-btn ${_preventOverswing ? 'active' : ''}" id="optimizer-overswing-on-btn">${_t('optimizer.on')}</button>
+                        </div>
                     </div>
-                    <div class="optimizer-field">
-                        <span class="stat-label">${_t('optimizer.minErgo')}</span>
-                        <input id="optimizer-min-ergo" type="number" class="optimizer-input" placeholder="${_t('optimizer.noLimit')}">
-                    </div>
+                    <div id="optimizer-constraints-widget"></div>
                 </div>
-                <div class="optimizer-field-row">
-                    <div class="optimizer-field">
-                        <span class="stat-label">${_t('optimizer.maxRecoil')}</span>
-                        <input id="optimizer-max-recoil" type="number" min="0" class="optimizer-input" placeholder="${_t('optimizer.noLimit')}">
-                    </div>
-                    <div class="optimizer-field">
-                        <span class="stat-label">${_t('optimizer.maxWeight')}</span>
-                        <input id="optimizer-max-weight" type="number" min="0" step="0.1" class="optimizer-input" placeholder="${_t('optimizer.noLimit')}">
-                    </div>
+            </div>
+
+            <div class="optimizer-section${_sectionOpen.modFilter ? ' open' : ''}" data-section="modFilter">
+                ${_sectionHeaderHtml('modFilter', 'optimizer.modFilter')}
+                <div class="optimizer-section-body" data-section-body style="${_sectionOpen.modFilter ? '' : 'display:none;'}">
+                    <div id="optimizer-mod-filter-widget"></div>
                 </div>
-                <div class="optimizer-field-row">
-                    <div class="optimizer-field">
-                        <span class="stat-label">${_t('optimizer.minMagCapacity')}</span>
-                        <input id="optimizer-min-mag" type="number" min="0" class="optimizer-input" placeholder="${_t('optimizer.noLimit')}">
+            </div>
+
+            <div class="optimizer-section${_sectionOpen.market ? ' open' : ''}" data-section="market">
+                ${_sectionHeaderHtml('market', 'optimizer.marketAccess')}
+                <div class="optimizer-section-body" data-section-body style="${_sectionOpen.market ? '' : 'display:none;'}">
+                    <div class="optimizer-toggle-row">
+                        <span class="stat-label">${_t('optimizer.fleaAvailable')}</span>
+                        <div class="optimizer-segmented">
+                            <button type="button" class="optimizer-segmented-btn ${!_fleaAvailable ? 'active' : ''}" id="optimizer-flea-off-btn">${_t('optimizer.off')}</button>
+                            <button type="button" class="optimizer-segmented-btn ${_fleaAvailable ? 'active' : ''}" id="optimizer-flea-on-btn">${_t('optimizer.on')}</button>
+                        </div>
                     </div>
-                    <div class="optimizer-field">
-                        <span class="stat-label">${_t('optimizer.minSightingRange')}</span>
-                        <input id="optimizer-min-sight" type="number" min="0" class="optimizer-input" placeholder="${_t('optimizer.noLimit')}">
-                    </div>
+                    <div id="optimizer-trader-access-widget"></div>
                 </div>
-                <label class="optimizer-checkbox-row">
-                    <input type="checkbox" id="optimizer-flea-available" checked>
-                    ${_t('optimizer.fleaAvailable')}
-                </label>
             </div>
 
             <button class="modal-btn primary full-width" id="optimizer-solve-btn">${_t('optimizer.solve')}</button>
@@ -275,12 +950,57 @@ window.EFTForge.optimizer = (function () {
             <div id="optimizer-result-container"></div>
         `;
 
+        document.getElementById('optimizer-preset-recoil').addEventListener('click', () => _setWeights(0, 100, 0));
+        document.getElementById('optimizer-preset-ergo').addEventListener('click', () => _setWeights(100, 0, 0));
+        document.getElementById('optimizer-preset-balanced').addEventListener('click', () => _setWeights(33, 34, 33));
+        document.getElementById('optimizer-preset-min-operable').addEventListener('click', () => _setWeights(0, 0, 100));
+        document.getElementById('optimizer-preset-performance').addEventListener('click', () => _setWeights(48, 48, 2));
+        document.getElementById('optimizer-preset-recoil-focus').addEventListener('click', () => _setWeights(20, 70, 10));
+        document.getElementById('optimizer-preset-ergo-focus').addEventListener('click', () => _setWeights(70, 20, 10));
+        document.getElementById('optimizer-evo-ergo-off-btn').addEventListener('click', () => _setUseEvoErgo(false));
+        document.getElementById('optimizer-evo-ergo-on-btn').addEventListener('click', () => _setUseEvoErgo(true));
+        document.getElementById('optimizer-weight-ui-sliders-btn').addEventListener('click', () => _setWeightUiMode('sliders'));
+        document.getElementById('optimizer-weight-ui-triangle-btn').addEventListener('click', () => _setWeightUiMode('triangle'));
+        _renderWeightWidget();
+        _wireSection('weight', () => _setWeights(33, 34, 33));
+
+        document.getElementById('optimizer-overswing-off-btn').addEventListener('click', () => _setPreventOverswing(false));
+        document.getElementById('optimizer-overswing-on-btn').addEventListener('click', () => _setPreventOverswing(true));
+        _renderConstraints();
+        if (weaponId) {
+            _fetchStatRanges(weaponId).then(ranges => {
+                _applyStatRanges(ranges);
+                _renderConstraints();
+            }).catch(() => {});
+        }
+        _wireSection('constraints', () => {
+            _setPreventOverswing(false);
+            _resetConstraintValues();
+            _renderConstraints();
+        });
+
+        _renderModFilterWidget();
+        _wireSection('modFilter', () => {
+            _includedModIds = [];
+            _excludedModIds = [];
+            _modSearch = '';
+            _renderModFilterWidget();
+        });
+
+        document.getElementById('optimizer-flea-off-btn').addEventListener('click', () => _setFleaAvailable(false));
+        document.getElementById('optimizer-flea-on-btn').addEventListener('click', () => _setFleaAvailable(true));
+        _wireSection('market', () => {
+            _setFleaAvailable(true);
+            resetTraderLevels();
+        });
+        _renderTraderAccessWidget();
+
         document.getElementById('optimizer-solve-btn').addEventListener('click', _solveOptimize);
         _renderResult();
     }
 
     async function _solveOptimize() {
-        const weaponId = document.getElementById('optimizer-weapon').value;
+        const weaponId = window.EFTForge.state?.currentGun?.id;
         if (!weaponId) return;
 
         _solving = true;
@@ -291,17 +1011,18 @@ window.EFTForge.optimizer = (function () {
         const state = window.EFTForge.state || {};
         const body = {
             weapon_id: weaponId,
-            use_evo_ergo: document.getElementById('optimizer-use-evo-ergo').checked,
-            ergo_weight: Number(document.getElementById('optimizer-ergo-weight').value),
-            recoil_weight: Number(document.getElementById('optimizer-recoil-weight').value),
-            price_weight: Number(document.getElementById('optimizer-price-weight').value),
-            max_price: _numOrNull('optimizer-max-price'),
-            min_ergonomics: _numOrNull('optimizer-min-ergo'),
-            max_recoil_v: _numOrNull('optimizer-max-recoil'),
-            max_weight: _numOrNull('optimizer-max-weight'),
-            min_mag_capacity: _numOrNull('optimizer-min-mag'),
-            min_sighting_range: _numOrNull('optimizer-min-sight'),
-            flea_available: document.getElementById('optimizer-flea-available').checked,
+            use_evo_ergo: _useEvoErgo,
+            ergo_weight: _ergoWeight / 100,
+            recoil_weight: _recoilWeight / 100,
+            price_weight: _priceWeight / 100,
+            max_price: _constraintState.budget.on ? _constraintState.budget.value : null,
+            min_ergonomics: _constraintState.minErgo.on ? _constraintState.minErgo.value : null,
+            min_mag_capacity: _constraintState.minMag.on ? _constraintState.minMag.value : null,
+            max_moa: _constraintState.maxSpread.on ? _constraintState.maxSpread.value : null,
+            prevent_overswing: _preventOverswing,
+            include_items: _includedModIds.length ? _includedModIds : null,
+            exclude_items: _excludedModIds.length ? _excludedModIds : null,
+            flea_available: _fleaAvailable,
             trader_levels: state.traderLevels || null,
             strength_level: state.currentStrengthLevel ?? 10,
             equip_ergo_modifier: state.currentEquipErgoModifier ?? 0,
@@ -498,6 +1219,6 @@ window.EFTForge.optimizer = (function () {
     // Scripts are loaded at the end of <body> so DOM is ready; init immediately.
     init();
 
-    return { showPanel, hidePanel, onLangChange };
+    return { showPanel, hidePanel, onLangChange, onTraderLevelsChange };
 
 }());

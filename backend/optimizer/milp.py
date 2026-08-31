@@ -6,6 +6,7 @@ original optimizer's WASM frontend already uses.
 """
 
 from collections import deque
+from types import SimpleNamespace
 
 import numpy as np
 from scipy.optimize import milp, LinearConstraint, Bounds
@@ -13,6 +14,26 @@ from scipy.optimize import milp, LinearConstraint, Bounds
 from stats import _compute_stats
 
 TIEBREAK = 0.01
+
+# A no-op OptimizeParams stand-in (every field _build_constraints reads is at
+# its default/off value) for compute_stat_ranges(), which wants only the
+# structural constraints (slot mutex, dependency, conflicts, required slots),
+# not the caller's own hard-stat constraints. Duck-typed instead of importing
+# OptimizeParams to avoid a circular import (solver.py imports this module).
+_NO_CONSTRAINTS_PARAMS = SimpleNamespace(
+    max_price=None,
+    min_ergonomics=None,
+    max_recoil_v=None,
+    max_recoil_sum=None,
+    include_categories=None,
+    max_weight=None,
+    min_mag_capacity=None,
+    min_sighting_range=None,
+    include_items=None,
+    prevent_overswing=False,
+    max_moa=None,
+    equip_ergo_modifier=0.0,
+)
 
 # Hard cap on a single HiGHS solve. A normal solve finishes in well under a
 # second; this only ever matters for a pathological case (an earlier attempt
@@ -36,6 +57,18 @@ PRICE_SCALE_FALLBACK = 300_000.0
 # of the reference's separate formula, per the "always use EFTForge's own
 # formula" decision.
 EVO_ERGO_ERGO_ANCHORS = [30, 55, 80, 105, 130, 155]
+
+# stats.py's KG(E) overswing-threshold curve: KG = KG_A*E^2 + KG_B*E + KG_C.
+# Must stay in sync with _compute_stats() there - this is a re-derivation for
+# the MILP's linear tangent-cut approximation, not an independent formula.
+KG_A, KG_B, KG_C = 0.0007556, 0.02736, 2.9159
+
+# stats.py's accuracy_moa formula: MOA = MOA_K * COI * (1 - total_accuracy_mod/100).
+MOA_K = 34.36
+# Safe upper bound on the per-candidate-barrel MOA gate terms below - real
+# values (COI a few units, accuracy mods a few hundred percent at most) stay
+# well under this, mirroring the reference optimizer's own big-M choice.
+MOA_BIG_M = 2000.0
 
 
 class _Infeasible(Exception):
@@ -113,6 +146,118 @@ def _item_to_valid_slots(compat_map, candidate_set):
             if item_id in candidate_set:
                 out.setdefault(item_id, []).append((slot_id, owner))
     return out
+
+
+def _lp_stat_range(cb, n, coeffs):
+    """[min, max] of sum(coeffs[i]*x_i) actually achievable under the
+    structural constraints already in cb (slot mutex, dependency, conflicts,
+    required slots) - via LP relaxation (fast: continuous, no integrality),
+    not a raw sum over every reachable item's coefficient. Summing every
+    positive (or negative) coefficient across the whole reachable set hugely
+    overshoots reality, since most of those items can never be selected
+    simultaneously (they compete for the same slots or conflict). A
+    relaxation optimum is still a valid outer bound on the true
+    integer-feasible range (relaxing integrality can only widen it), so it's
+    safe to use for tangent-cut anchors or a UI slider's extremes.
+    """
+    fallback_lo = float(np.clip(coeffs, None, 0).sum())
+    fallback_hi = float(np.clip(coeffs, 0, None).sum())
+
+    constraints = cb.build()
+    if constraints is None:
+        return fallback_lo, fallback_hi
+
+    bounds = Bounds(0, 1)
+    zero_integrality = np.zeros(n)
+    res_max = milp(-coeffs, constraints=constraints, bounds=bounds, integrality=zero_integrality)
+    res_min = milp(coeffs, constraints=constraints, bounds=bounds, integrality=zero_integrality)
+
+    hi = -res_max.fun if res_max.success else fallback_hi
+    lo = res_min.fun if res_min.success else fallback_lo
+    return lo, hi
+
+
+def _reachable_ergo_range(cb, mods, item_ids, base_ergo):
+    """[min, max] total_ergo actually achievable - see _lp_stat_range."""
+    n = len(item_ids)
+    ergo = np.array([(mods[i].ergonomics_modifier or 0) for i in item_ids])
+    lo, hi = _lp_stat_range(cb, n, ergo)
+
+    ergo_min = max(1.0, base_ergo + lo)
+    ergo_max = max(ergo_min + 1.0, base_ergo + hi)
+    return ergo_min, ergo_max
+
+
+def _prevent_overswing_anchors(cb, mods, item_ids, base_ergo):
+    """Anchor ergo values to build tangent cuts around, spread across THIS
+    weapon's actual reachable ergo range rather than a fixed global list
+    (EVO_ERGO_ERGO_ANCHORS is fine for the EvoErgo sweep, where each anchor
+    is tried in its own separate solve, but these cuts are ANDed together
+    into one simultaneous constraint set - a tangent line evaluated far past
+    its own anchor point extrapolates linearly away from the convex KG(E)
+    curve and can go negative, wrongly making every build infeasible for a
+    weapon whose ergo never gets near that anchor).
+    """
+    ergo_min, ergo_max = _reachable_ergo_range(cb, mods, item_ids, base_ergo)
+    return [ergo_min + (ergo_max - ergo_min) * t for t in (0.0, 0.25, 0.5, 0.75, 1.0)]
+
+
+def _add_prevent_overswing_constraints(cb, idx, mods, item_ids, base_ergo, base_weight, equip_ergo_modifier):
+    """Hard-constrains total_weight <= KG(effective_ergo), i.e. stats.py's
+    "overswing" flag stays False. KG is convex in ergo, so a MILP (linear
+    only) can't encode "weight <= KG(ergo)" exactly - that region is itself
+    non-convex. Instead this adds one linear tangent-line cut per anchor
+    (see _prevent_overswing_anchors) and ANDs them together. Each cut is a
+    stricter (tangent lines sit below the true convex curve) but sound
+    bound, so the solver can never accept a build that actually overswings;
+    it may reject a handful of builds that are fine but fall between
+    anchors, which is the same tradeoff the reference optimizer's
+    overswingCuts make.
+    """
+    b = equip_ergo_modifier
+    for anchor in _prevent_overswing_anchors(cb, mods, item_ids, base_ergo):
+        e0 = anchor * (1 + b)
+        kg0 = KG_A * e0 * e0 + KG_B * e0 + KG_C
+        slope = (2 * KG_A * e0 + KG_B) * (1 + b)  # d(KG)/d(total_ergo) via chain rule E = total_ergo*(1+b)
+        coeffs = {idx[i]: (mods[i].weight or 0) - slope * (mods[i].ergonomics_modifier or 0) for i in item_ids}
+        rhs = kg0 + slope * (base_ergo - anchor) - base_weight
+        cb.le(coeffs, rhs)
+
+
+def _add_max_moa_constraint(cb, idx, mods, weapon, item_ids, max_moa):
+    """Hard-constrains stats.py's accuracy_moa <= max_moa. COI-bearing items
+    (alternate barrels) override the weapon's own center_of_impact when
+    selected, so each is gated with a big-M "if this barrel is chosen" cut;
+    a final cut covers "no alternate barrel chosen, falls back to the
+    weapon's own COI" when that fallback itself has a real COI value.
+    """
+    coi_items = [i for i in item_ids if mods[i].center_of_impact is not None]
+    acc_items = [i for i in item_ids if mods[i].center_of_impact is None]
+
+    def _acc_coeffs(coi):
+        scale = (MOA_K * coi) / 100.0
+        return {idx[i]: scale * (mods[i].accuracy_modifier or 0) for i in acc_items}
+
+    if not coi_items:
+        base_coi = weapon.center_of_impact
+        if base_coi is None:
+            raise _Infeasible("This weapon has no accuracy (MOA) stat to constrain.")
+        cb.ge(_acc_coeffs(base_coi), MOA_K * base_coi - max_moa)
+        return
+
+    cb.le({idx[i]: 1 for i in coi_items}, 1)  # at most one alternate barrel active at a time
+
+    for b_id in coi_items:
+        coi_b = mods[b_id].center_of_impact
+        coeffs = _acc_coeffs(coi_b)
+        coeffs[idx[b_id]] = coeffs.get(idx[b_id], 0) - MOA_BIG_M
+        cb.ge(coeffs, MOA_K * coi_b - max_moa - MOA_BIG_M)
+
+    if weapon.center_of_impact is not None:
+        coeffs = _acc_coeffs(weapon.center_of_impact)
+        for b_id in coi_items:
+            coeffs[idx[b_id]] = coeffs.get(idx[b_id], 0) + MOA_BIG_M
+        cb.ge(coeffs, MOA_K * weapon.center_of_impact - max_moa)
 
 
 def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, prices: dict, params):
@@ -280,6 +425,12 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
                 raise _Infeasible(f"Required item {req_id} is not available under the current filters.")
             cb.eq({idx[req_id]: 1}, 1)
 
+    if params.prevent_overswing:
+        _add_prevent_overswing_constraints(cb, idx, mods, item_ids, base_ergo, base_weight, params.equip_ergo_modifier)
+
+    if params.max_moa is not None:
+        _add_max_moa_constraint(cb, idx, mods, weapon, item_ids, params.max_moa)
+
     return item_ids, idx, cb, item_to_valid_slots, base_ergo, base_weight, base_recoil_v
 
 
@@ -414,3 +565,57 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
             "slot_pairs": [],
         }
     return best
+
+
+def _moa_stat_range(cb, idx, mods, item_ids, weapon):
+    """[min, max] accuracy_moa actually achievable - same per-candidate-barrel
+    reasoning as _add_max_moa_constraint, but reporting the achievable range
+    instead of gating a single threshold.
+    """
+    coi_items = [i for i in item_ids if mods[i].center_of_impact is not None]
+    acc_items = [i for i in item_ids if mods[i].center_of_impact is None]
+
+    n = len(item_ids)
+    acc_coeffs = np.zeros(n)
+    for i in acc_items:
+        acc_coeffs[idx[i]] = mods[i].accuracy_modifier or 0
+    acc_lo, acc_hi = _lp_stat_range(cb, n, acc_coeffs)
+
+    candidate_cois = [mods[i].center_of_impact for i in coi_items]
+    if weapon.center_of_impact is not None:
+        candidate_cois.append(weapon.center_of_impact)  # "no alternate barrel chosen" fallback
+    if not candidate_cois:
+        return None
+
+    values = []
+    for coi in candidate_cois:
+        values.append(MOA_K * coi * (1 - acc_hi / 100))
+        values.append(MOA_K * coi * (1 - acc_lo / 100))
+    return max(0.0, min(values)), max(values)
+
+
+def compute_stat_ranges(weapon, mods: dict, compat_map, candidate_ids: list, prices: dict) -> dict:
+    """Reachable magazine capacities and the theoretical accuracy_moa range
+    for this weapon - the two constraints where the reference optimizer
+    itself computes a per-weapon dynamic slider range (availableMagCapacities
+    and moaRange in App.tsx). Every other hard constraint (budget, min ergo)
+    uses a fixed range there, matched in the frontend instead of here.
+    """
+    try:
+        item_ids, idx, cb, item_to_valid_slots, base_ergo, base_weight, base_recoil_v = _build_constraints(
+            weapon, mods, compat_map, candidate_ids, prices, _NO_CONSTRAINTS_PARAMS
+        )
+    except _Infeasible:
+        return {}
+
+    ranges = {}
+
+    mag_caps = sorted({mods[i].magazine_capacity for i in item_ids if mods[i].magazine_capacity})
+    if mag_caps:
+        ranges["mag_capacity"] = {"min": mag_caps[0], "max": mag_caps[-1], "values": mag_caps}
+
+    moa_range = _moa_stat_range(cb, idx, mods, item_ids, weapon)
+    if moa_range:
+        ranges["moa"] = {"min": round(moa_range[0], 2), "max": round(moa_range[1], 2)}
+
+    return ranges

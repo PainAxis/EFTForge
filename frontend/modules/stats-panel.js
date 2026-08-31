@@ -1,6 +1,7 @@
 window.EFTForge = window.EFTForge || {};
 
-/* exported restoreFleaCache, showBuildView, showPriceView, updateViewToggleLabels --
+/* exported restoreFleaCache, showBuildView, showPriceView, updateViewToggleLabels,
+   traderLevelsBodyHtml, attachTraderLevelsListeners, resetTraderLevels --
    called from other modules or index.html attributes */
 
 // ---------------------------------------------------
@@ -44,6 +45,96 @@ function _saveTraderLevels() {
     try {
         localStorage.setItem("eftforge_trader_levels", JSON.stringify(EFTForge.state.traderLevels));
     } catch (_) {}
+}
+
+// Shared trader-levels widget (master "All" row + one row per whitelisted
+// trader) - used by both the price panel and the optimizer's Trader Access
+// section, so a change made in either place updates the same
+// EFTForge.state.traderLevels and is reflected everywhere. Delegated via
+// data-trader/data-trader-all instead of ids, so it's safe to render more
+// than one instance in the DOM at once (e.g. optimizer drawer open over the
+// price panel).
+function traderLevelsBodyHtml() {
+    const { t } = EFTForge.lang;
+    const tradersByNorm = EFTForge.state.tradersByNorm || {};
+    const traderList = _TRADER_LEVEL_WHITELIST
+        .map(norm => tradersByNorm[norm])
+        .filter(Boolean);
+
+    let traderLevelRowsHtml = "";
+    for (const tr of traderList) {
+        const currentLevel = EFTForge.state.traderLevels[tr.normalizedName] ?? 4;
+        const portrait = tr.imageLink
+            ? `<img class="cost-trader-portrait" src="${escapeHtml(tr.imageLink)}" onerror="this.style.display='none'" />`
+            : `<span class="cost-trader-text">${escapeHtml(tr.normalizedName)}</span>`;
+        let levelBtns = "";
+        for (let lv = 1; lv <= 4; lv++) {
+            const cls = lv <= currentLevel ? "trader-level-btn active" : "trader-level-btn";
+            levelBtns += `<button type="button" class="${cls}" data-trader="${escapeHtml(tr.normalizedName)}" data-level="${lv}">${lv}</button>`;
+        }
+        traderLevelRowsHtml += `<div class="trader-level-row">
+            ${portrait}
+            <span class="trader-level-name">${escapeHtml(tr.name)}</span>
+            <div class="trader-level-btns">${levelBtns}</div>
+        </div>`;
+    }
+
+    const _allLevels = _TRADER_LEVEL_WHITELIST.map(n => EFTForge.state.traderLevels[n] ?? 4);
+    const _globalLevel = _allLevels.every(l => l === _allLevels[0]) ? _allLevels[0] : null;
+
+    let globalBtns = "";
+    for (let lv = 1; lv <= 4; lv++) {
+        const cls = lv <= (_globalLevel ?? 0) ? "trader-level-btn active" : "trader-level-btn";
+        globalBtns += `<button type="button" class="${cls}" data-level="${lv}" data-trader-all="1">${lv}</button>`;
+    }
+
+    return `
+        <div class="trader-level-row trader-level-master-row">
+            <span class="trader-level-name">${t("stats.traderLevelsAll")}</span>
+            <div class="trader-level-btns">${globalBtns}</div>
+        </div>
+        <div class="trader-levels-divider"></div>
+        ${traderLevelRowsHtml}
+    `;
+}
+
+/** Wires up click handlers on a container previously filled with traderLevelsBodyHtml(). */
+function attachTraderLevelsListeners(container) {
+    if (!container) return;
+    container.querySelectorAll('[data-trader-all="1"]').forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            const level = parseInt(e.currentTarget.dataset.level, 10);
+            for (const norm of _TRADER_LEVEL_WHITELIST) {
+                EFTForge.state.traderLevels[norm] = level;
+            }
+            _saveTraderLevels();
+            renderPriceOverview();
+            renderFullTree();
+            EFTForge.optimizer?.onTraderLevelsChange();
+        });
+    });
+    container.querySelectorAll(".trader-level-btn:not([data-trader-all])").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            const traderNorm = e.currentTarget.dataset.trader;
+            const level = parseInt(e.currentTarget.dataset.level, 10);
+            EFTForge.state.traderLevels[traderNorm] = level;
+            _saveTraderLevels();
+            renderPriceOverview();
+            renderFullTree();
+            EFTForge.optimizer?.onTraderLevelsChange();
+        });
+    });
+}
+
+/** Resets every whitelisted trader back to LL4 (the app's default/unset level) - used by the optimizer's Market & Trader Access reset button. */
+function resetTraderLevels() {
+    for (const norm of _TRADER_LEVEL_WHITELIST) {
+        EFTForge.state.traderLevels[norm] = 4;
+    }
+    _saveTraderLevels();
+    renderPriceOverview();
+    renderFullTree();
+    EFTForge.optimizer?.onTraderLevelsChange();
 }
 
 let _fleaFetching = false;
@@ -299,40 +390,6 @@ async function renderPriceOverview() {
         ? new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
         : "-";
 
-    // Build trader levels rows - whitelist only, preserving display order
-    const tradersByNorm = EFTForge.state.tradersByNorm || {};
-    const traderList = _TRADER_LEVEL_WHITELIST
-        .map(norm => tradersByNorm[norm])
-        .filter(Boolean);
-
-    let traderLevelRowsHtml = "";
-    for (const tr of traderList) {
-        const currentLevel = EFTForge.state.traderLevels[tr.normalizedName] ?? 4;
-        const portrait = tr.imageLink
-            ? `<img class="cost-trader-portrait" src="${escapeHtml(tr.imageLink)}" onerror="this.style.display='none'" />`
-            : `<span class="cost-trader-text">${escapeHtml(tr.normalizedName)}</span>`;
-        let levelBtns = "";
-        for (let lv = 1; lv <= 4; lv++) {
-            const cls = lv <= currentLevel ? "trader-level-btn active" : "trader-level-btn";
-            levelBtns += `<button class="${cls}" data-trader="${escapeHtml(tr.normalizedName)}" data-level="${lv}">${lv}</button>`;
-        }
-        traderLevelRowsHtml += `<div class="trader-level-row">
-            ${portrait}
-            <span class="trader-level-name">${escapeHtml(tr.name)}</span>
-            <div class="trader-level-btns">${levelBtns}</div>
-        </div>`;
-    }
-
-    // Determine if all traders are at the same level (to highlight the master row)
-    const _allLevels = _TRADER_LEVEL_WHITELIST.map(n => EFTForge.state.traderLevels[n] ?? 4);
-    const _globalLevel = _allLevels.every(l => l === _allLevels[0]) ? _allLevels[0] : null;
-
-    let globalBtns = "";
-    for (let lv = 1; lv <= 4; lv++) {
-        const cls = lv <= (_globalLevel ?? 0) ? "trader-level-btn active" : "trader-level-btn";
-        globalBtns += `<button class="${cls}" data-level="${lv}" id="trader-level-all-${lv}">${lv}</button>`;
-    }
-
     const levelsOpenCls = _traderLevelsOpen ? " open" : "";
     const levelsBodyStyle = _traderLevelsOpen ? "" : "height:0;opacity:0;overflow:hidden";
 
@@ -353,12 +410,7 @@ async function renderPriceOverview() {
                 </button>
             </div>
             <div class="trader-levels-body" id="trader-levels-body" style="${levelsBodyStyle}">
-                <div class="trader-level-row trader-level-master-row">
-                    <span class="trader-level-name">${t("stats.traderLevelsAll")}</span>
-                    <div class="trader-level-btns">${globalBtns}</div>
-                </div>
-                <div class="trader-levels-divider"></div>
-                ${traderLevelRowsHtml}
+                ${traderLevelsBodyHtml()}
             </div>
             ${rows}
             <div class="cost-total-row">
@@ -405,28 +457,7 @@ async function renderPriceOverview() {
         }
     });
 
-    for (let lv = 1; lv <= 4; lv++) {
-        document.getElementById(`trader-level-all-${lv}`)?.addEventListener("click", (e) => {
-            const level = parseInt(e.currentTarget.dataset.level, 10);
-            for (const norm of _TRADER_LEVEL_WHITELIST) {
-                EFTForge.state.traderLevels[norm] = level;
-            }
-            _saveTraderLevels();
-            renderPriceOverview();
-            renderFullTree();
-        });
-    }
-
-    panel.querySelectorAll(".trader-level-btn:not([id^='trader-level-all-'])").forEach(btn => {
-        btn.addEventListener("click", (e) => {
-            const traderNorm = e.currentTarget.dataset.trader;
-            const level = parseInt(e.currentTarget.dataset.level, 10);
-            EFTForge.state.traderLevels[traderNorm] = level;
-            _saveTraderLevels();
-            renderPriceOverview();
-            renderFullTree();
-        });
-    });
+    attachTraderLevelsListeners(document.getElementById("trader-levels-body"));
 
     const refetchBtn = document.getElementById("flea-refetch-btn");
     if (refetchBtn) {

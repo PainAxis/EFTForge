@@ -26,8 +26,9 @@ from models_slot_allowed import SlotAllowedItem
 from models_traders import Trader
 from models_item_offers import ItemOffer  # noqa: F401 - registers table with Base.metadata
 from stats import _compute_stats
-from optimizer.solver import optimize_weapon, OptimizeParams
+from optimizer.solver import optimize_weapon, get_stat_ranges, get_moa_floor, OptimizeParams
 from optimizer.gunsmith import get_gunsmith_tasks, solve_gunsmith_task
+from optimizer.compat_map import build_compatibility_map
 from database_changelog import changelog_engine, ChangelogSessionLocal, ChangelogBase
 from models_stat_changelog import StatChangeLog  # noqa: F401 - registers table with ChangelogBase.metadata
 
@@ -1922,6 +1923,10 @@ def build_optimize(
     min_sighting_range: float | None = Body(default=None),
     include_items: List[str] = Body(default=[]),
     exclude_items: List[str] = Body(default=[]),
+    include_categories: List[List[str]] = Body(default=[]),
+    exclude_categories: List[str] = Body(default=[]),
+    prevent_overswing: bool = Body(default=False),
+    max_moa: float | None = Body(default=None),
     ergo_weight: float = Body(default=1.0),
     recoil_weight: float = Body(default=1.0),
     price_weight: float = Body(default=0.0),
@@ -1956,6 +1961,8 @@ def build_optimize(
 
     _cap_list("include_items", include_items, MAX_INCLUDE_EXCLUDE_IDS)
     _cap_list("exclude_items", exclude_items, MAX_INCLUDE_EXCLUDE_IDS)
+    _cap_list("include_categories", include_categories, MAX_INCLUDE_EXCLUDE_IDS)
+    _cap_list("exclude_categories", exclude_categories, MAX_INCLUDE_EXCLUDE_IDS)
 
     weapon = db.query(Item).filter(Item.id == weapon_id, Item.is_weapon == True).first()  # noqa: E712
     if not weapon:
@@ -1971,6 +1978,10 @@ def build_optimize(
         min_sighting_range,
         tuple(sorted(include_items)),
         tuple(sorted(exclude_items)),
+        tuple(sorted(tuple(sorted(g)) for g in include_categories)),
+        tuple(sorted(exclude_categories)),
+        prevent_overswing,
+        max_moa,
         ergo_weight,
         recoil_weight,
         price_weight,
@@ -1996,6 +2007,10 @@ def build_optimize(
         min_sighting_range=min_sighting_range,
         include_items=include_items or None,
         exclude_items=exclude_items or None,
+        include_categories=include_categories or None,
+        exclude_categories=exclude_categories or None,
+        prevent_overswing=prevent_overswing,
+        max_moa=max_moa,
         ergo_weight=ergo_weight,
         recoil_weight=recoil_weight,
         price_weight=price_weight,
@@ -2017,6 +2032,79 @@ def build_optimize(
         _OPTIMIZE_CACHE[_cache_key] = result
 
     return result
+
+
+@app.post("/build/stat-ranges")
+def build_stat_ranges(
+    weapon_id: str = Body(...),
+    trader_levels: dict | None = Body(default=None),
+    flea_available: bool = Body(default=True),
+    player_level: int | None = Body(default=None),
+    db: Session = Depends(get_db),
+):
+    """Theoretical [min, max] each hard-constraint stat can reach for this
+    weapon, so the optimizer UI can cap each constraint slider to what's
+    actually achievable instead of an arbitrary fixed range."""
+    if trader_levels is not None:
+        for level in trader_levels.values():
+            if not (0 <= level <= 4):
+                raise HTTPException(status_code=422, detail="trader_levels values must be between 0 and 4")
+
+    weapon = db.query(Item).filter(Item.id == weapon_id, Item.is_weapon == True).first()  # noqa: E712
+    if not weapon:
+        raise HTTPException(status_code=404, detail="Weapon not found")
+
+    params = OptimizeParams(trader_levels=trader_levels, flea_available=flea_available, player_level=player_level)
+    result = get_stat_ranges(db, weapon_id, params)
+    if result["status"] == "error":
+        raise HTTPException(status_code=404, detail=result["reason"])
+    return result
+
+
+@app.post("/build/moa-floor")
+def build_moa_floor(
+    weapon_id: str = Body(...),
+    trader_levels: dict | None = Body(default=None),
+    flea_available: bool = Body(default=True),
+    player_level: int | None = Body(default=None),
+    db: Session = Depends(get_db),
+):
+    """Exact minimum achievable accuracy_moa for this weapon, via a binary
+    search of real solves - slower than GET /build/stat-ranges's LP-relaxation
+    estimate, only run when the optimizer's "Exact slider floor" toggle is on."""
+    if trader_levels is not None:
+        for level in trader_levels.values():
+            if not (0 <= level <= 4):
+                raise HTTPException(status_code=422, detail="trader_levels values must be between 0 and 4")
+
+    weapon = db.query(Item).filter(Item.id == weapon_id, Item.is_weapon == True).first()  # noqa: E712
+    if not weapon:
+        raise HTTPException(status_code=404, detail="Weapon not found")
+
+    params = OptimizeParams(trader_levels=trader_levels, flea_available=flea_available, player_level=player_level)
+    result = get_moa_floor(db, weapon_id, params)
+    if result["status"] == "error":
+        raise HTTPException(status_code=404, detail=result["reason"])
+    return result
+
+
+@app.get("/build/mods")
+def build_mods(weapon_id: str, lang: str = "en", db: Session = Depends(get_db)):
+    """Reachable mods for one weapon, for the optimizer's Mod Filter search
+    (force-include/exclude a specific item)."""
+    weapon = db.query(Item).filter(Item.id == weapon_id, Item.is_weapon == True).first()  # noqa: E712
+    if not weapon:
+        raise HTTPException(status_code=404, detail="Weapon not found")
+
+    cmap = build_compatibility_map(db, weapon_id)
+    if not cmap.reachable_ids:
+        return {"mods": []}
+
+    items = db.query(Item).filter(Item.id.in_(cmap.reachable_ids)).all()
+    mods = [{"id": item.id, "name": _item_name(item, lang), "icon": item.icon_link} for item in items]
+    mods.sort(key=lambda m: m["name"] or "")
+
+    return {"mods": mods}
 
 
 @app.get("/build/gunsmith-tasks")
