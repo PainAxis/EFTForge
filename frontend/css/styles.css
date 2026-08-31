@@ -7301,36 +7301,50 @@ button.build-tag-chip.active {
   padding: 2px 7px;
 }
 
-/* ---- Stat tiles ---- */
-.optimizer-stat-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 8px;
+/* ---- Results readout (mirrors the main "Current Build" stats panel) ---- */
+/* The full build image fills the left space; the bars and substats sit in a
+   compact column pinned to the right edge. */
+.optimizer-results-split {
+  display: flex;
+  gap: 20px;
+  align-items: center;
 }
-.optimizer-tile {
-  background: #161616;
-  border: 1px solid #2e2e2e;
-  border-radius: 6px;
-  padding: 10px 12px;
+.optimizer-results-gunimg {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
 }
-.optimizer-tile-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  color: #777;
+.optimizer-result-gun-img {
+  max-width: 100%;
+  max-height: 130px;
+  object-fit: contain;
+  transition: opacity 0.2s ease, filter 0.2s ease;
 }
-.optimizer-tile-value {
-  font-size: 18px;
-  font-weight: 700;
-  color: #eee;
+.optimizer-use-build-inline {
+  width: 100%;
+  max-width: 280px;
 }
-.optimizer-tile-value.positive { color: #4CAF50; }
-.optimizer-tile-value.negative { color: #e74c3c; }
-.optimizer-tile-value.cost { color: #f5c542; }
+.optimizer-results-statsblock {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.optimizer-results-statsblock .stats-divider {
+  margin: 0;
+}
+body[data-mobile="true"] .optimizer-results-split {
+  display: block;
+}
+body[data-mobile="true"] .optimizer-results-statsblock {
+  flex-basis: auto;
+  margin-top: 12px;
+}
 
 /* ---- Weapon card ---- */
 .optimizer-weapon-card {

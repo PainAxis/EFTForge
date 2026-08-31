@@ -664,6 +664,7 @@ window._bpGetPlaceholderUrl   = () => _bpPlaceholderUrl;
 window._bpIsInflight          = () => _bpInflight;
 window._bpIsQueued            = () => _bpQueued;
 window._bpIsEnabled           = () => _bpEnabled;
+window._bpIsGloballyDisabled  = () => _bpGlobalDisabled;
 
 window.scheduleBuildPreview = scheduleBuildPreview;
 window.resetBuildPreview    = resetBuildPreview;

@@ -122,6 +122,7 @@ window.EFTForge.optimizer = (function () {
         // Otherwise a solve left running behind a closed drawer could still
         // resolve later and pop a stale result into a future, unrelated session.
         _abortController?.abort();
+        _resultImgAbort?.abort();
     }
 
     function onLangChange() {
@@ -1272,28 +1273,161 @@ window.EFTForge.optimizer = (function () {
         return byId || (window.EFTForge.state && window.EFTForge.state.currentGun) || null;
     }
 
-    function _statTile(label, value, cls) {
-        return `<div class="optimizer-tile"><div class="optimizer-tile-label">${label}</div><div class="optimizer-tile-value ${cls || ''}">${value}</div></div>`;
+    // One animated stat bar, deliberately the same markup the main stats panel
+    // (stats-panel.js) and the tab-preview tooltip (tab-manager.js) use, so the fill
+    // grows from 0% to data-target once mounted (see the rAF sweep in _renderResult).
+    function _statBarRowHtml(labelKey, fillClass, target, valueText) {
+        return `
+            <div class="stat-bar-row">
+                <div class="stat-bar-label">${_t(labelKey)}</div>
+                <div class="stat-bar-track">
+                    <div class="stat-bar-fill ${fillClass}" style="width:0%"${target !== null ? ` data-target="${target}"` : ''}></div>
+                    <div class="stat-bar-value">${valueText}</div>
+                </div>
+            </div>`;
     }
 
+    // The results readout, mirroring the main "Current Build" stats panel
+    // (stats-panel.js updateStatsPanel) - the same bars/subsection layout, formatting
+    // and stats.* translation keys - so an optimized build reads identically to a
+    // hand-built one. Arm stamina and muzzle velocity are dropped: the optimizer picks
+    // no ammo, so there's no muzzle velocity to show, and arm stamina isn't one of the
+    // axes it optimizes. Total cost (the optimizer's own headline number) takes the
+    // price panel's cost-total-row slot at the bottom.
     function _statTilesHtml(s) {
-        const eedCls = s.evo_ergo_delta >= 0 ? 'positive' : 'negative';
-        const eedVal = `${s.evo_ergo_delta >= 0 ? '+' : ''}${s.evo_ergo_delta}`;
-        const moa = s.accuracy_moa != null ? s.accuracy_moa : '-';
-        const recoilH = s.recoil_horizontal != null ? s.recoil_horizontal : '-';
-        const recoilV = s.recoil_vertical != null ? s.recoil_vertical : '-';
+        const totalErgo = parseFloat(s.total_ergo ?? 0);
+        const ergoText = Math.abs(totalErgo - Math.round(totalErgo)) < 0.001 ? Math.round(totalErgo) : totalErgo.toFixed(1);
+        const ergoTarget = Math.max(0, Math.min(totalErgo, 100));
+
+        const rv = s.recoil_vertical;
+        const rh = s.recoil_horizontal;
+        const rvText = rv != null ? Math.round(rv) : '-';
+        const rhText = rh != null ? Math.round(rh) : '-';
+        const rvTarget = rv != null ? Math.min(Math.round(rv), 500) / 5 : 0;
+        const rhTarget = rh != null ? Math.min(Math.round(rh), 500) / 5 : 0;
+
+        const moa = s.accuracy_moa;
+        const accText = moa != null ? moa.toFixed(2) + ' MOA' : '-';
+        const accTarget = moa != null ? Math.min(moa / 10, 1) * 100 : 0;
+
+        const eed = parseFloat(s.evo_ergo_delta ?? 0);
+        const eedText = `${eed > 0 ? '+' : ''}${eed.toFixed(1)}`;
+        const eedClass = eed >= 0 ? 'positive' : 'negative';
+        const overswingClass = s.overswing ? 'negative' : 'positive';
+        const overswingText = s.overswing ? _t('stats.yes') : _t('stats.no');
+
+        const sighting = s.sighting_range;
+        const sightingRow = sighting != null
+            ? `<div class="stat-row"><span class="stat-label">${_t('stats.sightingRange')}</span><span>${sighting} m</span></div>`
+            : '';
+
+        const cost = _result.grand_total_rub != null ? _result.grand_total_rub : _result.total_price_rub;
+
         return `
-            <div class="optimizer-stat-tiles">
-                ${_statTile(_t('optimizer.ergonomics'), s.total_ergo)}
-                ${_statTile(_t('optimizer.eed'), eedVal, eedCls)}
-                ${_statTile(_t('optimizer.vertRecoil'), recoilV)}
-                ${_statTile(_t('optimizer.horizRecoil'), recoilH)}
-                ${_statTile(_t('optimizer.moa'), moa)}
-                ${_statTile(_t('optimizer.weightLabel'), `${s.total_weight.toFixed(2)} kg`)}
-                ${_statTile(_t('optimizer.armStamina'), s.arm_stamina)}
-                ${_statTile(_t('optimizer.totalCost'), _formatPrice(_result.grand_total_rub != null ? _result.grand_total_rub : _result.total_price_rub), 'cost')}
+            <div class="stats-section">
+                <div class="section-title stats-title-row"><span>${_t('stats.title')}</span></div>
+                <div class="optimizer-results-split">
+                    <div class="optimizer-results-statsblock">
+                        <div class="optimizer-results-bars">
+                            ${_statBarRowHtml('stats.ergo', 'ergo-bar', ergoTarget, ergoText)}
+                            ${_statBarRowHtml('stats.verRecoil', 'recoil-bar', rvTarget, rvText)}
+                            ${_statBarRowHtml('stats.horRecoil', 'recoil-bar', rhTarget, rhText)}
+                            ${_statBarRowHtml('stats.accuracy', 'accuracy-bar', accTarget, accText)}
+                        </div>
+                        <div class="stats-divider"></div>
+                        <div class="optimizer-results-substats stat-subsection">
+                            <div class="stat-row"><span class="stat-label">${_t('stats.weight')}</span><span>${s.total_weight.toFixed(3)} kg</span></div>
+                            <div class="stat-row"><span class="stat-label">${_t('stats.eedLabelShort')}</span><span class="${eedClass}">${eedText}</span></div>
+                            <div class="stat-row"><span class="stat-label">${_t('stats.overswing')}</span><span class="${overswingClass}">${overswingText}</span></div>
+                            ${sightingRow}
+                        </div>
+                    </div>
+                    <div class="optimizer-results-gunimg">
+                        <img id="optimizer-result-gun-img" class="optimizer-result-gun-img" alt="" onerror="this.style.visibility='hidden'">
+                        <button class="modal-btn primary optimizer-use-build-inline" id="optimizer-use-build-btn">${_t('optimizer.useThisBuild')}</button>
+                    </div>
+                </div>
+                <div class="cost-total-row">
+                    <span>${_t('stats.totalCost')}</span>
+                    <span>${_formatPrice(cost)}</span>
+                </div>
             </div>
         `;
+    }
+
+    // The solved build's full gun image, driven by the exact same rules as the main
+    // placeholder / tab-preview gun image (build-preview.js): a server-generated
+    // composite of the actual build when the image-gen toggle is on, and the static
+    // factory-preset asset when it's off (or when the admin/local kill-switch is set).
+    // Scoped to this <img> and its own abort/generation counter so it never touches the
+    // shared _bp* state that manages the main build image.
+    let _resultImgAbort = null;
+    let _resultImgGen = 0;
+
+    async function _loadResultGunImage() {
+        const imgEl = document.getElementById('optimizer-result-gun-img');
+        if (!imgEl || !_result) return;
+        const gun = _gunForResult();
+        if (!gun) return;
+
+        const gen = ++_resultImgGen;
+        const pairs = _result.slot_pairs || [];
+        const key = pairs.map(p => p.join(':')).sort().join(',');
+
+        // Static default (toggle off, factory config, or kill-switch): the preset
+        // composite, same fallback the placeholder resets to. Bare receiver when the
+        // build somehow has no attachments.
+        const staticSrc = key === ''
+            ? (gun.bare_image_512_link || gun.image_512_link || gun.icon_link || '')
+            : (gun.image_512_link || gun.icon_link || '');
+        imgEl.referrerPolicy = '';
+        imgEl.style.opacity = '';
+        imgEl.style.filter = '';
+        imgEl.style.visibility = '';
+        imgEl.src = staticSrc;
+
+        // Toggle off, admin/local kill-switch, or a build that maps to a static asset
+        // (bare receiver / untouched factory preset) - keep the static image, no request.
+        if (!window._bpIsEnabled?.() || window._bpIsGloballyDisabled?.()) return;
+        if (key === '' || key === EFTForge.state.factoryPairsKey) return;
+
+        // Warm slotCache for any parts _bpBuildSptItemsForPairs needs to resolve slot
+        // names (same warm-up the tab preview does before generating an arbitrary build).
+        const uncached = [...new Set(pairs.map(([, iid]) => iid).filter(iid => !EFTForge.state.slotCache[iid]))];
+        if (uncached.length) {
+            try {
+                const batch = await fetchItemSlotsBatch(uncached);
+                for (const [iid, slots] of Object.entries(batch)) cacheSet(EFTForge.state.slotCache, iid, slots);
+            } catch (_) { /* generation below just skips any still-unresolved slots */ }
+        }
+        if (gen !== _resultImgGen) return;
+
+        const sptData = _bpBuildSptItemsForPairs(gun, pairs);
+        if (!sptData) return;
+
+        imgEl.style.opacity = '0.35';
+        imgEl.style.filter = 'brightness(0.85)';
+        _resultImgAbort?.abort();
+        _resultImgAbort = new AbortController();
+        try {
+            const resp = await fetch(`${EFTForge.config.API_BASE}/build-image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(sptData),
+                signal: _resultImgAbort.signal,
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.image_url && gen === _resultImgGen) imgEl.src = data.image_url;
+        } catch (_) {
+            // Network failure or aborted - leave the static preset image showing.
+        } finally {
+            if (gen === _resultImgGen) {
+                imgEl.style.opacity = '';
+                imgEl.style.filter = '';
+            }
+            _resultImgAbort = null;
+        }
     }
 
     function _baseKindLabel(base) {
@@ -1476,12 +1610,19 @@ window.EFTForge.optimizer = (function () {
                         </table>
                     </div>
                 </div>
-
-                <button class="modal-btn primary full-width" id="optimizer-use-build-btn">${_t('optimizer.useThisBuild')}</button>
             </div>
         `;
         document.getElementById('optimizer-reoptimize-btn').addEventListener('click', _solveOptimize);
         document.getElementById('optimizer-use-build-btn').addEventListener('click', _useBuild);
+
+        // Grow the stat bars from 0% to their targets, same as the main stats panel.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            container.querySelectorAll('.stat-bar-fill[data-target]').forEach(el => {
+                el.style.width = el.dataset.target + '%';
+            });
+        }));
+
+        _loadResultGunImage();
         _populateManifest(_result);
     }
 
