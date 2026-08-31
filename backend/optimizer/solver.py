@@ -26,6 +26,7 @@ from typing import Optional, List, Dict
 
 from models_items import Item
 from models_item_offers import ItemOffer
+from models_weapon_presets import WeaponDefaultPreset
 from stats import _compute_stats
 
 from optimizer.compat_map import build_compatibility_map
@@ -97,7 +98,12 @@ def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
         offers_map = offers_by_item(offer_rows)
 
     exclude = set(params.exclude_items or [])
+    include = set(params.include_items or [])
     exclude_categories = set(params.exclude_categories or [])
+    # The weapon's own default-preset parts ship free with the gun, so they stay
+    # selectable at price 0 even when no trader/flea sells them - they're genuinely
+    # accessible, and a required slot may only be fillable by one of them.
+    factory_ids = set(weapon.factory_attachment_ids.split(",")) if weapon.factory_attachment_ids else set()
     candidate_ids = []
     prices = {}
     for item_id in all_mod_ids:
@@ -108,12 +114,15 @@ def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
         raw_offers = offers_map.get(item_id, [])
         best = get_best_price(raw_offers, params.trader_levels, params.flea_available, params.player_level)
         if best is None:
-            if raw_offers:
-                continue  # has offers, just none accessible under the current trader/flea filters
-            # No trader or flea ever sells this at all - Found-in-Raid only.
-            # A player might already own one, so it's freely selectable at
-            # price 0 rather than excluded (matches the reference optimizer's
-            # is_fir_mod handling in weapon_optimizer.py).
+            # No accessible price - either nothing sells it under the current trader/flea
+            # access, or no trader/flea ever sells it at all. Either way it's inaccessible
+            # on the open market, so drop it: a priceless part must not read as free
+            # (price 0) and get picked as the "cheapest" option. Exceptions kept at price
+            # 0: a part the user force-included via the mod filter (they've explicitly
+            # asked for it and may already own one), or one of the weapon's own factory
+            # preset parts (those come with the gun).
+            if item_id not in include and item_id not in factory_ids:
+                continue
             best = {"price": 0, "currency": "RUB", "price_rub": 0, "vendor": None}
         candidate_ids.append(item_id)
         prices[item_id] = best
@@ -139,8 +148,87 @@ def optimize_weapon(db, weapon_id: str, params: OptimizeParams) -> dict:
         )
         result["final_stats"] = final_stats
         result["gun_id"] = weapon_id
+        # Per-item EvoErgo contribution, so the results-panel manifest can show the
+        # same EvoErgo column the attachment table does. Contribution is marginal -
+        # the build's EED minus the EED it would have without that one part - which is
+        # the meaningful "how much does this part add" figure for a finished build.
+        result["evo_contributions"] = _per_item_evo_contributions(
+            weapon,
+            result["selected_items"],
+            mods,
+            final_stats["evo_ergo_delta"],
+            params.strength_level,
+            params.equip_ergo_modifier,
+        )
+        result["base"], result["grand_total_rub"] = _choose_base(
+            db, weapon, params, result["selected_items"], prices, result["total_price_rub"]
+        )
 
     return result
+
+
+def _load_best_offer_price(db, item_id, params):
+    offers = offers_by_item(db.query(ItemOffer).filter(ItemOffer.item_id == item_id).all()).get(item_id, [])
+    return get_best_price(offers, params.trader_levels, params.flea_available, params.player_level)
+
+
+def _choose_base(db, weapon, params, selected_items, prices, mods_total_rub):
+    """Decide whether it's cheaper to build up from the bare base receiver or from the
+    weapon's factory preset. The preset is a separate purchasable item that bundles its
+    parts, so any selected part already in the preset comes free with it. Returns
+    (base_info, grand_total_rub), where base_info names the chosen base and its own
+    price/vendor and grand_total_rub is the true all-in cost (base + parts bought on
+    top). This is a costing decision made after the solve, so it never changes which
+    parts were chosen - only how the build is acquired and priced."""
+    inf = float("inf")
+
+    receiver_best = _load_best_offer_price(db, weapon.id, params)
+    receiver_price = receiver_best["price_rub"] if receiver_best else None
+    receiver_total = (receiver_price if receiver_price is not None else inf) + mods_total_rub
+
+    preset_total = inf
+    preset_best = None
+    preset_id = None
+    row = db.query(WeaponDefaultPreset).filter(WeaponDefaultPreset.weapon_id == weapon.id).first()
+    if row:
+        preset_id = row.preset_id
+        preset_best = _load_best_offer_price(db, preset_id, params)
+        if preset_best:
+            factory_ids = set(weapon.factory_attachment_ids.split(",")) if weapon.factory_attachment_ids else set()
+            covered = sum(prices[i]["price_rub"] for i in selected_items if i in factory_ids and i in prices)
+            preset_total = preset_best["price_rub"] + (mods_total_rub - covered)
+
+    if preset_total < receiver_total:
+        base = {
+            "kind": "preset",
+            "item_id": preset_id,
+            "price_rub": preset_best["price_rub"],
+            "vendor": preset_best["vendor"],
+        }
+        grand_total = preset_total
+    else:
+        base = {
+            "kind": "receiver",
+            "item_id": weapon.id,
+            "price_rub": receiver_price,
+            "vendor": receiver_best["vendor"] if receiver_best else None,
+        }
+        grand_total = receiver_total if receiver_total != inf else mods_total_rub
+
+    return base, round(grand_total)
+
+
+def _per_item_evo_contributions(weapon, selected_ids, mods, full_eed, strength_level, equip_ergo_modifier):
+    """Marginal EvoErgo delta each selected part contributes to the build, keyed by
+    item id. Each value is full_eed - EED(build without that part). _compute_stats is
+    pure arithmetic over the pre-loaded items (no DB, no solve), so one pass per part
+    is cheap for the handful of attachments a build has."""
+    contributions = {}
+    for item_id in selected_ids:
+        subset = [i for i in selected_ids if i != item_id]
+        eed_without = _compute_stats(weapon, subset, mods, strength_level, equip_ergo_modifier)["evo_ergo_delta"]
+        contributions[item_id] = round(full_eed - eed_without, 2)
+    return contributions
 
 
 def get_stat_ranges(db, weapon_id: str, params: OptimizeParams) -> dict:

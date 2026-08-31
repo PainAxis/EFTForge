@@ -47,6 +47,21 @@ SOLVE_TIME_LIMIT_SECONDS = 120
 ERGO_SCALE = 100.0
 PRICE_SCALE_FALLBACK = 300_000.0
 
+# Plain-mode objective exchange rates, mirroring the reference optimizer's
+# lpBuilder.ts so the same weight sliders produce the same trade-offs. There, at
+# equal weights, one real ergonomics point is worth ew*1e4 objective units, one
+# unit of recoil_modifier (a fraction, so 1% = 0.01) is worth rw*1e7, and one
+# ruble is worth pw*10 - i.e. a 1% recoil reduction is worth ~10 ergonomics
+# points. We reproduce those exact ratios on a ÷1e4 scale: 1 ergo point = ergo_w,
+# 1 unit of recoil_modifier = recoil_w*1000 (so 1% = recoil_w*10), 1 ruble =
+# price_w*0.001. Recoil is deliberately the dominant combat axis at balanced
+# weights - the reference is well-established and this matches how EFT players
+# actually build. (EvoErgo mode has its own objective, _evo_ergo_objective, and
+# is tuned separately - it does not use these.)
+ERGO_OBJ_COEFF = 1.0        # per ergonomics point
+RECOIL_OBJ_COEFF = 1000.0   # per unit of recoil_modifier (1% recoil = 10)
+PRICE_OBJ_COEFF = 0.001     # per ruble
+
 # EvoErgo tangent sweep: anchor total-ergo values to linearize EFTForge's own
 # quadratic KG(E) curve (stats.py's _compute_stats) around. A MILP can only
 # optimize a linear objective, so true EED (a quadratic function of ergo) has
@@ -434,19 +449,21 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
     return item_ids, idx, cb, item_to_valid_slots, base_ergo, base_weight, base_recoil_v
 
 
-def _weighted_objective(item_ids, idx, mods, prices, params, base_recoil_v):
+def _weighted_objective(item_ids, idx, mods, prices, params):
     ergo_w = max(params.ergo_weight, TIEBREAK)
     recoil_w = max(params.recoil_weight, TIEBREAK)
     price_w = max(params.price_weight, TIEBREAK)
-    price_scale = params.max_price or PRICE_SCALE_FALLBACK
-    recoil_scale = abs(base_recoil_v) if base_recoil_v else 1.0
 
+    # recoil_modifier is a pure fraction (-0.12 = -12%), so - like the reference -
+    # the objective scores recoil as a percentage and the weapon's absolute base
+    # recoil never enters here. A recoil-reducing mod has a negative modifier, so
+    # its recoil_term is negative and pulls the (minimized) objective down.
     c = np.zeros(len(item_ids))
     for item_id in item_ids:
         i = idx[item_id]
-        ergo_term = -(ergo_w / ERGO_SCALE) * (mods[item_id].ergonomics_modifier or 0)
-        recoil_term = (recoil_w / recoil_scale) * (base_recoil_v or 0) * (mods[item_id].recoil_modifier or 0)
-        price_term = (price_w / price_scale) * prices[item_id]["price_rub"]
+        ergo_term = -ergo_w * ERGO_OBJ_COEFF * (mods[item_id].ergonomics_modifier or 0)
+        recoil_term = recoil_w * RECOIL_OBJ_COEFF * (mods[item_id].recoil_modifier or 0)
+        price_term = price_w * PRICE_OBJ_COEFF * prices[item_id]["price_rub"]
         c[i] = ergo_term + recoil_term + price_term
     return c
 
@@ -524,7 +541,7 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
     n = len(item_ids)
 
     if not params.use_evo_ergo:
-        c = _weighted_objective(item_ids, idx, mods, prices, params, base_recoil_v)
+        c = _weighted_objective(item_ids, idx, mods, prices, params)
         result = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices)
         if result is None:
             return {

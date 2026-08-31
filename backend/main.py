@@ -25,6 +25,7 @@ from models_slots import Slot
 from models_slot_allowed import SlotAllowedItem
 from models_traders import Trader
 from models_item_offers import ItemOffer  # noqa: F401 - registers table with Base.metadata
+from models_weapon_presets import WeaponDefaultPreset  # noqa: F401 - registers table with Base.metadata
 from stats import _compute_stats
 from optimizer.solver import optimize_weapon, get_stat_ranges, get_moa_floor, OptimizeParams
 from optimizer.gunsmith import get_gunsmith_tasks, solve_gunsmith_task
@@ -1993,10 +1994,12 @@ def build_optimize(
         use_evo_ergo,
         evo_ergo_k,
     )
+    _solve_start = time.perf_counter()
+
     with _OPTIMIZE_CACHE_LOCK:
         cached = _OPTIMIZE_CACHE.get(_cache_key)
     if cached is not None:
-        return cached
+        return {**cached, "solve_ms": round((time.perf_counter() - _solve_start) * 1000)}
 
     params = OptimizeParams(
         max_price=max_price,
@@ -2031,7 +2034,7 @@ def build_optimize(
                 del _OPTIMIZE_CACHE[k]
         _OPTIMIZE_CACHE[_cache_key] = result
 
-    return result
+    return {**result, "solve_ms": round((time.perf_counter() - _solve_start) * 1000)}
 
 
 @app.post("/build/stat-ranges")
@@ -2105,6 +2108,34 @@ def build_mods(weapon_id: str, lang: str = "en", db: Session = Depends(get_db)):
     mods.sort(key=lambda m: m["name"] or "")
 
     return {"mods": mods}
+
+
+@app.get("/build/default-preset")
+def build_default_preset(weapon_id: str, db: Session = Depends(get_db)):
+    """The weapon's factory default preset as a pseudo-item the price panel can price
+    exactly like any other item (its cheapest eligible trader offer + id for the flea
+    lookup), so the panel can weigh 'buy the bare receiver + parts' against 'buy the
+    assembled factory preset' the same way the optimizer's _choose_base does. Returns
+    {"preset": null} for weapons that have no default preset (melee, throwables)."""
+    row = db.query(WeaponDefaultPreset).filter(WeaponDefaultPreset.weapon_id == weapon_id).first()
+    if not row:
+        return {"preset": None}
+    # Cheapest trader offer, mirroring how sync computes Item.trader_price_rub (same
+    # excluded vendors) so the preset prices consistently with every other item row.
+    excluded = {"ragman", "ref", "fence", "flea-market"}
+    offers = db.query(ItemOffer).filter(
+        ItemOffer.item_id == row.preset_id, ItemOffer.is_flea == False  # noqa: E712
+    ).all()
+    eligible = [o for o in offers if o.vendor_normalized not in excluded and o.price_rub is not None]
+    cheapest = min(eligible, key=lambda o: o.price_rub) if eligible else None
+    return {
+        "preset": {
+            "id": row.preset_id,
+            "trader_price_rub": cheapest.price_rub if cheapest else None,
+            "trader_vendor": cheapest.vendor_normalized if cheapest else None,
+            "trader_min_level": cheapest.trader_level if cheapest else None,
+        }
+    }
 
 
 @app.get("/build/gunsmith-tasks")

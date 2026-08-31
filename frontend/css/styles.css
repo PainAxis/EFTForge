@@ -3931,6 +3931,17 @@ body[data-mobile="true"] .gun-card.mid-build {
     color: #bbb;
 }
 
+.cost-base-kind {
+    display: block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: #666;
+    line-height: 1.2;
+    margin-top: 1px;
+}
+
 .cost-item-icon {
     width: 24px;
     height: 24px;
@@ -6710,9 +6721,9 @@ button.build-tag-chip.active {
 #optimizer-overlay {
   position: fixed;
   top: 0; right: 0; bottom: 0;
-  width: 72%;
-  min-width: 620px;
-  max-width: 1100px;
+  width: 84%;
+  min-width: 720px;
+  max-width: 1400px;
   background: #1a1a1a;
   z-index: 1101;
   display: flex;
@@ -7194,6 +7205,237 @@ button.build-tag-chip.active {
 }
 .optimizer-credit a:hover {
   text-decoration: underline;
+}
+
+/* ============================================================
+   OPTIMIZER - two-pane layout + solved-build results panel
+   Left pane: the config controls. Right pane: the solved build
+   (status bar, stat tiles, weapon card, Build Manifest).
+============================================================ */
+
+.optimizer-two-pane {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.optimizer-config-pane {
+  flex: 0 0 340px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.optimizer-results-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: sticky;
+  top: 64px;
+  align-self: flex-start;
+}
+@media (max-width: 900px) {
+  .optimizer-two-pane { flex-direction: column; }
+  .optimizer-config-pane { flex-basis: auto; width: 100%; }
+  .optimizer-results-pane { position: static; width: 100%; }
+}
+
+/* Empty / loading / error placeholder for the results pane */
+.optimizer-results-empty {
+  border: 1px dashed #2e2e2e;
+  border-radius: 6px;
+  background: #161616;
+  color: #666;
+  font-size: 12px;
+  text-align: center;
+  padding: 48px 20px;
+}
+.optimizer-results-status {
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding: 40px 20px;
+}
+.optimizer-spinner-lg {
+  width: 26px;
+  height: 26px;
+  border-width: 3px;
+  margin-left: 0;
+}
+
+.optimizer-results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---- Status bar ---- */
+.optimizer-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: linear-gradient(90deg, rgba(76,175,80,0.10), rgba(76,175,80,0.02));
+  border: 1px solid rgba(76,175,80,0.30);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.optimizer-reoptimize-btn {
+  width: auto;
+  padding: 8px 16px;
+}
+.optimizer-status-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #bbb;
+}
+.optimizer-status-ok { color: #4CAF50; font-weight: 700; }
+.optimizer-status-label { color: #ddd; }
+.optimizer-badge {
+  background: #232323;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  color: #9ec7ff;
+  font-size: 11px;
+  padding: 2px 7px;
+}
+
+/* ---- Stat tiles ---- */
+.optimizer-stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+.optimizer-tile {
+  background: #161616;
+  border: 1px solid #2e2e2e;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.optimizer-tile-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #777;
+}
+.optimizer-tile-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #eee;
+}
+.optimizer-tile-value.positive { color: #4CAF50; }
+.optimizer-tile-value.negative { color: #e74c3c; }
+.optimizer-tile-value.cost { color: #f5c542; }
+
+/* ---- Weapon card ---- */
+.optimizer-weapon-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #161616;
+  border: 1px solid #2e2e2e;
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+.optimizer-weapon-card-img {
+  width: 84px;
+  height: 42px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.optimizer-weapon-card-info { flex: 1; min-width: 0; }
+.optimizer-weapon-card-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #eee;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.optimizer-weapon-card-sub {
+  font-size: 11px;
+  color: #777;
+  margin-top: 2px;
+}
+.optimizer-weapon-card-price {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f5c542;
+  flex-shrink: 0;
+}
+
+/* ---- Build Manifest ---- */
+.optimizer-manifest {
+  background: #161616;
+  border: 1px solid #2e2e2e;
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+.optimizer-manifest-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.optimizer-manifest-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #ccc;
+}
+/* The manifest reuses the attachment table wholesale; a horizontal scroll wrap
+   keeps the full stat column set usable when the results pane gets narrow. */
+.optimizer-manifest-table-wrap {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a #161616;
+}
+.optimizer-manifest-loading {
+  color: #666;
+  font-size: 12px;
+  text-align: center;
+  padding: 20px;
+}
+
+/* ---- Manifest lock / ban controls (replace the favorite star) ---- */
+.optimizer-lockban {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.optimizer-lock-btn,
+.optimizer-ban-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: #666;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.optimizer-lock-btn:hover { color: #f5c542; background: rgba(245,197,66,0.10); }
+.optimizer-ban-btn:hover { color: #e74c3c; background: rgba(231,76,60,0.10); }
+.optimizer-lock-btn.active {
+  color: #f5c542;
+  border-color: rgba(245,197,66,0.45);
+  background: rgba(245,197,66,0.14);
+}
+.optimizer-ban-btn.active {
+  color: #e74c3c;
+  border-color: rgba(231,76,60,0.45);
+  background: rgba(231,76,60,0.14);
 }
 
 /* ---- Disclaimer ---- */

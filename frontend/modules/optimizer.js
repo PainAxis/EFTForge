@@ -235,6 +235,11 @@ window.EFTForge.optimizer = (function () {
     const TP_SIDE = TP_WIDTH - TP_PAD_X * 2;
     const TP_TRI_H = TP_SIDE * (Math.sqrt(3) / 2);
     const TP_HEIGHT = TP_PAD_TOP + TP_TRI_H + TP_PAD_BOTTOM;
+    // Extend the viewBox horizontally (symmetrically, so the triangle stays centered)
+    // so the outer corner labels don't clip - the right one ("Recoil" / the wider CJK
+    // 后坐力) sits past the triangle's right vertex and was running off the edge.
+    const TP_VIEW_X = -16;
+    const TP_VIEW_W = TP_WIDTH - 2 * TP_VIEW_X;
     const TP_TOP = { x: TP_WIDTH / 2, y: TP_PAD_TOP };
     const TP_LEFT = { x: TP_PAD_X, y: TP_PAD_TOP + TP_TRI_H };
     const TP_RIGHT = { x: TP_WIDTH - TP_PAD_X, y: TP_PAD_TOP + TP_TRI_H };
@@ -327,7 +332,7 @@ window.EFTForge.optimizer = (function () {
         const svg = document.getElementById('optimizer-tp-svg');
         if (!svg) return;
         const rect = svg.getBoundingClientRect();
-        const x = (clientX - rect.left) * (TP_WIDTH / rect.width);
+        const x = TP_VIEW_X + (clientX - rect.left) * (TP_VIEW_W / rect.width);
         const y = (clientY - rect.top) * (TP_HEIGHT / rect.height);
         const { e, r, p } = _tpToBarycentric(x, y);
         const total = e + r + p;
@@ -370,7 +375,7 @@ window.EFTForge.optimizer = (function () {
             `;
         }
         return `
-            <svg id="optimizer-tp-svg" viewBox="0 0 ${TP_WIDTH} ${TP_HEIGHT}" class="optimizer-ternary-svg">
+            <svg id="optimizer-tp-svg" viewBox="${TP_VIEW_X} 0 ${TP_VIEW_W} ${TP_HEIGHT}" class="optimizer-ternary-svg">
                 <polygon points="${TP_TOP.x},${TP_TOP.y} ${TP_RIGHT.x},${TP_RIGHT.y} ${TP_LEFT.x},${TP_LEFT.y}"
                     fill="#111" stroke="#444" stroke-width="1.5" />
                 <g>${_tpGridLinesHtml()}</g>
@@ -952,6 +957,8 @@ window.EFTForge.optimizer = (function () {
         const weaponId = currentGun ? currentGun.id : null;
 
         content.innerHTML = `
+          <div class="optimizer-two-pane">
+            <div class="optimizer-config-pane">
             <div class="optimizer-field">
                 <label class="modal-label">${_t('optimizer.weapon')}</label>
                 <div class="optimizer-current-weapon">${_escape(gunName)}</div>
@@ -1020,8 +1027,10 @@ window.EFTForge.optimizer = (function () {
             </div>
 
             <button class="modal-btn primary full-width" id="optimizer-solve-btn">${_t('optimizer.solve')}</button>
+            </div>
 
-            <div id="optimizer-result-container"></div>
+            <div class="optimizer-results-pane" id="optimizer-results-pane"></div>
+          </div>
         `;
 
         document.getElementById('optimizer-preset-recoil').addEventListener('click', () => _setWeights(0, 100, 0));
@@ -1246,44 +1255,308 @@ window.EFTForge.optimizer = (function () {
         _abortController?.abort();
     }
 
+    // Padlock and no-entry glyphs for the manifest's lock/ban buttons - inline SVG
+    // (not emoji) so they inherit currentColor and stay crisp at 14px, matching the
+    // reference optimizer's per-item lock/ban controls that sit where the attachment
+    // table normally puts its favorite star.
+    const _LOCK_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+    const _BAN_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg>';
+
+    function _resultsContainer() {
+        return document.getElementById('optimizer-results-pane')
+            || document.getElementById('optimizer-result-container');
+    }
+
+    function _gunForResult() {
+        const byId = (typeof gunById === 'function' && _result && _result.gun_id) ? gunById(_result.gun_id) : null;
+        return byId || (window.EFTForge.state && window.EFTForge.state.currentGun) || null;
+    }
+
+    function _statTile(label, value, cls) {
+        return `<div class="optimizer-tile"><div class="optimizer-tile-label">${label}</div><div class="optimizer-tile-value ${cls || ''}">${value}</div></div>`;
+    }
+
+    function _statTilesHtml(s) {
+        const eedCls = s.evo_ergo_delta >= 0 ? 'positive' : 'negative';
+        const eedVal = `${s.evo_ergo_delta >= 0 ? '+' : ''}${s.evo_ergo_delta}`;
+        const moa = s.accuracy_moa != null ? s.accuracy_moa : '-';
+        const recoilH = s.recoil_horizontal != null ? s.recoil_horizontal : '-';
+        const recoilV = s.recoil_vertical != null ? s.recoil_vertical : '-';
+        return `
+            <div class="optimizer-stat-tiles">
+                ${_statTile(_t('optimizer.ergonomics'), s.total_ergo)}
+                ${_statTile(_t('optimizer.eed'), eedVal, eedCls)}
+                ${_statTile(_t('optimizer.vertRecoil'), recoilV)}
+                ${_statTile(_t('optimizer.horizRecoil'), recoilH)}
+                ${_statTile(_t('optimizer.moa'), moa)}
+                ${_statTile(_t('optimizer.weightLabel'), `${s.total_weight.toFixed(2)} kg`)}
+                ${_statTile(_t('optimizer.armStamina'), s.arm_stamina)}
+                ${_statTile(_t('optimizer.totalCost'), _formatPrice(_result.grand_total_rub != null ? _result.grand_total_rub : _result.total_price_rub), 'cost')}
+            </div>
+        `;
+    }
+
+    function _baseKindLabel(base) {
+        return _t(base && base.kind === 'preset' ? 'optimizer.factoryPreset' : 'optimizer.baseReceiver');
+    }
+
+    // The starting-point cost blip: the price of the chosen base (bare receiver or
+    // factory preset) alone, with its trader portrait or a flea tag - deliberately the
+    // same portrait-blip markup the price panel/attachment table use (_attPriceCellContent).
+    function _basePriceBlipHtml(base) {
+        if (!base || base.price_rub == null) return '<span class="att-price-flea">-</span>';
+        const isFlea = !base.vendor || base.vendor === 'flea-market';
+        let vendorHtml;
+        if (isFlea) {
+            vendorHtml = `<span class="att-price-flea">${_escape(_t('stats.fleaLabel'))}</span>`;
+        } else {
+            const trader = window.EFTForge.state.tradersByNorm && window.EFTForge.state.tradersByNorm[base.vendor];
+            const img = (trader && trader.imageLink) || '';
+            vendorHtml = img
+                ? `<img class="att-price-portrait" src="${_escape(img)}" onerror="this.style.display='none'">`
+                : `<span class="att-price-vendor">${_escape(base.vendor)}</span>`;
+        }
+        return `<div class="att-price-wrap">${vendorHtml}<span>${_formatPrice(base.price_rub)}</span></div>`;
+    }
+
+    // The card art follows the chosen base and prefers the 512px image: the preset's
+    // composite (image_512_link) when starting from the factory preset, the bare
+    // receiver (bare_image_512_link) when starting from the base receiver.
+    function _baseImage(gun, kind) {
+        if (!gun) return '';
+        if (kind === 'preset') {
+            return gun.image_512_link || gun.preset_icon_link || gun.icon_link || '';
+        }
+        return gun.bare_image_512_link || gun.icon_link || gun.image_512_link || '';
+    }
+
+    function _weaponCardHtml() {
+        const gun = _gunForResult();
+        const gunName = gun ? gun.name : '';
+        const base = _result.base || { kind: 'receiver', price_rub: null };
+        const gunImg = _baseImage(gun, base.kind);
+        return `
+            <div class="optimizer-weapon-card">
+                <img class="optimizer-weapon-card-img" src="${_escape(gunImg)}" onerror="this.style.visibility='hidden'" alt="">
+                <div class="optimizer-weapon-card-info">
+                    <div class="optimizer-weapon-card-name">${_escape(gunName)}</div>
+                    <div class="optimizer-weapon-card-sub">${_escape(_baseKindLabel(base))}</div>
+                </div>
+                <div class="optimizer-weapon-card-price">${_basePriceBlipHtml(base)}</div>
+            </div>
+        `;
+    }
+
+    function _manifestTheadHtml() {
+        return `
+            <thead>
+                <tr>
+                    <th>${_t('th.name')}</th>
+                    <th>${_t('th.price')}</th>
+                    <th>${_t('th.rubRecoil')}</th>
+                    <th>${_t('th.weight')}</th>
+                    <th>${_t('th.recoilList')}</th>
+                    <th>${_t('th.accuracy')}</th>
+                    <th>${_t('th.ergo')}</th>
+                    <th>${_t('th.evoErgo')}</th>
+                    <th>${_t('th.balance')}</th>
+                    <th>${_t('th.heatCoolBurn')}</th>
+                    <th>${_t('th.muzzleVelocity')}</th>
+                </tr>
+            </thead>
+        `;
+    }
+
+    // One manifest row, deliberately mirroring the attachment table's cell layout and
+    // classes (slot-selector.js) so it inherits the exact same styling and column set.
+    // The two differences the results panel wants: the favorite star is replaced by a
+    // lock/ban pair, and the like/dislike rating block is dropped.
+    function _manifestRowHtml(item) {
+        const evo = (_result.evo_contributions && _result.evo_contributions[item.id]) || 0;
+        const recoilPercent = parseFloat(item.recoil_modifier ?? 0) * 100;
+        const ergoModifier = parseFloat(item.ergonomics_modifier ?? 0);
+
+        const itemCOI = item.center_of_impact ?? null;
+        const itemAccMod = item.accuracy_modifier ?? null;
+        let accContent;
+        if (itemCOI !== null) {
+            accContent = `<span class="acc-coi-val">${(itemCOI * 34.3).toFixed(2)} MOA</span>`;
+        } else if (itemAccMod !== null && itemAccMod !== 0) {
+            const cls = itemAccMod > 0 ? 'positive' : 'negative';
+            accContent = `<span class="${cls}">${itemAccMod > 0 ? '+' : ''}${itemAccMod.toFixed(1)}%</span>`;
+        } else {
+            accContent = '-';
+        }
+
+        const locked = _includedModIds.includes(item.id);
+        const banned = _excludedModIds.includes(item.id);
+        const sid = escapeHtml(item.id);
+
+        return `
+            <tr data-item-id="${sid}">
+                <td class="name-cell">
+                    <div class="attachment-name-wrapper">
+                        <div class="optimizer-lockban">
+                            <button type="button" class="optimizer-lock-btn${locked ? ' active' : ''}" data-lock-id="${sid}" title="${escapeHtml(_t('optimizer.lockItem'))}">${_LOCK_SVG}</button>
+                            <button type="button" class="optimizer-ban-btn${banned ? ' active' : ''}" data-ban-id="${sid}" title="${escapeHtml(_t('optimizer.banItem'))}">${_BAN_SVG}</button>
+                        </div>
+                        <div class="attachment-icon-wrapper">
+                            <img src="${escapeHtml(item.icon_link)}" class="attachment-icon" loading="lazy" decoding="async" onerror="this.style.display='none'" />
+                            <div class="slot-shortname">${escapeHtml(item.short_name)}</div>
+                        </div>
+                        <div class="att-name-and-rating">
+                            <div class="attachment-name-text"><span class="marquee-text">${escapeHtml(item.name)}</span></div>
+                        </div>
+                    </div>
+                </td>
+                <td>${_attPriceCellContent(item)}</td>
+                <td class="col-combo-only"></td>
+                <td>${parseFloat(item.weight ?? 0).toFixed(3)}</td>
+                <td>${formatStat(recoilPercent)}%</td>
+                <td class="acc-cell">${accContent}</td>
+                <td class="${ergoModifier >= 0 ? 'ergo-positive' : 'ergo-negative'}">${ergoModifier >= 0 ? '+' : ''}${formatStat(ergoModifier)}</td>
+                <td class="${evo >= 0 ? 'evo-positive' : 'evo-negative'}">${evo >= 0 ? '+' : ''}${evo.toFixed(1)}</td>
+                <td class="col-combo-only"></td>
+                ${_heatCoolBurnCellHtml(item)}
+                ${_velCellHtml(item)}
+            </tr>
+        `;
+    }
+
     function _renderResult() {
-        const container = document.getElementById('optimizer-result-container');
+        const container = _resultsContainer();
         if (!container) return;
 
         if (_solving) {
             container.innerHTML = `
-                <div class="optimizer-result">
+                <div class="optimizer-result optimizer-results-status">
+                    <div class="optimizer-spinner optimizer-spinner-lg"></div>
                     <div>${_t('optimizer.solving')}</div>
-                    <button class="modal-btn full-width" id="optimizer-cancel-btn">${_t('modal.cancel')}</button>
+                    <button class="modal-btn" id="optimizer-cancel-btn">${_t('modal.cancel')}</button>
                 </div>
             `;
             document.getElementById('optimizer-cancel-btn').addEventListener('click', _cancelSolve);
             return;
         }
         if (_error) {
-            container.innerHTML = `<div class="optimizer-result"><div class="optimizer-error">${_escape(_error)}</div></div>`;
+            container.innerHTML = `<div class="optimizer-result optimizer-results-status"><div class="optimizer-error">${_escape(_error)}</div></div>`;
             return;
         }
         if (!_result) {
-            container.innerHTML = '';
+            container.innerHTML = `<div class="optimizer-results-empty">${_t('optimizer.resultsPlaceholder')}</div>`;
             return;
         }
 
         const s = _result.final_stats;
         container.innerHTML = `
-            <div class="optimizer-result">
-                <div class="optimizer-stat-grid">
-                    <span class="stat-label">${_t('modal.ergo')}</span><span class="stat-value">${s.total_ergo}</span>
-                    <span class="stat-label">${_t('modal.recoil')}</span><span class="stat-value">${s.recoil_vertical}</span>
-                    <span class="stat-label">${_t('modal.weight')}</span><span class="stat-value">${s.total_weight.toFixed(2)}kg</span>
-                    <span class="stat-label">${_t('modal.evoErgo')}</span><span class="stat-value">${s.evo_ergo_delta}</span>
-                    <span class="stat-label">${_t('optimizer.itemCount')}</span><span class="stat-value">${_result.selected_items.length}</span>
-                    <span class="stat-label">${_t('optimizer.totalCost')}</span><span class="stat-value">${_result.total_price_rub.toLocaleString()}₽</span>
+            <div class="optimizer-results">
+                <div class="optimizer-status-bar">
+                    <button type="button" class="modal-btn primary optimizer-reoptimize-btn" id="optimizer-reoptimize-btn">${_t('optimizer.reoptimize')}</button>
+                    <div class="optimizer-status-meta">
+                        <span class="optimizer-status-ok">&#10003;</span>
+                        <span class="optimizer-status-label">${_t('optimizer.statusOptimal')}</span>
+                        ${_result.solve_ms != null ? `<span class="optimizer-badge">${_result.solve_ms} ms</span>` : ''}
+                    </div>
                 </div>
+
+                ${_statTilesHtml(s)}
+
+                ${_weaponCardHtml()}
+
+                <div class="optimizer-manifest">
+                    <div class="optimizer-manifest-header">
+                        <span class="optimizer-manifest-title">${_t('optimizer.buildManifest')}</span>
+                    </div>
+                    <div class="optimizer-manifest-table-wrap">
+                        <table class="attachment-table hide-col-rub-recoil hide-col-balance optimizer-manifest-table">
+                            ${_manifestTheadHtml()}
+                            <tbody id="optimizer-manifest-body">
+                                <tr><td colspan="11" class="optimizer-manifest-loading">${_t('optimizer.loadingItems')}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <button class="modal-btn primary full-width" id="optimizer-use-build-btn">${_t('optimizer.useThisBuild')}</button>
             </div>
         `;
+        document.getElementById('optimizer-reoptimize-btn').addEventListener('click', _solveOptimize);
         document.getElementById('optimizer-use-build-btn').addEventListener('click', _useBuild);
+        _populateManifest(_result);
+    }
+
+    async function _resolveSelectedItems(result) {
+        const pairs = result.slot_pairs || [];
+        const need = [...new Set(pairs.map(p => p[0]).filter(sid => !EFTForge.state.allowedCache[sid]))];
+        if (need.length) {
+            const batch = await fetchSlotAllowedItemsBatch(need);
+            for (const [sid, items] of Object.entries(batch)) cacheSet(EFTForge.state.allowedCache, sid, items);
+        }
+        const out = [];
+        for (const [slotId, itemId] of pairs) {
+            const allowed = EFTForge.state.allowedCache[slotId];
+            const item = allowed && allowed.find(i => i.id === itemId);
+            if (item) out.push(item);
+        }
+        return out;
+    }
+
+    async function _populateManifest(result) {
+        let resolved = [];
+        try { resolved = await _resolveSelectedItems(result); } catch { resolved = []; }
+        if (_result !== result) return; // a newer solve superseded this one
+        try { await ensureFleaPrices(resolved.map(i => i.id)); } catch {}
+        if (_result !== result) return;
+
+        const body = document.getElementById('optimizer-manifest-body');
+        if (!body) return;
+        if (!resolved.length) {
+            body.innerHTML = `<tr><td colspan="11" class="optimizer-manifest-loading">${_t('optimizer.noItems')}</td></tr>`;
+            return;
+        }
+        body.innerHTML = resolved.map(_manifestRowHtml).join('');
+        _wireManifestButtons();
+    }
+
+    function _wireManifestButtons() {
+        const body = document.getElementById('optimizer-manifest-body');
+        if (!body) return;
+        body.querySelectorAll('[data-lock-id]').forEach(btn =>
+            btn.addEventListener('click', () => _toggleManifestLock(btn.dataset.lockId)));
+        body.querySelectorAll('[data-ban-id]').forEach(btn =>
+            btn.addEventListener('click', () => _toggleManifestBan(btn.dataset.banId)));
+    }
+
+    // Lock pins a part (force-include); ban forbids it (exclude). Both feed the exact
+    // same _includedModIds/_excludedModIds the Attachment Filtering section drives, so
+    // the two surfaces stay one source of truth - the user then hits Re-optimize.
+    function _toggleManifestLock(id) {
+        if (_includedModIds.includes(id)) {
+            _includedModIds = _includedModIds.filter(x => x !== id);
+        } else {
+            _includedModIds.push(id);
+            _excludedModIds = _excludedModIds.filter(x => x !== id);
+        }
+        _syncFilterSurfaces();
+    }
+
+    function _toggleManifestBan(id) {
+        if (_excludedModIds.includes(id)) {
+            _excludedModIds = _excludedModIds.filter(x => x !== id);
+        } else {
+            _excludedModIds.push(id);
+            _includedModIds = _includedModIds.filter(x => x !== id);
+        }
+        _syncFilterSurfaces();
+    }
+
+    function _syncFilterSurfaces() {
+        document.querySelectorAll('#optimizer-manifest-body [data-lock-id]').forEach(b =>
+            b.classList.toggle('active', _includedModIds.includes(b.dataset.lockId)));
+        document.querySelectorAll('#optimizer-manifest-body [data-ban-id]').forEach(b =>
+            b.classList.toggle('active', _excludedModIds.includes(b.dataset.banId)));
+        // Keep the Attachment Filtering section's tags in sync if it's mounted.
+        if (document.getElementById('optimizer-mod-filter-widget')) _renderModFilterWidget();
     }
 
     async function _useBuild() {

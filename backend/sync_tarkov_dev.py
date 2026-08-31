@@ -15,6 +15,7 @@ from models_slot_allowed import SlotAllowedItem
 from models_traders import Trader
 from models_stat_changelog import StatChangeLog
 from models_item_offers import ItemOffer
+from models_weapon_presets import WeaponDefaultPreset
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -331,6 +332,20 @@ def _sync_item_offers(db, items_map, trader_norm_map):
     logger.info("Item offers synced (%d rows).", len(offer_rows))
 
 
+def _sync_weapon_default_presets(db, weapon_default_preset_ids):
+    """Persist the weapon -> default-preset-item-id map so the optimizer can price
+    the factory configuration as an alternative base. Table is created by
+    Base.metadata.create_all if it doesn't exist yet; we wipe and repopulate."""
+    db.query(WeaponDefaultPreset).delete()
+    rows = [
+        WeaponDefaultPreset(weapon_id=weapon_id, preset_id=preset_id)
+        for weapon_id, preset_id in weapon_default_preset_ids.items()
+    ]
+    db.bulk_save_objects(rows)
+    db.commit()
+    logger.info("Weapon default-preset map synced (%d rows).", len(rows))
+
+
 def _sync_spt_hidden_stats(db):
     """
     Supplementary sync from a local SPT items.json.
@@ -450,6 +465,9 @@ def sync_items(sync_source: str = "scheduled"):
 
     # Store preset attachments temporarily
     weapon_presets = {}
+    # weapon id -> its default preset's own item id (that preset is a separate
+    # purchasable item; the optimizer prices it as an alternative base).
+    weapon_default_preset_ids = {}
 
     for item in items_map.values():
         properties = item.get("properties")
@@ -604,6 +622,8 @@ def sync_items(sync_source: str = "scheduled"):
                 # --------------------------
                 preset_id = properties.get("defaultPreset")
                 default_preset = items_map.get(preset_id) if preset_id else None
+                if preset_id:
+                    weapon_default_preset_ids[item["id"]] = preset_id
                 if default_preset:
                     preset_image = default_preset.get("image512pxLink")
                     if preset_image:
@@ -914,6 +934,9 @@ def sync_items(sync_source: str = "scheduled"):
     # ------------------------------------------
     logger.info("Syncing full item offer list...")
     _sync_item_offers(db, items_map, trader_norm_map)
+
+    logger.info("Syncing weapon default-preset map...")
+    _sync_weapon_default_presets(db, weapon_default_preset_ids)
 
     # ------------------------------------------
     # Compute cheapest trader buy price per item from the already-fetched items.

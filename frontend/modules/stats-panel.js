@@ -216,6 +216,23 @@ async function ensureFleaPrices(itemIds) {
     }
 }
 
+// weapon id -> its default-preset pseudo-item ({id, trader_price_rub, trader_vendor,
+// trader_min_level}) or null. Cached per session; preset trader pricing is static and
+// its flea price rides the normal fleaCache like any other item.
+const _defaultPresetCache = {};
+async function _fetchDefaultPreset(weaponId) {
+    if (weaponId in _defaultPresetCache) return _defaultPresetCache[weaponId];
+    try {
+        const res = await fetch(`${EFTForge.config.API_BASE}/build/default-preset?weapon_id=${encodeURIComponent(weaponId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        _defaultPresetCache[weaponId] = data.preset || null;
+    } catch {
+        _defaultPresetCache[weaponId] = null;
+    }
+    return _defaultPresetCache[weaponId];
+}
+
 async function renderPriceOverview() {
     const { t } = EFTForge.lang;
     const panel = document.getElementById("price-overview");
@@ -237,7 +254,13 @@ async function renderPriceOverview() {
     const magItem = installedItems.find(it => it.magazine_capacity > 0);
     const magCap = magItem?.magazine_capacity || 1;
 
+    // The weapon's factory preset as a priceable pseudo-item, so the base row can
+    // weigh 'bare receiver + parts' against 'buy the assembled preset' (same call the
+    // optimizer's base choice is built on). Null for weapons without a default preset.
+    const preset = await _fetchDefaultPreset(gun.id);
+
     const allIds = [gun.id, ...installedItems.map(i => i.id)];
+    if (preset) allIds.push(preset.id);
     if (ammo) allIds.push(ammo.id);
     if (ubglAmmo) allIds.push(ubglAmmo.id);
 
@@ -322,19 +345,59 @@ async function renderPriceOverview() {
 
     const factorySet = new Set(gun.factory_attachment_ids || []);
 
+    // The base row shows the chosen starting point + its portrait/kind, matching the
+    // optimizer's card. It carries a kind label under the name, so it needs a portrait
+    // (unlike a plain part row) and can't reuse _costRow.
+    function _baseCostRow(name, kindLabel, priceInfo, iconLink) {
+        const icon = _itemIcon(iconLink);
+        const portraitHtml = priceInfo ? _portrait(priceInfo.vendorNorm) : _portraitSpacer;
+        const priceHtml = priceInfo
+            ? `<span class="cost-price">${_formatPrice(priceInfo.priceRub)}</span>`
+            : `<span class="cost-no-price">-</span>`;
+        return `<div class="cost-row">
+            <div class="cost-row-label">
+                ${portraitHtml}
+                ${icon}
+                <div class="cost-item-name-wrap">
+                    <span class="cost-item-name marquee-text">${escapeHtml(name)}</span>
+                    <span class="cost-base-kind">${escapeHtml(kindLabel)}</span>
+                </div>
+            </div>
+            ${priceHtml}
+        </div>`;
+    }
+
+    // Base choice: build up from the bare receiver, or buy the factory preset (which
+    // bundles its parts, so a selected factory part comes free with it). Pick whichever
+    // is cheaper to acquire this exact build - the same costing the optimizer does.
+    const receiverInfo = _priceInfoForItem(gun);
+    const presetInfo = preset ? _priceInfoForItem(preset) : null;
+    let sumAllParts = 0;
+    let sumNonFactoryParts = 0;
+    for (const it of installedItems) {
+        const p = _priceInfoForItem(it);
+        const rub = p ? p.priceRub : 0;
+        sumAllParts += rub;
+        if (!factorySet.has(it.id)) sumNonFactoryParts += rub;
+    }
+    const receiverTotal = receiverInfo ? receiverInfo.priceRub + sumAllParts : Infinity;
+    const presetTotal = presetInfo ? presetInfo.priceRub + sumNonFactoryParts : Infinity;
+    const usePreset = presetTotal < receiverTotal;
+    const baseInfo = usePreset ? presetInfo : receiverInfo;
+    const baseKindLabel = t(usePreset ? "stats.baseFactoryPreset" : "stats.baseReceiver");
+    const baseIcon = usePreset ? (gun.preset_icon_link || gun.icon_link) : (gun.icon_link || gun.preset_icon_link);
+
     let totalRub = 0;
     let rows = "";
 
-    // Gun is bought on flea with its factory config - use flea price, preset icon, no portrait
-    const gunFleaPrice = fleaCache[gun.id];
-    const gunPriceInfo = gunFleaPrice != null ? { priceRub: gunFleaPrice, vendorNorm: null, isFlea: true } : null;
-    rows += _costRow(gun.name || gun.short_name || "Weapon", gunPriceInfo, gun.preset_icon_link || gun.icon_link, { noPortrait: true });
-    if (gunPriceInfo) totalRub += gunPriceInfo.priceRub;
+    rows += _baseCostRow(gun.name || gun.short_name || "Weapon", baseKindLabel, baseInfo, baseIcon);
+    if (baseInfo) totalRub += baseInfo.priceRub;
 
     for (const att of installedItems) {
         const attName = att.name || att.short_name || "?";
-        if (factorySet.has(att.id)) {
-            // Factory attachments included in flea gun price - show label only, no price
+        // Factory parts are only free when the preset base is chosen; from a bare
+        // receiver every part is bought individually.
+        if (usePreset && factorySet.has(att.id)) {
             rows += _costRow(attName, null, att.icon_link, { noPortrait: true, labelOverride: t("stats.factoryIncluded") });
             continue;
         }
