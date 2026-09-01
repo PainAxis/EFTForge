@@ -68,12 +68,15 @@ with sync_playwright() as playwright:
               const twoPane = document.querySelector('.optimizer-two-pane');
               const ternary = document.querySelector('.optimizer-ternary-svg');
               const presets = document.querySelector('.optimizer-preset-row');
-              const fieldRow = document.querySelector('.optimizer-field-row');
 
               const syntheticSplit = document.createElement('div');
               syntheticSplit.className = 'optimizer-results-split';
               syntheticSplit.innerHTML = '<div></div><div></div>';
               overlay.appendChild(syntheticSplit);
+              const syntheticFieldRow = document.createElement('div');
+              syntheticFieldRow.className = 'optimizer-field-row';
+              syntheticFieldRow.innerHTML = '<div></div><div></div>';
+              overlay.appendChild(syntheticFieldRow);
 
               const overlayRect = overlay.getBoundingClientRect();
               const ternaryRect = ternary.getBoundingClientRect();
@@ -90,10 +93,11 @@ with sync_playwright() as playwright:
                 presetDisplay: presetStyle.display,
                 presetColumns: presetStyle.gridTemplateColumns,
                 resultDirection: getComputedStyle(syntheticSplit).flexDirection,
-                fieldDirection: fieldRow ? getComputedStyle(fieldRow).flexDirection : null,
+                fieldDirection: getComputedStyle(syntheticFieldRow).flexDirection,
                 bodyMobile: document.body.dataset.mobile || null,
               };
               syntheticSplit.remove();
+              syntheticFieldRow.remove();
               return result;
             }
             """,
