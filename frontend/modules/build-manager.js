@@ -2302,7 +2302,7 @@ function buildSlotParentMap(node, map) {
 // pass their own so switching to one restores it in the SAME render as the build
 // itself - without it the caller has to reapply the state and pay a second full
 // renderFullTree() just to reflect it.
-async function loadBuildFromPayload({ g: gunId, p: pairs, a: ammoId = null, ua: ubglAmmoId = null }, buildName = null, silent = false, { collapsedSlots = null } = {}) {
+async function loadBuildFromPayload({ g: gunId, p: pairs, a: ammoId = null, ua: ubglAmmoId = null }, buildName = null, silent = false, { collapsedSlots = null, suppressPulse = false } = {}) {
     const gun = gunById(gunId);
     if (!gun) {
         showToast(t("toast.loadFailed"), t("toast.unknownWeapon"), 3500);
@@ -2313,7 +2313,7 @@ async function loadBuildFromPayload({ g: gunId, p: pairs, a: ammoId = null, ua: 
     EFTForge.state.currentGun = null;
     const dummyEl = { classList: { add() {}, remove() {} } };
     // Its factory tree render would be discarded three lines down - skip it.
-    await selectGun(gun, dummyEl, { skipTreeRender: true });
+    await selectGun(gun, dummyEl, { skipTreeRender: true, suppressPulse });
     // selectGun populates EFTForge.state.slotCache for the gun and all factory items - but we
     // don't want factory attachments in the tree; pairs represent the complete build.
     EFTForge.state.buildTree.children = {};

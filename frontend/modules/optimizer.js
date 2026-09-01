@@ -105,6 +105,10 @@ window.EFTForge.optimizer = (function () {
 
         overlay.classList.add('visible');
         if (backdrop) backdrop.classList.add('visible');
+        // Holds the edge-tab rail in its expanded (hover) look for as long as the
+        // drawer is open, independent of the mouse - see .optimizer-edge-tab-drawer-open
+        // in styles.css.
+        document.getElementById('optimizer-edge-tab')?.classList.add('optimizer-edge-tab-drawer-open');
         document.getElementById('main-container')?.setAttribute('inert', '');
         if (document.activeElement) document.activeElement.blur();
 
@@ -118,6 +122,7 @@ window.EFTForge.optimizer = (function () {
         const backdrop = document.getElementById('optimizer-backdrop');
         if (overlay) overlay.classList.remove('visible');
         if (backdrop) backdrop.classList.remove('visible');
+        document.getElementById('optimizer-edge-tab')?.classList.remove('optimizer-edge-tab-drawer-open');
         document.getElementById('main-container')?.removeAttribute('inert');
         // Otherwise a solve left running behind a closed drawer could still
         // resolve later and pop a stale result into a future, unrelated session.
@@ -151,22 +156,102 @@ window.EFTForge.optimizer = (function () {
         // otherwise get wiped out the first time either of those runs.
         // Watching and re-appending here keeps this self-contained instead of
         // patching every current (and future) place that rebuilds the panel.
+        // Skipped while publishMode is true: showPublishConfirmPanel sets it before
+        // wiping the placeholder for its confirm screen, and the rail has no reason
+        // to show there. build-manager.js flips it back to false before
+        // _restoreNormalPlaceholder runs, so the tab correctly reappears once the
+        // user leaves that screen (cancel, modify, or confirm).
         const placeholder = document.getElementById('attachment-placeholder');
         if (placeholder) {
             _ensureEdgeTab(placeholder);
-            new MutationObserver(() => _ensureEdgeTab(placeholder)).observe(placeholder, { childList: true });
+            // The static tab in index.html ships with optimizer-edge-tab-pulse-snap
+            // hardcoded (so a first-ever visitor gets the pre-expanded intro state
+            // from their very first paint - see pulse()'s comment). _ensureEdgeTab
+            // no-ops when that element already exists, so a returning user (whose
+            // localStorage already says they've seen it) needs it stripped
+            // explicitly here instead, or it'd render stuck expanded forever with
+            // nothing left to ever remove it. This runs synchronously before the
+            // browser's first paint (this script isn't deferred/async), so there's
+            // no visible flash either way.
+            if (_hasPulsed) document.getElementById('optimizer-edge-tab')?.classList.remove('optimizer-edge-tab-pulse-snap');
+            new MutationObserver(() => {
+                if (!EFTForge.state.publishMode) _ensureEdgeTab(placeholder);
+            }).observe(placeholder, { childList: true });
         }
         onLangChange(); // sync the edge-tab label with the saved language preference on first paint
+    }
+
+    // Keep this markup in sync with the static #optimizer-edge-tab in index.html -
+    // this rebuilds it after a wholesale placeholder innerHTML replace wipes it out.
+    // The logo is the reference optimizer's crosshair-reticle favicon.
+    function _edgeTabInnerHtml() {
+        return `
+            <div class="optimizer-edge-tab-glow optimizer-edge-tab-glow-rest"></div>
+            <div class="optimizer-edge-tab-glow optimizer-edge-tab-glow-hover"></div>
+            <div class="optimizer-edge-tab-clip">
+                <span class="optimizer-edge-tab-content">
+                    <svg class="optimizer-edge-tab-logo" viewBox="0 0 128 128" fill="none" stroke="currentColor" aria-hidden="true">
+                        <circle cx="64" cy="64" r="56" stroke-width="8"/>
+                        <circle cx="64" cy="64" r="28" stroke-width="6"/>
+                        <circle cx="64" cy="64" r="6" fill="currentColor" stroke="none"/>
+                        <line x1="64" y1="4" x2="64" y2="28" stroke-width="6"/>
+                        <line x1="64" y1="100" x2="64" y2="124" stroke-width="6"/>
+                        <line x1="4" y1="64" x2="28" y2="64" stroke-width="6"/>
+                        <line x1="100" y1="64" x2="124" y2="64" stroke-width="6"/>
+                    </svg>
+                    <span class="optimizer-edge-tab-label" id="optimizer-edge-tab-label">${_t('optimizer.title')}</span>
+                </span>
+            </div>
+        `;
     }
 
     function _ensureEdgeTab(placeholder) {
         if (document.getElementById('optimizer-edge-tab')) return;
         const tab = document.createElement('div');
         tab.id = 'optimizer-edge-tab';
-        tab.className = 'optimizer-edge-tab';
+        // Only pre-expanded (see pulse()'s comment) if this user has never seen the
+        // intro (tracked in localStorage, not just this session). Without this
+        // check, a placeholder rebuild later on (e.g. _restoreNormalPlaceholder
+        // after the publish-confirm flow) would recreate the tab already-expanded
+        // again, but pulse() would never fire again to collapse it - leaving it
+        // stuck expanded for good.
+        tab.className = _hasPulsed ? 'optimizer-edge-tab' : 'optimizer-edge-tab optimizer-edge-tab-pulse-snap';
         tab.addEventListener('click', showPanel);
-        tab.innerHTML = `<span class="optimizer-edge-tab-label" id="optimizer-edge-tab-label">${_t('optimizer.title')}</span>`;
+        tab.innerHTML = _edgeTabInnerHtml();
         placeholder.appendChild(tab);
+    }
+
+    // Draws the eye to the optimizer rail the very first time this user ever opens a
+    // gun's build panel (called from selectGun in gun-list.js), by replaying the
+    // rail's own mouse-leave collapse - no bespoke pulse animation. The tab already ships
+    // with .optimizer-edge-tab-pulse-snap applied (index.html / _ensureEdgeTab above)
+    // so it's rendered fully expanded, transitions disabled, from its very first
+    // paint - there's nothing before that first paint for it to have collapsed FROM,
+    // so there's no collapsed-then-snapped-open flicker to begin with. Removing the
+    // class after a short hold is then just a normal style change back to rest,
+    // which the base rule's own transition (the collapse curve) picks up and
+    // animates - the only motion that ever plays is that one-time collapse.
+    // Deferred two frames before removing it because selectGun un-hides the right
+    // panel (removes .no-gun) in the same tick; we wait for that reveal to commit
+    // and re-query the current tab (the MutationObserver may have re-appended it as
+    // a fresh node) before touching it.
+    const PULSE_HOLD_MS = 555; // how long the rail stays expanded before collapsing
+
+    // Once-ever gate, persisted in localStorage (not sessionStorage/in-memory): once
+    // this user has seen the intro on any visit, it must never play again, on any
+    // future page load or refresh either.
+    const PULSE_SEEN_KEY = 'eftforge-optimizer-intro-pulsed';
+    let _hasPulsed = localStorage.getItem(PULSE_SEEN_KEY) === 'true';
+
+    function pulse() {
+        if (_hasPulsed) return;
+        _hasPulsed = true;
+        localStorage.setItem(PULSE_SEEN_KEY, 'true');
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            const tab = document.getElementById('optimizer-edge-tab');
+            if (!tab) return;
+            setTimeout(() => tab.classList.remove('optimizer-edge-tab-pulse-snap'), PULSE_HOLD_MS);
+        }));
     }
 
     /* ===========================
@@ -1718,6 +1803,6 @@ window.EFTForge.optimizer = (function () {
     // Scripts are loaded at the end of <body> so DOM is ready; init immediately.
     init();
 
-    return { showPanel, hidePanel, onLangChange, onTraderLevelsChange };
+    return { showPanel, hidePanel, onLangChange, onTraderLevelsChange, pulse };
 
 }());

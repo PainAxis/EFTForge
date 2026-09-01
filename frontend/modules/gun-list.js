@@ -566,7 +566,7 @@ function renderGunList(guns, forceStagger = false) {
 // rendering it here is pure waste - a full renderNode pass over the factory
 // build plus, via build-preview.js's renderFullTree hook, a discarded
 // scheduleBuildPreview() image generation for a build nobody will ever see.
-async function selectGun(gun, liElement, { skipTreeRender = false } = {}) {
+async function selectGun(gun, liElement, { skipTreeRender = false, suppressPulse = false } = {}) {
     // If clicking same gun, do nothing
     if (EFTForge.state.currentGun && EFTForge.state.currentGun.id === gun.id) {
         return;
@@ -611,6 +611,14 @@ async function selectGun(gun, liElement, { skipTreeRender = false } = {}) {
     const placeholder = document.getElementById("attachment-placeholder");
     if (placeholder) {
         placeholder.style.display = "flex";
+    }
+
+    // Pulse the optimizer edge-rail so opening a gun draws the eye to it - but not
+    // when this selectGun is just re-installing a build for an already-open tab
+    // (suppressPulse, set by tab-manager's _activateTab), otherwise switching
+    // between existing tabs would replay the pulse every time.
+    if (!suppressPulse) {
+        EFTForge.optimizer?.pulse?.();
     }
 
     EFTForge.state.lastParentNode = null;

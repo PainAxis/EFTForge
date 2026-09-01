@@ -221,6 +221,13 @@ async function createTabForGun(gun, card = null) {
             const preDup = _findDuplicateTab(gun.id, collectSlotPairs({ children: initData.factory_tree }), savedAmmoId, null);
             if (preDup) {
                 await _activateTab(preDup.id);
+                // _activateTab's own loadBuildFromPayload call suppresses selectGun's
+                // pulse (shared with genuine tab-bar switching, which must NOT replay
+                // it) - so a grid click that collapses into an already-open tab needs
+                // its own pulse here instead. Fired only now, not up front: this is
+                // the earliest point the right panel (and the edge-tab living in it)
+                // is actually revealed - _activateTab is what removes .no-gun.
+                EFTForge.optimizer?.pulse?.();
                 _scrollTabIntoView(preDup.id);
                 return;
             }
@@ -234,6 +241,9 @@ async function createTabForGun(gun, card = null) {
 
         EFTForge.state.currentGun = null; // bypass selectGun's same-gun guard
         const el = card || { classList: { add() {}, remove() {} } };
+        // Not suppressed here: this is a genuinely fresh gun pick, so selectGun's own
+        // pulse call (which fires right after it reveals the right panel, i.e. at the
+        // correct time) is exactly the one that should run.
         await selectGun(gun, el);
 
         tab.pairs = collectSlotPairs(EFTForge.state.buildTree);
@@ -337,7 +347,7 @@ async function _activateTab(tabId) {
         { g: target.gunId, p: target.pairs, a: target.ammoId, ua: target.ubglAmmoId },
         target.buildName,
         true,
-        { collapsedSlots: target.collapsedSlots || {} },
+        { collapsedSlots: target.collapsedSlots || {}, suppressPulse: true },
     );
     EFTForge.state.communityBuild = restoreCommunityBuild;
     syncBuildDisplayName();
