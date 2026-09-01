@@ -39,6 +39,10 @@ with sync_playwright() as playwright:
         page.locator(f'.gun-card[data-gun-id="{gun["id"]}"]').wait_for(
             state="visible", timeout=120_000
         )
+        news_backdrop = page.locator("#news-backdrop.visible")
+        if news_backdrop.is_visible():
+            news_backdrop.click()
+            news_backdrop.wait_for(state="hidden", timeout=30_000)
         page.locator(f'.gun-card[data-gun-id="{gun["id"]}"]').click()
         page.wait_for_function(
             "() => Boolean(window.EFTForge?.state?.currentGun)", timeout=120_000
