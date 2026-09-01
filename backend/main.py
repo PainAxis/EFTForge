@@ -2123,9 +2123,9 @@ def build_default_preset(weapon_id: str, db: Session = Depends(get_db)):
     # Cheapest trader offer, mirroring how sync computes Item.trader_price_rub (same
     # excluded vendors) so the preset prices consistently with every other item row.
     excluded = {"ragman", "ref", "fence", "flea-market"}
-    offers = db.query(ItemOffer).filter(
-        ItemOffer.item_id == row.preset_id, ItemOffer.is_flea == False  # noqa: E712
-    ).all()
+    offers = (
+        db.query(ItemOffer).filter(ItemOffer.item_id == row.preset_id, ItemOffer.is_flea == False).all()  # noqa: E712
+    )
     eligible = [o for o in offers if o.vendor_normalized not in excluded and o.price_rub is not None]
     cheapest = min(eligible, key=lambda o: o.price_rub) if eligible else None
     return {

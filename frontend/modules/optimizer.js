@@ -211,8 +211,13 @@ window.EFTForge.optimizer = (function () {
         body.innerHTML = `
             ${tabStripHtml}
             <div id="optimizer-tab-content"></div>
-            <div class="optimizer-credit">${_creditHtml()}</div>
         `;
+
+        // Lives outside .optimizer-panel-body as a fixed watermark (see styles.css
+        // .optimizer-credit), so it's set once here rather than rebuilt on every
+        // tab switch along with the rest of the panel body.
+        const credit = document.getElementById('optimizer-credit');
+        if (credit) credit.innerHTML = _creditHtml();
 
         if (GUNSMITH_ENABLED) {
             document.getElementById('optimizer-tab-optimize').addEventListener('click', () => _switchTab('optimize'));
@@ -954,17 +959,11 @@ window.EFTForge.optimizer = (function () {
         _modSearch = '';
 
         const currentGun = window.EFTForge.state && window.EFTForge.state.currentGun;
-        const gunName = currentGun ? currentGun.name : '';
         const weaponId = currentGun ? currentGun.id : null;
 
         content.innerHTML = `
           <div class="optimizer-two-pane">
             <div class="optimizer-config-pane">
-            <div class="optimizer-field">
-                <label class="modal-label">${_t('optimizer.weapon')}</label>
-                <div class="optimizer-current-weapon">${_escape(gunName)}</div>
-            </div>
-
             <div class="optimizer-section${_sectionOpen.weight ? ' open' : ''}" data-section="weight">
                 ${_sectionHeaderHtml('weight', 'optimizer.weightAdjustment')}
                 <div class="optimizer-section-body" data-section-body style="${_sectionOpen.weight ? '' : 'display:none;'}">
@@ -1033,6 +1032,15 @@ window.EFTForge.optimizer = (function () {
             <div class="optimizer-results-pane" id="optimizer-results-pane"></div>
           </div>
         `;
+
+        // Mirrors the main attachment table's header-pinned toggle (styles.css
+        // .attachment-table.header-pinned), but scoped to this pane's own scroll
+        // instead of .right-panel since the results pane now scrolls independently.
+        const resultsPane = document.getElementById('optimizer-results-pane');
+        resultsPane.addEventListener('scroll', () => {
+            const table = resultsPane.querySelector('.optimizer-manifest-table');
+            if (table) table.classList.toggle('header-pinned', resultsPane.scrollTop > 10);
+        }, { passive: true });
 
         document.getElementById('optimizer-preset-recoil').addEventListener('click', () => _setWeights(0, 100, 0));
         document.getElementById('optimizer-preset-ergo').addEventListener('click', () => _setWeights(100, 0, 0));
@@ -1434,23 +1442,24 @@ window.EFTForge.optimizer = (function () {
         return _t(base && base.kind === 'preset' ? 'optimizer.factoryPreset' : 'optimizer.baseReceiver');
     }
 
-    // The starting-point cost blip: the price of the chosen base (bare receiver or
-    // factory preset) alone, with its trader portrait or a flea tag - deliberately the
-    // same portrait-blip markup the price panel/attachment table use (_attPriceCellContent).
-    function _basePriceBlipHtml(base) {
-        if (!base || base.price_rub == null) return '<span class="att-price-flea">-</span>';
-        const isFlea = !base.vendor || base.vendor === 'flea-market';
+    // Renders a {price_rub, vendor} price blip (trader portrait or a flea tag) -
+    // shared by the weapon card's base cost and the manifest table's per-item
+    // price cell, both driven by the solve's own item_prices rather than an
+    // independently re-picked "cheapest overall" price.
+    function _priceBlipHtml(priced) {
+        if (!priced || priced.price_rub == null) return '<span class="att-price-flea">-</span>';
+        const isFlea = !priced.vendor || priced.vendor === 'flea-market';
         let vendorHtml;
         if (isFlea) {
             vendorHtml = `<span class="att-price-flea">${_escape(_t('stats.fleaLabel'))}</span>`;
         } else {
-            const trader = window.EFTForge.state.tradersByNorm && window.EFTForge.state.tradersByNorm[base.vendor];
+            const trader = window.EFTForge.state.tradersByNorm && window.EFTForge.state.tradersByNorm[priced.vendor];
             const img = (trader && trader.imageLink) || '';
             vendorHtml = img
                 ? `<img class="att-price-portrait" src="${_escape(img)}" onerror="this.style.display='none'">`
-                : `<span class="att-price-vendor">${_escape(base.vendor)}</span>`;
+                : `<span class="att-price-vendor">${_escape(priced.vendor)}</span>`;
         }
-        return `<div class="att-price-wrap">${vendorHtml}<span>${_formatPrice(base.price_rub)}</span></div>`;
+        return `<div class="att-price-wrap">${vendorHtml}<span>${_formatPrice(priced.price_rub)}</span></div>`;
     }
 
     // The card art follows the chosen base and prefers the 512px image: the preset's
@@ -1476,7 +1485,7 @@ window.EFTForge.optimizer = (function () {
                     <div class="optimizer-weapon-card-name">${_escape(gunName)}</div>
                     <div class="optimizer-weapon-card-sub">${_escape(_baseKindLabel(base))}</div>
                 </div>
-                <div class="optimizer-weapon-card-price">${_basePriceBlipHtml(base)}</div>
+                <div class="optimizer-weapon-card-price">${_priceBlipHtml(base)}</div>
             </div>
         `;
     }
@@ -1543,7 +1552,7 @@ window.EFTForge.optimizer = (function () {
                         </div>
                     </div>
                 </td>
-                <td>${_attPriceCellContent(item)}</td>
+                <td>${_priceBlipHtml((_result.item_prices && _result.item_prices[item.id]) || null)}</td>
                 <td class="col-combo-only"></td>
                 <td>${parseFloat(item.weight ?? 0).toFixed(3)}</td>
                 <td>${formatStat(recoilPercent)}%</td>
@@ -1595,9 +1604,9 @@ window.EFTForge.optimizer = (function () {
 
                 ${_statTilesHtml(s)}
 
-                ${_weaponCardHtml()}
-
                 <div class="optimizer-manifest">
+                    ${_weaponCardHtml()}
+
                     <div class="optimizer-manifest-header">
                         <span class="optimizer-manifest-title">${_t('optimizer.buildManifest')}</span>
                     </div>

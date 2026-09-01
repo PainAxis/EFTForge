@@ -58,9 +58,9 @@ PRICE_SCALE_FALLBACK = 300_000.0
 # weights - the reference is well-established and this matches how EFT players
 # actually build. (EvoErgo mode has its own objective, _evo_ergo_objective, and
 # is tuned separately - it does not use these.)
-ERGO_OBJ_COEFF = 1.0        # per ergonomics point
-RECOIL_OBJ_COEFF = 1000.0   # per unit of recoil_modifier (1% recoil = 10)
-PRICE_OBJ_COEFF = 0.001     # per ruble
+ERGO_OBJ_COEFF = 1.0  # per ergonomics point
+RECOIL_OBJ_COEFF = 1000.0  # per unit of recoil_modifier (1% recoil = 10)
+PRICE_OBJ_COEFF = 0.001  # per ruble
 
 # EvoErgo tangent sweep: anchor total-ergo values to linearize EFTForge's own
 # quadratic KG(E) curve (stats.py's _compute_stats) around. A MILP can only

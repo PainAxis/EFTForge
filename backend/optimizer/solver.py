@@ -148,6 +148,11 @@ def optimize_weapon(db, weapon_id: str, params: OptimizeParams) -> dict:
         )
         result["final_stats"] = final_stats
         result["gun_id"] = weapon_id
+        # The exact price/vendor each selected item was actually costed at during
+        # the solve (respects flea_available/trader_levels) - the manifest UI
+        # renders from this instead of independently re-picking "cheapest overall"
+        # client-side, which would ignore those same access filters.
+        result["item_prices"] = {item_id: prices[item_id] for item_id in result["selected_items"]}
         # Per-item EvoErgo contribution, so the results-panel manifest can show the
         # same EvoErgo column the attachment table does. Contribution is marginal -
         # the build's EED minus the EED it would have without that one part - which is

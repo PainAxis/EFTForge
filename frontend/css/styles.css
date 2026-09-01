@@ -6769,6 +6769,8 @@ button.build-tag-chip.active {
 
 .optimizer-panel-body {
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
   padding: 14px 16px 24px;
   display: flex;
   flex-direction: column;
@@ -6782,6 +6784,15 @@ button.build-tag-chip.active {
   /* Establish an explicit base so unstyled labels (.stat-label) stop
      inheriting the 16px browser default and out-sizing the section titles. */
   font-size: 13px;
+  /* Fills whatever's left below the tab strip and scrolls as one region by
+     default (e.g. the Gunsmith tab). The Optimize tab's two-pane below
+     overrides this so its two columns scroll independently instead. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+#optimizer-tab-content:has(> .optimizer-two-pane) {
+  overflow: hidden;
 }
 
 .optimizer-field {
@@ -7190,20 +7201,26 @@ button.build-tag-chip.active {
   line-height: 1.5;
 }
 
+/* A small watermark pinned to the drawer's bottom-right corner rather than a
+   full-width section in the normal document flow, so it doesn't add height
+   to .optimizer-panel-body and force the whole drawer to scroll. */
 .optimizer-credit {
-  font-size: 11px;
-  color: #777;
-  line-height: 1.5;
-  background: #1c1c1c;
-  border: 1px solid #2e2e2e;
-  border-radius: 4px;
-  padding: 8px 12px;
+  position: absolute;
+  right: 14px;
+  bottom: 6px;
+  font-size: 10px;
+  color: #555;
+  line-height: 1.4;
+  pointer-events: none;
+  z-index: 1;
 }
 .optimizer-credit a {
-  color: #f5c542;
+  color: #776b46;
   text-decoration: none;
+  pointer-events: auto;
 }
 .optimizer-credit a:hover {
+  color: #f5c542;
   text-decoration: underline;
 }
 
@@ -7213,29 +7230,62 @@ button.build-tag-chip.active {
    (status bar, stat tiles, weapon card, Build Manifest).
 ============================================================ */
 
+/* Fills the bounded height #optimizer-tab-content hands it (see the :has()
+   override above) so both columns below can size to 100% and scroll on
+   their own - no viewport-height arithmetic needed. */
 .optimizer-two-pane {
   display: flex;
   gap: 16px;
-  align-items: flex-start;
+  align-items: stretch;
+  height: 100%;
+  min-height: 0;
 }
+/* Both panes fill the two-pane's full height and scroll their own contents
+   in their own box, so dragging one side's scrollbar never moves the other. */
 .optimizer-config-pane {
   flex: 0 0 340px;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a #1a1a1a;
+}
+/* Being a flex column itself, .optimizer-config-pane would otherwise shrink
+   its sections (default flex-shrink:1) to fit its bounded height instead of
+   overflowing - which is what made opening more sections squish the others
+   rather than scroll. Pin every child to its natural content height so
+   overflow-y:auto has actual overflow to scroll. */
+.optimizer-config-pane > * {
+  flex-shrink: 0;
 }
 .optimizer-results-pane {
   flex: 1 1 auto;
   min-width: 0;
-  position: sticky;
-  top: 64px;
-  align-self: flex-start;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a #1a1a1a;
 }
 @media (max-width: 900px) {
-  .optimizer-two-pane { flex-direction: column; }
-  .optimizer-config-pane { flex-basis: auto; width: 100%; }
-  .optimizer-results-pane { position: static; width: 100%; }
+  /* Stacked layout: drop the independent-scroll boxing and let the whole
+     drawer scroll as one region again, same as before the two-pane existed. */
+  .optimizer-panel-body { min-height: auto; overflow: visible; }
+  #optimizer-tab-content,
+  #optimizer-tab-content:has(> .optimizer-two-pane) {
+    flex: none; min-height: auto; overflow: visible;
+  }
+  .optimizer-two-pane { flex-direction: column; height: auto; }
+  .optimizer-config-pane {
+    flex-basis: auto; width: 100%;
+    overflow-y: visible;
+  }
+  .optimizer-results-pane {
+    width: 100%;
+    overflow: visible;
+  }
 }
 
 /* Empty / loading / error placeholder for the results pane */
@@ -7347,14 +7397,16 @@ body[data-mobile="true"] .optimizer-results-statsblock {
 }
 
 /* ---- Weapon card ---- */
+/* Sits inside .optimizer-manifest as its receiver/preset header; the bottom
+   border is what keeps it visually distinct from the attachment table below
+   rather than a separate card of its own. */
 .optimizer-weapon-card {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: #161616;
-  border: 1px solid #2e2e2e;
-  border-radius: 6px;
-  padding: 10px 14px;
+  padding: 0 0 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #2e2e2e;
 }
 .optimizer-weapon-card-img {
   width: 84px;
@@ -7403,12 +7455,18 @@ body[data-mobile="true"] .optimizer-results-statsblock {
   text-transform: uppercase;
   color: #ccc;
 }
-/* The manifest reuses the attachment table wholesale; a horizontal scroll wrap
-   keeps the full stat column set usable when the results pane gets narrow. */
-.optimizer-manifest-table-wrap {
-  overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: #3a3a3a #161616;
+/* The manifest reuses the attachment table wholesale. Horizontal scroll lives
+   on .optimizer-results-pane itself (same as .right-panel does for the normal
+   attachment table) rather than on a wrap here - overflow-x on this wrap
+   would force overflow-y:auto too and break the sticky header's positioning
+   against the pane it's actually supposed to pin to. */
+/* The shared .attachment-table th sticky offset (top:-40px / padding-top:29px)
+   is tuned for the standalone attachment picker, whose sticky header fades in
+   over a much taller block (search bar + filter toggles) above the table. The
+   manifest has no such header, so pin it flush instead. */
+.optimizer-manifest-table th {
+  top: 0;
+  padding-top: 8px;
 }
 .optimizer-manifest-loading {
   color: #666;
