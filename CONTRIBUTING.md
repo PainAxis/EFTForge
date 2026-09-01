@@ -71,6 +71,14 @@ calculation formulas, since those are duplicated between the backend and
 
 Focus on *why* a change was made, not just what changed.
 
+## Release notes / news posts
+
+Contributors should never add or edit anything under `frontend/news/` (posts,
+`manifest.json`) as part of a feature or fix PR. Release notes,
+version bumps, and the news feed are written and published by Morph1ne **only**, after
+a change has actually shipped. If your PR includes changes in that directory, expect
+to be asked to remove them before merge.
+
 ## Reporting bugs / requesting features
 
 Open a GitHub issue. For security vulnerabilities, see [SECURITY.md](SECURITY.md)
