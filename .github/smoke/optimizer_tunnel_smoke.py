@@ -96,9 +96,12 @@ with sync_playwright() as playwright:
                 lastHeaderRight: lastHeaderBefore.right,
               };
 
-              wrap.scrollLeft = wrap.scrollWidth;
+              const horizontalScroller = width <= 900 ? wrap : resultsPane;
+              horizontalScroller.scrollLeft = horizontalScroller.scrollWidth;
               const lastHeaderAfter = lastHeader.getBoundingClientRect();
-              const maxScrollLeft = wrap.scrollWidth - wrap.clientWidth;
+              const horizontalScrollerRect = horizontalScroller.getBoundingClientRect();
+              const maxScrollLeft =
+                horizontalScroller.scrollWidth - horizontalScroller.clientWidth;
               const result = {
                 width,
                 documentScrollWidth: document.documentElement.scrollWidth,
@@ -123,9 +126,20 @@ with sync_playwright() as playwright:
                 wrapClientWidth: wrap.clientWidth,
                 wrapScrollWidth: wrap.scrollWidth,
                 wrapScrollLeft: wrap.scrollLeft,
-                wrapMaxScrollLeft: maxScrollLeft,
+                wrapMaxScrollLeft: wrap.scrollWidth - wrap.clientWidth,
                 wrapOverflowX: getComputedStyle(wrap).overflowX,
                 resultsOverflow: getComputedStyle(resultsPane).overflow,
+                resultsClientWidth: resultsPane.clientWidth,
+                resultsScrollWidth: resultsPane.scrollWidth,
+                resultsScrollLeft: resultsPane.scrollLeft,
+                resultsMaxScrollLeft:
+                  resultsPane.scrollWidth - resultsPane.clientWidth,
+                horizontalScroller:
+                  horizontalScroller === wrap ? 'manifest-wrap' : 'results-pane',
+                horizontalScrollerLeft: horizontalScrollerRect.left,
+                horizontalScrollerRight: horizontalScrollerRect.right,
+                horizontalScrollLeft: horizontalScroller.scrollLeft,
+                horizontalMaxScrollLeft: maxScrollLeft,
                 tableWidth: table.getBoundingClientRect().width,
                 visibleHeaderCount: visibleHeaders.length,
                 lastHeaderText: lastHeader.textContent.trim(),
@@ -157,16 +171,16 @@ with sync_playwright() as playwright:
             f"{width}px: current-build panel escaped drawer {metrics}",
         )
         require(
-            metrics["manifestLeft"] >= metrics["overlayLeft"] - 1
-            and metrics["manifestRight"] <= metrics["overlayRight"] + 1,
-            f"{width}px: manifest panel escaped drawer {metrics}",
-        )
-        require(
             abs(metrics["overlayScrollTop"] - metrics["overlayMaxScrollTop"]) <= 1,
             f"{width}px: outer drawer cannot reach its vertical end {metrics}",
         )
 
         if width <= 900:
+            require(
+                metrics["manifestLeft"] >= metrics["overlayLeft"] - 1
+                and metrics["manifestRight"] <= metrics["overlayRight"] + 1,
+                f"{width}px: manifest panel escaped drawer {metrics}",
+            )
             require(metrics["twoPaneDirection"] == "column", f"{width}px: panes not stacked")
             require(metrics["presetDisplay"] == "grid", f"{width}px: presets not a grid")
             require(metrics["resultDirection"] == "column", f"{width}px: results not stacked")
@@ -190,6 +204,16 @@ with sync_playwright() as playwright:
                 metrics["wrapOverflowX"] == "visible",
                 f"{width}px: desktop manifest overflow behavior changed {metrics}",
             )
+            if metrics["resultsScrollWidth"] > metrics["resultsClientWidth"] + 1:
+                require(
+                    abs(metrics["resultsScrollLeft"] - metrics["resultsMaxScrollLeft"]) <= 1,
+                    f"{width}px: desktop results pane cannot reach its horizontal end {metrics}",
+                )
+                require(
+                    metrics["lastHeaderLeft"] >= metrics["horizontalScrollerLeft"] - 1
+                    and metrics["lastHeaderRight"] <= metrics["horizontalScrollerRight"] + 1,
+                    f"{width}px: desktop final manifest column inaccessible {metrics}",
+                )
 
         if width in (543, 480):
             require(
