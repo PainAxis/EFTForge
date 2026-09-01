@@ -72,15 +72,17 @@ window.EFTForge.optimizer = (function () {
     function _toggleSection(id) {
         _sectionOpen[id] = !_sectionOpen[id];
         const section = document.querySelector(`.optimizer-section[data-section="${id}"]`);
-        const body = section?.querySelector('[data-section-body]');
-        if (section) section.classList.toggle('open', _sectionOpen[id]);
-        if (body) body.style.display = _sectionOpen[id] ? '' : 'none';
+        section?.classList.toggle('open', _sectionOpen[id]);
     }
 
     function _wireSection(id, onReset) {
         document.querySelector(`[data-section-toggle="${id}"]`)?.addEventListener('click', () => _toggleSection(id));
         document.querySelector(`[data-section-reset="${id}"]`)?.addEventListener('click', (ev) => {
             ev.stopPropagation();
+            const btn = ev.currentTarget;
+            btn.classList.remove('reset-pulse');
+            void btn.offsetWidth; // restart the animation on rapid repeat clicks
+            btn.classList.add('reset-pulse');
             onReset();
         });
     }
@@ -93,6 +95,20 @@ window.EFTForge.optimizer = (function () {
     let _abortController = null;
 
     function _t(key) { return window.t ? window.t(key) : key; }
+    function _tFmt(key, vars) { return window.tFmt ? window.tFmt(key, vars) : _t(key); }
+
+    // Backend infeasibility responses carry either reason_details (a list, from
+    // the cheap pre-checks in feasibility.py that can flag several problems at
+    // once) or a single reason_key (from the MILP build itself, which only ever
+    // fails for one cause at a time). Older/unmapped reasons fall back to the
+    // raw English `reason` text so nothing goes silently blank.
+    function _formatReason(data) {
+        if (Array.isArray(data.reason_details) && data.reason_details.length) {
+            return data.reason_details.map(r => _tFmt(r.key, r.params || {})).join('; ');
+        }
+        if (data.reason_key) return _tFmt(data.reason_key, data.reason_params || {});
+        return data.reason || _t('optimizer.infeasible');
+    }
 
     /* ===========================
        PUBLIC API
@@ -1051,7 +1067,9 @@ window.EFTForge.optimizer = (function () {
             <div class="optimizer-config-pane">
             <div class="optimizer-section${_sectionOpen.weight ? ' open' : ''}" data-section="weight">
                 ${_sectionHeaderHtml('weight', 'optimizer.weightAdjustment')}
-                <div class="optimizer-section-body" data-section-body style="${_sectionOpen.weight ? '' : 'display:none;'}">
+                <div class="optimizer-section-body" data-section-body>
+                  <div class="optimizer-section-body-inner">
+                   <div class="optimizer-section-body-content">
                     <div class="optimizer-preset-row">
                         <button type="button" class="optimizer-preset-btn" id="optimizer-preset-recoil">${_t('optimizer.presetRecoil')}</button>
                         <button type="button" class="optimizer-preset-btn" id="optimizer-preset-ergo">${_t('optimizer.presetErgo')}</button>
@@ -1075,12 +1093,16 @@ window.EFTForge.optimizer = (function () {
                         </div>
                     </div>
                     <div id="optimizer-weight-widget"></div>
+                   </div>
+                  </div>
                 </div>
             </div>
 
             <div class="optimizer-section${_sectionOpen.constraints ? ' open' : ''}" data-section="constraints">
                 ${_sectionHeaderHtml('constraints', 'optimizer.constraints')}
-                <div class="optimizer-section-body" data-section-body style="${_sectionOpen.constraints ? '' : 'display:none;'}">
+                <div class="optimizer-section-body" data-section-body>
+                  <div class="optimizer-section-body-inner">
+                   <div class="optimizer-section-body-content">
                     <div class="optimizer-toggle-row">
                         <span class="stat-label">${_t('optimizer.preventOverswing')}</span>
                         <button type="button" class="compare-toggle${_preventOverswing ? ' active' : ''}" id="optimizer-overswing-toggle">
@@ -1088,19 +1110,27 @@ window.EFTForge.optimizer = (function () {
                         </button>
                     </div>
                     <div id="optimizer-constraints-widget"></div>
+                   </div>
+                  </div>
                 </div>
             </div>
 
             <div class="optimizer-section${_sectionOpen.modFilter ? ' open' : ''}" data-section="modFilter">
                 ${_sectionHeaderHtml('modFilter', 'optimizer.modFilter')}
-                <div class="optimizer-section-body" data-section-body style="${_sectionOpen.modFilter ? '' : 'display:none;'}">
+                <div class="optimizer-section-body" data-section-body>
+                  <div class="optimizer-section-body-inner">
+                   <div class="optimizer-section-body-content">
                     <div id="optimizer-mod-filter-widget"></div>
+                   </div>
+                  </div>
                 </div>
             </div>
 
             <div class="optimizer-section${_sectionOpen.market ? ' open' : ''}" data-section="market">
                 ${_sectionHeaderHtml('market', 'optimizer.marketAccess')}
-                <div class="optimizer-section-body" data-section-body style="${_sectionOpen.market ? '' : 'display:none;'}">
+                <div class="optimizer-section-body" data-section-body>
+                  <div class="optimizer-section-body-inner">
+                   <div class="optimizer-section-body-content">
                     <div class="optimizer-toggle-row">
                         <span class="stat-label">${_t('optimizer.fleaAvailable')}</span>
                         <button type="button" class="compare-toggle${_fleaAvailable ? ' active' : ''}" id="optimizer-flea-toggle">
@@ -1108,10 +1138,11 @@ window.EFTForge.optimizer = (function () {
                         </button>
                     </div>
                     <div id="optimizer-trader-access-widget"></div>
+                   </div>
+                  </div>
                 </div>
             </div>
 
-            <button class="modal-btn primary full-width" id="optimizer-solve-btn">${_t('optimizer.solve')}</button>
             </div>
 
             <div class="optimizer-results-pane" id="optimizer-results-pane"></div>
@@ -1170,7 +1201,6 @@ window.EFTForge.optimizer = (function () {
         });
         _renderTraderAccessWidget();
 
-        document.getElementById('optimizer-solve-btn').addEventListener('click', _solveOptimize);
         _renderResult();
     }
 
@@ -1335,7 +1365,7 @@ window.EFTForge.optimizer = (function () {
             if (data.status === 'optimal') {
                 _result = data;
             } else {
-                _error = data.reason || _t('optimizer.infeasible');
+                _error = _formatReason(data);
             }
         } catch (err) {
             _error = err.name === 'AbortError' ? _t('optimizer.cancelled') : _t('optimizer.solveFailed');
@@ -1652,6 +1682,10 @@ window.EFTForge.optimizer = (function () {
         `;
     }
 
+    function _solveButtonHtml() {
+        return `<button class="modal-btn primary" id="optimizer-solve-btn">${_t('optimizer.solve')}</button>`;
+    }
+
     function _renderResult() {
         const container = _resultsContainer();
         if (!container) return;
@@ -1668,11 +1702,23 @@ window.EFTForge.optimizer = (function () {
             return;
         }
         if (_error) {
-            container.innerHTML = `<div class="optimizer-result optimizer-results-status"><div class="optimizer-error">${_escape(_error)}</div></div>`;
+            container.innerHTML = `
+                <div class="optimizer-result optimizer-results-status">
+                    <div class="optimizer-error">${_escape(_error)}</div>
+                    ${_solveButtonHtml()}
+                </div>
+            `;
+            document.getElementById('optimizer-solve-btn').addEventListener('click', _solveOptimize);
             return;
         }
         if (!_result) {
-            container.innerHTML = `<div class="optimizer-results-empty">${_t('optimizer.resultsPlaceholder')}</div>`;
+            container.innerHTML = `
+                <div class="optimizer-results-empty">
+                    <div>${_t('optimizer.resultsPlaceholder')}</div>
+                    ${_solveButtonHtml()}
+                </div>
+            `;
+            document.getElementById('optimizer-solve-btn').addEventListener('click', _solveOptimize);
             return;
         }
 

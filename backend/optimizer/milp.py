@@ -87,8 +87,10 @@ MOA_BIG_M = 2000.0
 
 
 class _Infeasible(Exception):
-    def __init__(self, reason):
+    def __init__(self, reason, key=None, params=None):
         self.reason = reason
+        self.key = key
+        self.params = params or {}
 
 
 class ConstraintBuilder:
@@ -256,7 +258,10 @@ def _add_max_moa_constraint(cb, idx, mods, weapon, item_ids, max_moa):
     if not coi_items:
         base_coi = weapon.center_of_impact
         if base_coi is None:
-            raise _Infeasible("This weapon has no accuracy (MOA) stat to constrain.")
+            raise _Infeasible(
+                "This weapon has no accuracy (MOA) stat to constrain.",
+                key="optimizer.reason.moaNotSupported",
+            )
         cb.ge(_acc_coeffs(base_coi), MOA_K * base_coi - max_moa)
         return
 
@@ -289,7 +294,10 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
     weapon_id = weapon.id
 
     if n == 0:
-        raise _Infeasible("No attachments are available under the current filters.")
+        raise _Infeasible(
+            "No attachments are available under the current filters.",
+            key="optimizer.reason.noAttachmentsAvailable",
+        )
 
     candidate_set = set(item_ids)
     item_to_valid_slots = _item_to_valid_slots(compat_map, candidate_set)
@@ -414,7 +422,11 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
             group_set = set(group)
             matching = [i for i in item_ids if group_set & set((mods[i].category_ids or "").split(","))]
             if not matching:
-                raise _Infeasible(f"No available item matches required category group: {sorted(group_set)}.")
+                raise _Infeasible(
+                    f"No available item matches required category group: {sorted(group_set)}.",
+                    key="optimizer.reason.categoryGroupUnavailable",
+                    params={"groups": ", ".join(sorted(group_set))},
+                )
             cb.ge({idx[i]: 1 for i in matching}, 1)
 
     if params.max_weight is not None:
@@ -423,7 +435,11 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
     if params.min_mag_capacity:
         mags = [i for i in item_ids if (mods[i].magazine_capacity or 0) >= params.min_mag_capacity]
         if not mags:
-            raise _Infeasible(f"No available magazine with capacity >= {params.min_mag_capacity} rounds.")
+            raise _Infeasible(
+                f"No available magazine with capacity >= {params.min_mag_capacity} rounds.",
+                key="optimizer.reason.minMagCapacityUnavailable",
+                params={"capacity": params.min_mag_capacity},
+            )
         cb.ge({idx[i]: 1 for i in mags}, 1)
 
     if params.min_sighting_range:
@@ -431,13 +447,21 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
         if base_sight < params.min_sighting_range:
             sights = [i for i in item_ids if (mods[i].sighting_range or 0) >= params.min_sighting_range]
             if not sights:
-                raise _Infeasible(f"No available sight with sighting range >= {params.min_sighting_range}m.")
+                raise _Infeasible(
+                    f"No available sight with sighting range >= {params.min_sighting_range}m.",
+                    key="optimizer.reason.minSightingRangeUnavailable",
+                    params={"range": params.min_sighting_range},
+                )
             cb.ge({idx[i]: 1 for i in sights}, 1)
 
     if params.include_items:
         for req_id in params.include_items:
             if req_id not in idx:
-                raise _Infeasible(f"Required item {req_id} is not available under the current filters.")
+                raise _Infeasible(
+                    f"Required item {req_id} is not available under the current filters.",
+                    key="optimizer.reason.requiredItemUnavailable",
+                    params={"itemId": req_id},
+                )
             cb.eq({idx[req_id]: 1}, 1)
 
     if params.prevent_overswing:
@@ -536,7 +560,14 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
             weapon, mods, compat_map, candidate_ids, prices, params
         )
     except _Infeasible as exc:
-        return {"status": "infeasible", "reason": exc.reason, "selected_items": [], "slot_pairs": []}
+        return {
+            "status": "infeasible",
+            "reason": exc.reason,
+            "reason_key": exc.key,
+            "reason_params": exc.params,
+            "selected_items": [],
+            "slot_pairs": [],
+        }
 
     n = len(item_ids)
 
@@ -547,6 +578,7 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
             return {
                 "status": "infeasible",
                 "reason": "No feasible build satisfies these constraints.",
+                "reason_key": "optimizer.infeasible",
                 "selected_items": [],
                 "slot_pairs": [],
             }
@@ -578,6 +610,7 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
         return {
             "status": "infeasible",
             "reason": "No feasible build satisfies these constraints.",
+            "reason_key": "optimizer.infeasible",
             "selected_items": [],
             "slot_pairs": [],
         }

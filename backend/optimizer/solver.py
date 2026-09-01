@@ -138,7 +138,13 @@ def optimize_weapon(db, weapon_id: str, params: OptimizeParams) -> dict:
 
     reasons = check_feasibility(weapon, mods, candidate_ids, params)
     if reasons:
-        return {"status": "infeasible", "reason": "; ".join(reasons), "selected_items": [], "slot_pairs": []}
+        return {
+            "status": "infeasible",
+            "reason": "; ".join(r["text"] for r in reasons),
+            "reason_details": [{"key": r["key"], "params": r["params"]} for r in reasons],
+            "selected_items": [],
+            "slot_pairs": [],
+        }
 
     result = build_and_solve(weapon, mods, compat_map, candidate_ids, prices, params)
 
