@@ -1542,7 +1542,9 @@ window.EFTForge.optimizer = (function () {
                         </div>
                     </div>
                     <div class="optimizer-results-gunimg">
-                        <img id="optimizer-result-gun-img" class="optimizer-result-gun-img" alt="" onerror="this.style.visibility='hidden'">
+                        <div class="bp-gun-img-wrap" id="optimizer-result-gun-img-wrap">
+                            <img id="optimizer-result-gun-img" class="optimizer-result-gun-img" alt="" onerror="this.style.visibility='hidden'">
+                        </div>
                         <button class="modal-btn primary optimizer-use-build-inline" id="optimizer-use-build-btn">${_t('optimizer.useThisBuild')}</button>
                     </div>
                 </div>
@@ -1562,6 +1564,25 @@ window.EFTForge.optimizer = (function () {
     // shared _bp* state that manages the main build image.
     let _resultImgAbort = null;
     let _resultImgGen = 0;
+
+    // Queue overlay for the result image, mirroring _bpSetQueued (build-preview.js)
+    // and _tpSetQueued (tab-manager.js) - same icon/tooltip, scoped to this panel's
+    // own wrapper instead of touching the shared placeholder/tooltip containers.
+    function _setResultQueued(isQueued) {
+        const wrap = document.getElementById('optimizer-result-gun-img-wrap');
+        if (!wrap) return;
+        let ov = wrap.querySelector('.bp-queue-overlay');
+        if (isQueued && !ov) {
+            ov = document.createElement('img');
+            ov.className = 'bp-queue-overlay';
+            ov.src = './assets/images/queue.png';
+            ov.alt = '';
+            ov.title = _t('toast.imgGenQueuedMsg');
+            wrap.appendChild(ov);
+        } else if (!isQueued && ov) {
+            ov.remove();
+        }
+    }
 
     async function _loadResultGunImage() {
         const imgEl = document.getElementById('optimizer-result-gun-img');
@@ -1608,12 +1629,25 @@ window.EFTForge.optimizer = (function () {
         imgEl.style.filter = 'brightness(0.85)';
         _resultImgAbort?.abort();
         _resultImgAbort = new AbortController();
+        const signal = _resultImgAbort.signal;
         try {
+            // Queue status check, same as build-preview.js/_bpGenerate and
+            // tab-manager.js/_tpLoadImage - best-effort, a failed check just
+            // means no overlay rather than blocking the generation itself.
+            try {
+                const busyResp = await fetch(`${EFTForge.config.API_BASE}/build-image/busy`, { signal });
+                if (busyResp.ok) {
+                    const busyData = await busyResp.json();
+                    if (gen === _resultImgGen && busyData.busy) _setResultQueued(true);
+                }
+            } catch (_) {}
+            if (gen !== _resultImgGen) return;
+
             const resp = await fetch(`${EFTForge.config.API_BASE}/build-image`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(sptData),
-                signal: _resultImgAbort.signal,
+                signal,
             });
             if (!resp.ok) return;
             const data = await resp.json();
@@ -1624,6 +1658,7 @@ window.EFTForge.optimizer = (function () {
             if (gen === _resultImgGen) {
                 imgEl.style.opacity = '';
                 imgEl.style.filter = '';
+                _setResultQueued(false);
             }
             _resultImgAbort = null;
         }
@@ -1757,8 +1792,44 @@ window.EFTForge.optimizer = (function () {
         `;
     }
 
+    // Chevron wave pulled straight from the publish-confirm resizer hint
+    // (.panel-resizer-publish-hint / pub-chevron-pulse in styles.css) - same
+    // animation, mirrored on both sides so each group's arrows point in and the
+    // wave travels the same direction they point, converging on the button.
     function _solveButtonHtml() {
-        return `<button class="modal-btn primary" id="optimizer-solve-btn">${_t('optimizer.solve')}</button>`;
+        return `
+            <div class="optimizer-go-row">
+                <span class="optimizer-go-chevrons optimizer-go-chevrons-left">
+                    <span>&#x3E;</span><span>&#x3E;</span><span>&#x3E;</span>
+                </span>
+                <button class="modal-btn primary optimizer-go-btn" id="optimizer-solve-btn">${_t('optimizer.solve')}</button>
+                <span class="optimizer-go-chevrons optimizer-go-chevrons-right">
+                    <span>&#x3C;</span><span>&#x3C;</span><span>&#x3C;</span>
+                </span>
+            </div>
+        `;
+    }
+
+    // Pre-solve results pane: same dashed-border/centered-gun-art layout as the main
+    // panel's #attachment-placeholder (build-manager.js _restoreNormalPlaceholder), but
+    // with the click-slot hint swapped for the solve prompt + GO! button. The gun art is
+    // always the static base 512px image - never the composited build render the main
+    // placeholder can show - since there's no build yet to composite.
+    function _emptyStateHtml() {
+        const gun = _gunForResult();
+        const imgSrc = gun ? (gun.image_512_link || gun.icon_link || '') : '';
+        const imgHtml = imgSrc
+            ? `<img class="optimizer-placeholder-gun-img" src="${_escape(imgSrc)}" onerror="this.style.display='none'" alt="">`
+            : '';
+        const nameHtml = gun ? `<div class="optimizer-placeholder-gun-name">${_escape(gun.name)}</div>` : '';
+        return `
+            <div class="optimizer-results-empty">
+                ${imgHtml}
+                ${nameHtml}
+                <div>${_t('optimizer.resultsPlaceholder')}</div>
+                ${_solveButtonHtml()}
+            </div>
+        `;
     }
 
     function _renderResult() {
@@ -1787,12 +1858,7 @@ window.EFTForge.optimizer = (function () {
             return;
         }
         if (!_result) {
-            container.innerHTML = `
-                <div class="optimizer-results-empty">
-                    <div>${_t('optimizer.resultsPlaceholder')}</div>
-                    ${_solveButtonHtml()}
-                </div>
-            `;
+            container.innerHTML = _emptyStateHtml();
             document.getElementById('optimizer-solve-btn').addEventListener('click', _solveOptimize);
             return;
         }
