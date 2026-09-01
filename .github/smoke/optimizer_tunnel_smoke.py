@@ -30,6 +30,9 @@ with sync_playwright() as playwright:
     browser = playwright.chromium.launch()
     for width in VIEWPORTS:
         context = browser.new_context(viewport={"width": width, "height": 1000})
+        context.add_init_script(
+            "localStorage.setItem('eftforge_news_seen', '2026-07-26-desktop-app-launch')"
+        )
         page = context.new_page()
         page_errors = []
         page.on("pageerror", lambda error: page_errors.append(str(error)))
