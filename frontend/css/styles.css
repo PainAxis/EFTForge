@@ -7431,14 +7431,23 @@ button.build-tag-chip.active {
   position: absolute;
   right: 14px;
   bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 10px;
-  color: #555;
+  color: #888;
   line-height: 1.4;
   pointer-events: none;
   z-index: 1;
 }
+.optimizer-credit-logo {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  color: #FA8C16;
+}
 .optimizer-credit a {
-  color: #776b46;
+  color: #FA8C16;
   text-decoration: none;
   pointer-events: auto;
 }
@@ -7545,16 +7554,17 @@ button.build-tag-chip.active {
 }
 
 /* ---- Status bar ---- */
+/* Now the header strip of the merged .stats-section card (see _statTilesHtml)
+   rather than a boxed card of its own - no border/background/radius, just a
+   flex row; the divider right after it in the markup draws the separation
+   from the "CURRENT BUILD" title below. */
 .optimizer-status-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  background: linear-gradient(90deg, rgba(76,175,80,0.10), rgba(76,175,80,0.02));
-  border: 1px solid rgba(76,175,80,0.30);
-  border-radius: 6px;
-  padding: 10px 12px;
+  margin-bottom: 10px;
 }
 .optimizer-reoptimize-btn {
   width: auto;
@@ -7601,9 +7611,20 @@ button.build-tag-chip.active {
   object-fit: contain;
   transition: opacity 0.2s ease, filter 0.2s ease;
 }
+/* Green instead of the shared amber .modal-btn.primary, so it doesn't read
+   as the same action as the amber "Re-optimize" button right above it in the
+   merged results card. */
 .optimizer-use-build-inline {
   width: 100%;
   max-width: 280px;
+}
+.modal-btn.optimizer-use-build-inline {
+  background: #123c1a;
+  border-color: #4CAF50;
+  color: #4CAF50;
+}
+.modal-btn.optimizer-use-build-inline:hover {
+  background: #174d22;
 }
 .optimizer-results-statsblock {
   flex: 1 1 0;

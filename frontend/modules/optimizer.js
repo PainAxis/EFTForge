@@ -276,7 +276,20 @@ window.EFTForge.optimizer = (function () {
 
     function _creditHtml() {
         const link = `<a href="https://ahaimk01.github.io/tarkov-weapon-optimizer/" target="_blank" rel="noopener noreferrer">${_t('optimizer.creditLinkText')}</a>`;
-        return window.tFmt ? window.tFmt('optimizer.creditText', { link }) : '';
+        const text = window.tFmt ? window.tFmt('optimizer.creditText', { link }) : '';
+        // Same crosshair-reticle mark as the panel header/edge-tab (_edgeTabInnerHtml),
+        // shrunk down to sit inline with the watermark text.
+        const logo = `
+            <svg class="optimizer-credit-logo" viewBox="0 0 128 128" fill="none" stroke="currentColor" aria-hidden="true">
+                <circle cx="64" cy="64" r="56" stroke-width="8"/>
+                <circle cx="64" cy="64" r="28" stroke-width="6"/>
+                <circle cx="64" cy="64" r="6" fill="currentColor" stroke="none"/>
+                <line x1="64" y1="4" x2="64" y2="28" stroke-width="6"/>
+                <line x1="64" y1="100" x2="64" y2="124" stroke-width="6"/>
+                <line x1="4" y1="64" x2="28" y2="64" stroke-width="6"/>
+                <line x1="100" y1="64" x2="124" y2="64" stroke-width="6"/>
+            </svg>`;
+        return `${logo}<span>${text}</span>`;
     }
 
     function _escape(str) {
@@ -645,11 +658,13 @@ window.EFTForge.optimizer = (function () {
             _includedModIds.push(btn.dataset.addInclude);
             _modSearch = '';
             _renderModFilterWidget();
+            _syncManifestIcons();
         }));
         el.querySelectorAll('[data-add-exclude]').forEach(btn => btn.addEventListener('click', () => {
             _excludedModIds.push(btn.dataset.addExclude);
             _modSearch = '';
             _renderModFilterWidget();
+            _syncManifestIcons();
         }));
     }
 
@@ -678,6 +693,7 @@ window.EFTForge.optimizer = (function () {
             _includedModIds = _includedModIds.filter(m => m !== id);
             _excludedModIds = _excludedModIds.filter(m => m !== id);
             _renderModFilterWidget();
+            _syncManifestIcons();
         }));
     }
 
@@ -1192,6 +1208,7 @@ window.EFTForge.optimizer = (function () {
             _excludedModIds = [];
             _modSearch = '';
             _renderModFilterWidget();
+            _syncManifestIcons();
         });
 
         document.getElementById('optimizer-flea-toggle').addEventListener('click', () => _setFleaAvailable(!_fleaAvailable));
@@ -1449,7 +1466,16 @@ window.EFTForge.optimizer = (function () {
 
         return `
             <div class="stats-section">
-                <div class="section-title stats-title-row"><span>${_t('stats.title')}</span></div>
+                <div class="optimizer-status-bar">
+                    <button type="button" class="modal-btn primary optimizer-reoptimize-btn" id="optimizer-reoptimize-btn">${_t('optimizer.reoptimize')}</button>
+                    <div class="optimizer-status-meta">
+                        <span class="optimizer-status-ok">&#10003;</span>
+                        <span class="optimizer-status-label">${_t('optimizer.statusOptimal')}</span>
+                        ${_result.solve_ms != null ? `<span class="optimizer-badge">${_result.solve_ms} ms</span>` : ''}
+                    </div>
+                </div>
+                <div class="stats-divider"></div>
+                <div class="section-title stats-title-row"><span>${_t('optimizer.optimizedBuildTitle')}</span></div>
                 <div class="optimizer-results-split">
                     <div class="optimizer-results-statsblock">
                         <div class="optimizer-results-bars">
@@ -1725,15 +1751,6 @@ window.EFTForge.optimizer = (function () {
         const s = _result.final_stats;
         container.innerHTML = `
             <div class="optimizer-results">
-                <div class="optimizer-status-bar">
-                    <button type="button" class="modal-btn primary optimizer-reoptimize-btn" id="optimizer-reoptimize-btn">${_t('optimizer.reoptimize')}</button>
-                    <div class="optimizer-status-meta">
-                        <span class="optimizer-status-ok">&#10003;</span>
-                        <span class="optimizer-status-label">${_t('optimizer.statusOptimal')}</span>
-                        ${_result.solve_ms != null ? `<span class="optimizer-badge">${_result.solve_ms} ms</span>` : ''}
-                    </div>
-                </div>
-
                 ${_statTilesHtml(s)}
 
                 <div class="optimizer-manifest">
@@ -1832,11 +1849,20 @@ window.EFTForge.optimizer = (function () {
         _syncFilterSurfaces();
     }
 
-    function _syncFilterSurfaces() {
+    // The manifest table's lock/ban icons are just a read of _includedModIds/
+    // _excludedModIds taken at render time (see _manifestRowHtml) - anything that
+    // mutates those two arrays from the *other* direction (the Attachment Filtering
+    // section's tags/reset) needs to call this too, or the icons go stale until the
+    // next re-optimize re-renders the whole table.
+    function _syncManifestIcons() {
         document.querySelectorAll('#optimizer-manifest-body [data-lock-id]').forEach(b =>
             b.classList.toggle('active', _includedModIds.includes(b.dataset.lockId)));
         document.querySelectorAll('#optimizer-manifest-body [data-ban-id]').forEach(b =>
             b.classList.toggle('active', _excludedModIds.includes(b.dataset.banId)));
+    }
+
+    function _syncFilterSurfaces() {
+        _syncManifestIcons();
         // Keep the Attachment Filtering section's tags in sync if it's mounted.
         if (document.getElementById('optimizer-mod-filter-widget')) _renderModFilterWidget();
     }

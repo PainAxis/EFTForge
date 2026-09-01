@@ -30,7 +30,7 @@ window.EFTForge.config = {
     STATIC_ANNOUNCEMENTS_URL: "/offline/announcements.json",
 
     APP_VERSION:    "v1.5.0-m3",
-    APP_BUILD_DATE: "2026-09-01T13:20:09.090Z", // new Date().toISOString()
+    APP_BUILD_DATE: "2026-09-01T21:26:11.081Z", // new Date().toISOString()
 
     CALIBER_DISPLAY_MAP: {
         "Caliber20x1mm":      "20x1mm disk",
