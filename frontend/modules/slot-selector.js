@@ -1020,6 +1020,15 @@ function _animateDeltaBarOut(deltaEl) {
     deltaEl.style.opacity = "0";
 }
 
+// recoil_modifier is a non-nullable DB column (models_items.py: default=0), so
+// items that don't affect recoil at all - pistol grips, for example - come
+// back as 0.0 rather than null. There's no separate "not applicable" value to
+// key off, so I treat literal 0 the same as missing, same convention already
+// used for velocity_modifier's cell (_velCellHtml).
+function _recoilCellText(recoilModifier, recoilPercent) {
+    return (recoilModifier == null || recoilModifier === 0) ? "-" : `${formatStat(recoilPercent)}%`;
+}
+
 function _hcbSegmentHtml(value, positiveIsGood) {
     if (value == null) return `<span>-</span>`;
     const pct = (value - 1) * 100;
@@ -1147,7 +1156,7 @@ function renderAttachmentRows(items) {
           <td>${_attPriceCellContent(blItem)}</td>
           <td class="col-combo-only"></td>
           <td>${ghostStats ? ghostStats.weight.toFixed(3) : parseFloat(blItem.weight ?? 0).toFixed(3)}</td>
-          <td>${ghostStats ? formatStat(ghostStats.recoilPct) : formatStat(bl.recoilPercent)}%</td>
+          <td>${ghostStats ? `${formatStat(ghostStats.recoilPct)}%` : _recoilCellText(blItem.recoil_modifier, bl.recoilPercent)}</td>
           <td class="acc-cell">${(() => {
               const coi = blItem.center_of_impact ?? null;
               const am  = blItem.accuracy_modifier ?? null;
@@ -1268,7 +1277,7 @@ function renderAttachmentRows(items) {
         weightCell = `<td>${parseFloat(item.weight ?? 0).toFixed(3)}${wD !== 0
             ? `<div class="cmp-delta ${wD < 0 ? "positive" : "negative"}">${fmtD(wD, 3)}</div>` : ""}</td>`;
 
-        recoilCell = `<td>${formatStat(recoilPercent)}%${rD !== 0
+        recoilCell = `<td>${_recoilCellText(item.recoil_modifier, recoilPercent)}${rD !== 0
             ? `<div class="cmp-delta ${rD < 0 ? "positive" : "negative"}">${fmtD(rD, 1)}%</div>` : ""}</td>`;
 
         ergoCell = `<td class="${ergoModifier >= 0 ? "ergo-positive" : "ergo-negative"}">${ergoModifier >= 0 ? "+" : ""}${formatStat(ergoModifier)}${eD !== 0
@@ -1278,7 +1287,7 @@ function renderAttachmentRows(items) {
             ? `<div class="cmp-delta ${evD > 0 ? "positive" : "negative"}">${fmtD(evD, 1)}</div>` : ""}</td>`;
     } else {
         weightCell   = `<td>${parseFloat(item.weight ?? 0).toFixed(3)}</td>`;
-        recoilCell   = `<td>${formatStat(recoilPercent)}%</td>`;
+        recoilCell   = `<td>${_recoilCellText(item.recoil_modifier, recoilPercent)}</td>`;
         ergoCell     = `<td class="${ergoModifier >= 0 ? "ergo-positive" : "ergo-negative"}">${ergoModifier >= 0 ? "+" : ""}${formatStat(ergoModifier)}</td>`;
         evoCell      = `<td class="${contribution >= 0 ? "evo-positive" : "evo-negative"}">${contribution >= 0 ? "+" : ""}${contribution.toFixed(1)}</td>`;
     }
@@ -2646,4 +2655,5 @@ function _renderComboRows(items) {
         const table = document.querySelector(".attachment-table");
         if (table) table.classList.toggle("header-pinned", scrollRoot.scrollTop > 10);
     }, { passive: true });
+    setupEdgePanScroll(scrollRoot);
 }());

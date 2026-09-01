@@ -240,7 +240,7 @@ window.EFTForge.optimizer = (function () {
     // Once-ever gate, persisted in localStorage (not sessionStorage/in-memory): once
     // this user has seen the intro on any visit, it must never play again, on any
     // future page load or refresh either.
-    const PULSE_SEEN_KEY = 'eftforge-optimizer-intro-pulsed';
+    const PULSE_SEEN_KEY = 'eftforge_optimizer_intro_pulsed';
     let _hasPulsed = localStorage.getItem(PULSE_SEEN_KEY) === 'true';
 
     function pulse() {
@@ -1126,6 +1126,7 @@ window.EFTForge.optimizer = (function () {
             const table = resultsPane.querySelector('.optimizer-manifest-table');
             if (table) table.classList.toggle('header-pinned', resultsPane.scrollTop > 10);
         }, { passive: true });
+        setupEdgePanScroll(resultsPane);
 
         document.getElementById('optimizer-preset-recoil').addEventListener('click', () => _setWeights(0, 100, 0));
         document.getElementById('optimizer-preset-ergo').addEventListener('click', () => _setWeights(100, 0, 0));
@@ -1640,7 +1641,7 @@ window.EFTForge.optimizer = (function () {
                 <td>${_priceBlipHtml((_result.item_prices && _result.item_prices[item.id]) || null)}</td>
                 <td class="col-combo-only"></td>
                 <td>${parseFloat(item.weight ?? 0).toFixed(3)}</td>
-                <td>${formatStat(recoilPercent)}%</td>
+                <td>${_recoilCellText(item.recoil_modifier, recoilPercent)}</td>
                 <td class="acc-cell">${accContent}</td>
                 <td class="${ergoModifier >= 0 ? 'ergo-positive' : 'ergo-negative'}">${ergoModifier >= 0 ? '+' : ''}${formatStat(ergoModifier)}</td>
                 <td class="${evo >= 0 ? 'evo-positive' : 'evo-negative'}">${evo >= 0 ? '+' : ''}${evo.toFixed(1)}</td>
@@ -1696,7 +1697,7 @@ window.EFTForge.optimizer = (function () {
                         <span class="optimizer-manifest-title">${_t('optimizer.buildManifest')}</span>
                     </div>
                     <div class="optimizer-manifest-table-wrap">
-                        <table class="attachment-table hide-col-rub-recoil hide-col-balance optimizer-manifest-table">
+                        <table class="attachment-table hide-col-rub-recoil hide-col-balance hide-col-acc hide-col-heat hide-col-vel optimizer-manifest-table">
                             ${_manifestTheadHtml()}
                             <tbody id="optimizer-manifest-body">
                                 <tr><td colspan="11" class="optimizer-manifest-loading">${_t('optimizer.loadingItems')}</td></tr>

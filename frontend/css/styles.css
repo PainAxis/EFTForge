@@ -7603,6 +7603,13 @@ body[data-mobile="true"] .optimizer-results-statsblock {
   border: 1px solid #2e2e2e;
   border-radius: 6px;
   padding: 12px 14px;
+  /* Without this the manifest table (attachment-table, all columns shown) can
+     be wider than the pane and just overflow past this box's edges, leaving
+     the trailing columns rendered on the bare page background instead of the
+     panel. fit-content lets the box grow to match; min-width keeps it filling
+     the pane when the table actually fits. */
+  width: fit-content;
+  min-width: 100%;
 }
 .optimizer-manifest-header {
   display: flex;
