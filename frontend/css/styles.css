@@ -7266,7 +7266,7 @@ button.build-tag-chip.active {
 .optimizer-ternary-svg {
   display: block;
   width: 100%;
-  max-width: 300px;
+  max-width: 340px;
   height: auto;
   margin: 0 auto;
   cursor: crosshair;
@@ -7475,7 +7475,7 @@ button.build-tag-chip.active {
 /* Both panes fill the two-pane's full height and scroll their own contents
    in their own box, so dragging one side's scrollbar never moves the other. */
 .optimizer-config-pane {
-  flex: 0 0 340px;
+  flex: 0 0 380px;
   min-width: 0;
   min-height: 0;
   display: flex;

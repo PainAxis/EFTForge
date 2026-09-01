@@ -52,6 +52,11 @@ class OptimizeParams:
     include_categories: Optional[List[List[str]]] = None
     # Flat list of raw category ids - no selected item may match any of them.
     exclude_categories: Optional[List[str]] = None
+    # Requires at least one selected item to be a sound suppressor (see
+    # optimizer/milp.py's SUPPRESSOR_CATEGORY_ID) - whatever muzzle adapter
+    # chain that suppressor needs to be reachable is pulled in automatically
+    # by the existing slot-dependency constraints, same as any other item.
+    require_suppressor: bool = False
     ergo_weight: float = 1.0
     recoil_weight: float = 1.0
     price_weight: float = 0.0
@@ -119,11 +124,20 @@ def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
             # on the open market, so drop it: a priceless part must not read as free
             # (price 0) and get picked as the "cheapest" option. Exceptions kept at price
             # 0: a part the user force-included via the mod filter (they've explicitly
-            # asked for it and may already own one), or one of the weapon's own factory
-            # preset parts (those come with the gun).
-            if item_id not in include and item_id not in factory_ids:
+            # asked for it and may already own one), one of the weapon's own factory
+            # preset parts (those come with the gun), or a magazine - high-capacity mags
+            # are routinely flea-banned and trader-barter-only in-game, so this data set
+            # never prices most of them at all. Dropping those would silently shrink the
+            # min-mag-capacity slider's range and make the constraint infeasible for
+            # capacities that are genuinely obtainable, just not through a priced offer.
+            if item_id not in include and item_id not in factory_ids and not mods[item_id].magazine_capacity:
                 continue
             best = {"price": 0, "currency": "RUB", "price_rub": 0, "vendor": None}
+            # Factory parts really do cost 0 - they ship with the gun. The include/
+            # magazine-capacity carve-outs above don't actually know a price, so flag
+            # them as such; the manifest UI reads this to show "-" instead of "0₽".
+            if item_id not in factory_ids:
+                best["no_price"] = True
         candidate_ids.append(item_id)
         prices[item_id] = best
 

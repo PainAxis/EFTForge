@@ -15,6 +15,10 @@ from stats import _compute_stats
 
 TIEBREAK = 0.01
 
+# tarkov.dev raw category id for sound suppressors (standalone and integral
+# barrel-suppressors alike) - verified against the synced DB, not just docs.
+SUPPRESSOR_CATEGORY_ID = "550aa4cd4bdc2dd8348b456c"
+
 # A no-op OptimizeParams stand-in (every field _build_constraints reads is at
 # its default/off value) for compute_stat_ranges(), which wants only the
 # structural constraints (slot mutex, dependency, conflicts, required slots),
@@ -33,6 +37,7 @@ _NO_CONSTRAINTS_PARAMS = SimpleNamespace(
     prevent_overswing=False,
     max_moa=None,
     equip_ergo_modifier=0.0,
+    require_suppressor=False,
 )
 
 # Hard cap on a single HiGHS solve. A normal solve finishes in well under a
@@ -428,6 +433,15 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
                     params={"groups": ", ".join(sorted(group_set))},
                 )
             cb.ge({idx[i]: 1 for i in matching}, 1)
+
+    if params.require_suppressor:
+        suppressors = [i for i in item_ids if SUPPRESSOR_CATEGORY_ID in (mods[i].category_ids or "").split(",")]
+        if not suppressors:
+            raise _Infeasible(
+                "No available suppressor is compatible with this weapon under the current filters.",
+                key="optimizer.reason.suppressorUnavailable",
+            )
+        cb.ge({idx[i]: 1 for i in suppressors}, 1)
 
     if params.max_weight is not None:
         cb.le({idx[i]: (mods[i].weight or 0) for i in item_ids}, params.max_weight - base_weight)

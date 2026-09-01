@@ -38,13 +38,18 @@ window.EFTForge.optimizer = (function () {
     // (milp.py's _weighted_objective) only compares their ratio after scaling
     // each axis by its own price/recoil range, so this is purely a display
     // convention borrowed from the reference optimizer's ternary plot.
-    let _ergoWeight = 33;
-    let _recoilWeight = 34;
-    let _priceWeight = 33;
-    let _useEvoErgo = false;
+    function _loadWeight(key, fallback) {
+        const stored = localStorage.getItem(key);
+        return stored === null ? fallback : Number(stored);
+    }
+    let _ergoWeight = _loadWeight('eftforge-optimizer-ergo-weight', 33);
+    let _recoilWeight = _loadWeight('eftforge-optimizer-recoil-weight', 34);
+    let _priceWeight = _loadWeight('eftforge-optimizer-price-weight', 33);
+    let _useEvoErgo = localStorage.getItem('eftforge-optimizer-use-evo-ergo') === 'true';
     let _weightUiMode = localStorage.getItem('eftforge-optimizer-weight-ui') || 'triangle'; // 'triangle' | 'sliders'
-    let _fleaAvailable = true;
-    let _preventOverswing = false;
+    let _fleaAvailable = localStorage.getItem('eftforge-optimizer-flea-available') !== 'false';
+    let _preventOverswing = localStorage.getItem('eftforge-optimizer-prevent-overswing') === 'true';
+    let _requireSuppressor = localStorage.getItem('eftforge-optimizer-require-suppressor') === 'true';
 
     // Mod Filter (GET /build/mods) - cached per weapon+lang so switching tabs
     // or re-rendering doesn't refetch.
@@ -412,6 +417,9 @@ window.EFTForge.optimizer = (function () {
         _ergoWeight = ergo;
         _recoilWeight = recoil;
         _priceWeight = price;
+        localStorage.setItem('eftforge-optimizer-ergo-weight', String(ergo));
+        localStorage.setItem('eftforge-optimizer-recoil-weight', String(recoil));
+        localStorage.setItem('eftforge-optimizer-price-weight', String(price));
         _updateWeightVisuals();
     }
 
@@ -538,12 +546,14 @@ window.EFTForge.optimizer = (function () {
 
     function _setUseEvoErgo(value) {
         _useEvoErgo = value;
+        localStorage.setItem('eftforge-optimizer-use-evo-ergo', String(value));
         document.getElementById('optimizer-evo-ergo-toggle')?.classList.toggle('active', value);
         _renderWeightWidget();
     }
 
     function _setFleaAvailable(value) {
         _fleaAvailable = value;
+        localStorage.setItem('eftforge-optimizer-flea-available', String(value));
         document.getElementById('optimizer-flea-toggle')?.classList.toggle('active', value);
         _refreshStatRanges();
     }
@@ -565,7 +575,14 @@ window.EFTForge.optimizer = (function () {
 
     function _setPreventOverswing(value) {
         _preventOverswing = value;
+        localStorage.setItem('eftforge-optimizer-prevent-overswing', String(value));
         document.getElementById('optimizer-overswing-toggle')?.classList.toggle('active', value);
+    }
+
+    function _setRequireSuppressor(value) {
+        _requireSuppressor = value;
+        localStorage.setItem('eftforge-optimizer-require-suppressor', String(value));
+        document.getElementById('optimizer-suppressor-toggle')?.classList.toggle('active', value);
     }
 
     /* ---------------------------
@@ -726,11 +743,25 @@ window.EFTForge.optimizer = (function () {
         _constraintState.maxSpread = { on: false, value: 0 };
     }
 
+    // Only persist the budget constraint across panel reopens - minErgo/minMag/
+    // maxSpread stay session-only.
+    function _persistBudgetConstraint() {
+        localStorage.setItem('eftforge-optimizer-budget-on', String(_constraintState.budget.on));
+        localStorage.setItem('eftforge-optimizer-budget-value', String(_constraintState.budget.value));
+    }
+
+    function _loadPersistedBudget() {
+        _constraintState.budget.on = localStorage.getItem('eftforge-optimizer-budget-on') === 'true';
+        const storedValue = Number(localStorage.getItem('eftforge-optimizer-budget-value'));
+        if (!Number.isNaN(storedValue) && storedValue > 0) _constraintState.budget.value = storedValue;
+    }
+
     // Full reset for opening the panel on a (possibly different) weapon -
     // also drops the cached per-weapon ranges, unlike _resetConstraintValues()
     // which the "reset section" button uses (same weapon, no need to refetch).
     function _resetConstraintState() {
         _resetConstraintValues();
+        _loadPersistedBudget();
         _magCapacityValues = null;
         _moaRange = null;
         _exactMoaFloor = null;
@@ -984,6 +1015,7 @@ window.EFTForge.optimizer = (function () {
         const def = CONSTRAINT_DEFS.find(d => d.key === key);
         const state = _constraintState[key];
         state.value = Math.min(def.max, Math.max(def.min, value));
+        if (key === 'budget') _persistBudgetConstraint();
         const row = document.querySelector(`[data-constraint-slider="${key}"]`);
         if (!row) return;
         const [range, number] = row.querySelectorAll('input');
@@ -1028,6 +1060,7 @@ window.EFTForge.optimizer = (function () {
                 toggle.classList.toggle('active', on);
                 detail.innerHTML = _plainConstraintDetailHtml(def);
                 _wirePlainConstraintDetail(def, detail);
+                if (def.key === 'budget') _persistBudgetConstraint();
             });
             _wirePlainConstraintDetail(def, detail);
         }
@@ -1064,12 +1097,18 @@ window.EFTForge.optimizer = (function () {
         const content = document.getElementById('optimizer-tab-content');
         if (!content) return;
 
-        _ergoWeight = 33;
-        _recoilWeight = 34;
-        _priceWeight = 33;
-        _useEvoErgo = false;
-        _fleaAvailable = true;
-        _preventOverswing = false;
+        // Reload every persisted Weight Adjustment setting from localStorage on
+        // each panel open instead of resetting to a hardcoded default - weights,
+        // evo ergo, prevent overswing, require suppressor and flea availability
+        // (plus the budget constraint, via _resetConstraintState -> _loadPersistedBudget
+        // below) all survive a panel close/reopen this way.
+        _ergoWeight = _loadWeight('eftforge-optimizer-ergo-weight', 33);
+        _recoilWeight = _loadWeight('eftforge-optimizer-recoil-weight', 34);
+        _priceWeight = _loadWeight('eftforge-optimizer-price-weight', 33);
+        _useEvoErgo = localStorage.getItem('eftforge-optimizer-use-evo-ergo') === 'true';
+        _fleaAvailable = localStorage.getItem('eftforge-optimizer-flea-available') !== 'false';
+        _preventOverswing = localStorage.getItem('eftforge-optimizer-prevent-overswing') === 'true';
+        _requireSuppressor = localStorage.getItem('eftforge-optimizer-require-suppressor') === 'true';
         _resetConstraintState();
         _includedModIds = [];
         _excludedModIds = [];
@@ -1122,6 +1161,12 @@ window.EFTForge.optimizer = (function () {
                     <div class="optimizer-toggle-row">
                         <span class="stat-label">${_t('optimizer.preventOverswing')}</span>
                         <button type="button" class="compare-toggle${_preventOverswing ? ' active' : ''}" id="optimizer-overswing-toggle">
+                            <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
+                        </button>
+                    </div>
+                    <div class="optimizer-toggle-row">
+                        <span class="stat-label">${_t('optimizer.requireSuppressor')}</span>
+                        <button type="button" class="compare-toggle${_requireSuppressor ? ' active' : ''}" id="optimizer-suppressor-toggle">
                             <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
                         </button>
                     </div>
@@ -1189,6 +1234,7 @@ window.EFTForge.optimizer = (function () {
         _wireSection('weight', () => _setWeights(33, 34, 33));
 
         document.getElementById('optimizer-overswing-toggle').addEventListener('click', () => _setPreventOverswing(!_preventOverswing));
+        document.getElementById('optimizer-suppressor-toggle').addEventListener('click', () => _setRequireSuppressor(!_requireSuppressor));
         _renderConstraints();
         if (weaponId) {
             _fetchStatRanges(weaponId).then(ranges => {
@@ -1198,7 +1244,9 @@ window.EFTForge.optimizer = (function () {
         }
         _wireSection('constraints', () => {
             _setPreventOverswing(false);
+            _setRequireSuppressor(false);
             _resetConstraintValues();
+            _persistBudgetConstraint();
             _renderConstraints();
         });
 
@@ -1242,6 +1290,7 @@ window.EFTForge.optimizer = (function () {
             min_mag_capacity: _constraintState.minMag.on ? _constraintState.minMag.value : null,
             max_moa: _constraintState.maxSpread.on ? _constraintState.maxSpread.value : null,
             prevent_overswing: _preventOverswing,
+            require_suppressor: _requireSuppressor,
             include_items: _includedModIds.length ? _includedModIds : null,
             exclude_items: _excludedModIds.length ? _excludedModIds : null,
             flea_available: _fleaAvailable,
@@ -1589,7 +1638,7 @@ window.EFTForge.optimizer = (function () {
     // price cell, both driven by the solve's own item_prices rather than an
     // independently re-picked "cheapest overall" price.
     function _priceBlipHtml(priced) {
-        if (!priced || priced.price_rub == null) return '<span class="att-price-flea">-</span>';
+        if (!priced || priced.price_rub == null || priced.no_price) return '-';
         const isFlea = !priced.vendor || priced.vendor === 'flea-market';
         let vendorHtml;
         if (isFlea) {
