@@ -49,6 +49,13 @@ with sync_playwright() as playwright:
         )
         page.locator("#optimizer-edge-tab").click()
         page.locator("#optimizer-overlay.visible").wait_for(state="visible", timeout=30_000)
+        page.wait_for_function(
+            """() => {
+              const rect = document.querySelector('#optimizer-overlay').getBoundingClientRect();
+              return rect.left >= -1 && rect.right <= window.innerWidth + 1;
+            }""",
+            timeout=30_000,
+        )
         page.locator(".optimizer-two-pane").wait_for(state="attached", timeout=30_000)
 
         metrics = page.evaluate(
