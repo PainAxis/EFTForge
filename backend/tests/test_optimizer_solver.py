@@ -19,6 +19,7 @@ import pytest
 
 M4A1_ID = "5447a9cd4bdc2dbd208b4567"
 AK74N_ID = "5644bd2b4bdc2d3b4c8b4572"
+SVDS_ID = "5c46fbd72e2216398b5a8c9c"
 
 _HAS_DB = os.path.exists(os.path.join(os.path.dirname(__file__), "..", "tarkov.db"))
 
@@ -145,6 +146,41 @@ class TestInfeasibleConstraints:
     def test_impossible_mag_capacity_is_infeasible(self, db):
         result = optimize_weapon(db, M4A1_ID, OptimizeParams(min_mag_capacity=100_000))
         assert result["status"] == "infeasible"
+
+
+class TestPreventOverswing:
+    def test_never_returns_an_overswinging_build(self, db):
+        for weapon_id in (M4A1_ID, AK74N_ID, SVDS_ID):
+            result = optimize_weapon(db, weapon_id, OptimizeParams(prevent_overswing=True))
+            assert result["status"] == "optimal"
+            assert result["final_stats"]["overswing"] is False
+
+    def test_svds_suppressed_is_satisfiable(self, db):
+        """Regression test: a non-overswinging suppressed SVDS build exists,
+        but the old fixed 5-anchor tangent-cut grid ANDed a cut anchored near
+        the bottom of the weapon's whole reachable ergo range - extrapolated
+        out to where real builds land, that single cut alone rejected every
+        one of them, always reporting infeasible."""
+        result = optimize_weapon(
+            db,
+            SVDS_ID,
+            OptimizeParams(
+                require_suppressor=True, prevent_overswing=True, ergo_weight=1.0, recoil_weight=0.01, price_weight=0.01
+            ),
+        )
+        assert result["status"] == "optimal"
+        assert result["final_stats"]["overswing"] is False
+
+    def test_matches_unconstrained_when_already_non_overswinging(self, db):
+        """If the ordinary optimum already doesn't overswing, adding the
+        constraint should change nothing about that result."""
+        baseline = optimize_weapon(db, M4A1_ID, OptimizeParams())
+        assert baseline["status"] == "optimal"
+        assert baseline["final_stats"]["overswing"] is False
+
+        constrained = optimize_weapon(db, M4A1_ID, OptimizeParams(prevent_overswing=True))
+        assert constrained["status"] == "optimal"
+        assert constrained["selected_items"] == baseline["selected_items"]
 
 
 class TestIncludeExcludeItems:

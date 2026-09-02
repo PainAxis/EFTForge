@@ -47,22 +47,19 @@ _NO_CONSTRAINTS_PARAMS = SimpleNamespace(
 # worker indefinitely instead of degrading gracefully.
 SOLVE_TIME_LIMIT_SECONDS = 120
 
-# Reference scales so the 0-1 priority sliders behave consistently regardless
-# of a weapon's absolute ergo/recoil/price magnitudes.
-ERGO_SCALE = 100.0
-PRICE_SCALE_FALLBACK = 300_000.0
-
-# Plain-mode objective exchange rates, mirroring the reference optimizer's
-# lpBuilder.ts so the same weight sliders produce the same trade-offs. There, at
-# equal weights, one real ergonomics point is worth ew*1e4 objective units, one
-# unit of recoil_modifier (a fraction, so 1% = 0.01) is worth rw*1e7, and one
-# ruble is worth pw*10 - i.e. a 1% recoil reduction is worth ~10 ergonomics
-# points. We reproduce those exact ratios on a ÷1e4 scale: 1 ergo point = ergo_w,
-# 1 unit of recoil_modifier = recoil_w*1000 (so 1% = recoil_w*10), 1 ruble =
+# Objective exchange rates, mirroring the reference optimizer's lpBuilder.ts so
+# the same weight sliders produce the same trade-offs. There, at equal weights,
+# one real ergonomics point is worth ew*1e4 objective units, one unit of
+# recoil_modifier (a fraction, so 1% = 0.01) is worth rw*1e7, and one ruble is
+# worth pw*10 - i.e. a 1% recoil reduction is worth ~10 ergonomics points. We
+# reproduce those exact ratios on a ÷1e4 scale: 1 ergo point = ergo_w, 1 unit
+# of recoil_modifier = recoil_w*1000 (so 1% = recoil_w*10), 1 ruble =
 # price_w*0.001. Recoil is deliberately the dominant combat axis at balanced
 # weights - the reference is well-established and this matches how EFT players
-# actually build. (EvoErgo mode has its own objective, _evo_ergo_objective, and
-# is tuned separately - it does not use these.)
+# actually build. Both _weighted_objective (plain mode) and _evo_ergo_objective
+# (EvoErgo mode) use these same rates for their recoil/price terms, matching
+# the reference's useEvoErgo, which only swaps in a weight-penalized ergo term
+# on top of the usual blended objective rather than rescaling recoil/price too.
 ERGO_OBJ_COEFF = 1.0  # per ergonomics point
 RECOIL_OBJ_COEFF = 1000.0  # per unit of recoil_modifier (1% recoil = 10)
 PRICE_OBJ_COEFF = 0.001  # per ruble
@@ -199,51 +196,24 @@ def _lp_stat_range(cb, n, coeffs):
     return lo, hi
 
 
-def _reachable_ergo_range(cb, mods, item_ids, base_ergo):
-    """[min, max] total_ergo actually achievable - see _lp_stat_range."""
-    n = len(item_ids)
-    ergo = np.array([(mods[i].ergonomics_modifier or 0) for i in item_ids])
-    lo, hi = _lp_stat_range(cb, n, ergo)
-
-    ergo_min = max(1.0, base_ergo + lo)
-    ergo_max = max(ergo_min + 1.0, base_ergo + hi)
-    return ergo_min, ergo_max
-
-
-def _prevent_overswing_anchors(cb, mods, item_ids, base_ergo):
-    """Anchor ergo values to build tangent cuts around, spread across THIS
-    weapon's actual reachable ergo range rather than a fixed global list
-    (EVO_ERGO_ERGO_ANCHORS is fine for the EvoErgo sweep, where each anchor
-    is tried in its own separate solve, but these cuts are ANDed together
-    into one simultaneous constraint set - a tangent line evaluated far past
-    its own anchor point extrapolates linearly away from the convex KG(E)
-    curve and can go negative, wrongly making every build infeasible for a
-    weapon whose ergo never gets near that anchor).
-    """
-    ergo_min, ergo_max = _reachable_ergo_range(cb, mods, item_ids, base_ergo)
-    return [ergo_min + (ergo_max - ergo_min) * t for t in (0.0, 0.25, 0.5, 0.75, 1.0)]
-
-
-def _add_prevent_overswing_constraints(cb, idx, mods, item_ids, base_ergo, base_weight, equip_ergo_modifier):
-    """Hard-constrains total_weight <= KG(effective_ergo), i.e. stats.py's
-    "overswing" flag stays False. KG is convex in ergo, so a MILP (linear
-    only) can't encode "weight <= KG(ergo)" exactly - that region is itself
-    non-convex. Instead this adds one linear tangent-line cut per anchor
-    (see _prevent_overswing_anchors) and ANDs them together. Each cut is a
-    stricter (tangent lines sit below the true convex curve) but sound
-    bound, so the solver can never accept a build that actually overswings;
-    it may reject a handful of builds that are fine but fall between
-    anchors, which is the same tradeoff the reference optimizer's
-    overswingCuts make.
+def _add_overswing_cut_at(cb, idx, mods, item_ids, base_ergo, base_weight, equip_ergo_modifier, anchor_ergo):
+    """Adds one linear tangent-line cut - total_weight <= KG(effective_ergo)'s
+    tangent at anchor_ergo - hard-constraining out exactly the build that sits
+    at that ergo value and everything else the tangent's slope excludes. KG is
+    convex in ergo, so a MILP (linear only) can't encode the true "weight <=
+    KG(ergo)" region directly - that region is itself non-convex - but a
+    single tangent line is always a sound (never lets an overswinging build
+    through) local bound. See _solve_avoiding_overswing for why this is
+    called with one fresh anchor per rejected solve rather than a fixed grid
+    of anchors ANDed together up front.
     """
     b = equip_ergo_modifier
-    for anchor in _prevent_overswing_anchors(cb, mods, item_ids, base_ergo):
-        e0 = anchor * (1 + b)
-        kg0 = KG_A * e0 * e0 + KG_B * e0 + KG_C
-        slope = (2 * KG_A * e0 + KG_B) * (1 + b)  # d(KG)/d(total_ergo) via chain rule E = total_ergo*(1+b)
-        coeffs = {idx[i]: (mods[i].weight or 0) - slope * (mods[i].ergonomics_modifier or 0) for i in item_ids}
-        rhs = kg0 + slope * (base_ergo - anchor) - base_weight
-        cb.le(coeffs, rhs)
+    e0 = anchor_ergo * (1 + b)
+    kg0 = KG_A * e0 * e0 + KG_B * e0 + KG_C
+    slope = (2 * KG_A * e0 + KG_B) * (1 + b)  # d(KG)/d(total_ergo) via chain rule E = total_ergo*(1+b)
+    coeffs = {idx[i]: (mods[i].weight or 0) - slope * (mods[i].ergonomics_modifier or 0) for i in item_ids}
+    rhs = kg0 + slope * (base_ergo - anchor_ergo) - base_weight
+    cb.le(coeffs, rhs)
 
 
 def _add_max_moa_constraint(cb, idx, mods, weapon, item_ids, max_moa):
@@ -478,9 +448,6 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
                 )
             cb.eq({idx[req_id]: 1}, 1)
 
-    if params.prevent_overswing:
-        _add_prevent_overswing_constraints(cb, idx, mods, item_ids, base_ergo, base_weight, params.equip_ergo_modifier)
-
     if params.max_moa is not None:
         _add_max_moa_constraint(cb, idx, mods, weapon, item_ids, params.max_moa)
 
@@ -506,30 +473,31 @@ def _weighted_objective(item_ids, idx, mods, prices, params):
     return c
 
 
-def _evo_ergo_objective(k, item_ids, idx, mods, prices, params, base_recoil_v):
-    """Same blended objective as _weighted_objective, but the ergo term is
-    replaced with a tangent-linearized EvoErgo term (ergo adjusted for its
-    weight cost at slope k, the first-order approximation of EFTForge's true
-    quadratic EED around the ergo value k was derived from) instead of raw
-    ergo. recoil_weight and price_weight still apply exactly as in the plain
-    mode - checked against the reference optimizer's lpBuilder.ts, where
-    useEvoErgo only adds a weight-penalty term on top of the usual blended
-    ergo/recoil/price objective, it doesn't replace it.
+def _evo_ergo_objective(k, item_ids, idx, mods, prices, params):
+    """Same blended objective as _weighted_objective, on the exact same
+    exchange rates (ERGO_OBJ_COEFF/RECOIL_OBJ_COEFF/PRICE_OBJ_COEFF), except
+    the raw ergo term is replaced with a tangent-linearized EvoErgo term (ergo
+    adjusted for its weight cost at slope k, the first-order approximation of
+    EFTForge's true quadratic EED around the ergo value k was derived from).
+    This matches the reference optimizer's lpBuilder.ts, where useEvoErgo only
+    adds a weight-penalty term on top of the usual blended ergo/recoil/price
+    objective, it doesn't replace it or its rates - k plays the role of "true"
+    marginal ergo value (dEED/dergo at the anchor) in place of the plain
+    mode's flat 1-point-per-point assumption, and 15 is dEED/dweight (both
+    read straight off stats.py's evo_weight = total_weight - KG(E)).
     """
     ergo_w = max(params.ergo_weight, TIEBREAK)
     recoil_w = max(params.recoil_weight, TIEBREAK)
     price_w = max(params.price_weight, TIEBREAK)
-    price_scale = params.max_price or PRICE_SCALE_FALLBACK
-    recoil_scale = abs(base_recoil_v) if base_recoil_v else 1.0
 
     c = np.zeros(len(item_ids))
     for item_id in item_ids:
         i = idx[item_id]
-        evo_ergo_term = (ergo_w / ERGO_SCALE) * (
-            -k * (mods[item_id].ergonomics_modifier or 0) + 15 * (mods[item_id].weight or 0)
+        evo_ergo_term = (
+            ergo_w * ERGO_OBJ_COEFF * (-k * (mods[item_id].ergonomics_modifier or 0) + 15 * (mods[item_id].weight or 0))
         )
-        recoil_term = (recoil_w / recoil_scale) * (base_recoil_v or 0) * (mods[item_id].recoil_modifier or 0)
-        price_term = (price_w / price_scale) * prices[item_id]["price_rub"]
+        recoil_term = recoil_w * RECOIL_OBJ_COEFF * (mods[item_id].recoil_modifier or 0)
+        price_term = price_w * PRICE_OBJ_COEFF * prices[item_id]["price_rub"]
         c[i] = evo_ergo_term + recoil_term + price_term
     return c
 
@@ -568,6 +536,57 @@ def _solve_once(c, cb, n, item_ids, weapon_id, item_to_valid_slots, prices):
     }
 
 
+# Each iteration below only ever fires because a real solve just proved a
+# fresh cut necessary, so this is a generous ceiling, not a tuned budget -
+# it exists purely so a pathological weapon can't hang a request.
+MAX_OVERSWING_CUT_ITERS = 40
+
+
+def _solve_avoiding_overswing(
+    c,
+    cb,
+    n,
+    item_ids,
+    idx,
+    weapon,
+    mods,
+    item_to_valid_slots,
+    prices,
+    base_ergo,
+    base_weight,
+    equip_ergo_modifier,
+    strength_level,
+):
+    """Same contract as _solve_once, but hard-constrains the result to
+    stats.py's own "overswing" definition (total_weight <= KG(effective_ergo))
+    without the unsoundness-by-omission a fixed grid of ANDed tangent cuts
+    has: since KG is convex, ANDing several tangent lines only ever shrinks
+    the modeled region as more/wider-spread anchors are added, it never
+    converges toward the true curve - so a weapon whose viable builds all
+    land far from every anchor could see every one of them rejected even
+    though none of them actually overswing (see SVDS + suppressor + prevent
+    overswing).
+
+    Solves once with whatever overswing cuts are already in cb, checks the
+    result against stats._compute_stats()'s exact formula, and - only if it
+    actually overswings - adds one new cut anchored exactly at that build's
+    own total_ergo (tight there, so it's guaranteed to exclude that specific
+    build without extrapolating a stale bound across the whole ergo range)
+    and retries. cb accumulates cuts across calls, so repeat calls (e.g. the
+    EvoErgo anchor sweep below) never rediscover the same violation twice.
+    """
+    for _ in range(MAX_OVERSWING_CUT_ITERS):
+        result = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices)
+        if result is None:
+            return None
+        stats = _compute_stats(weapon, result["selected_items"], mods, strength_level, equip_ergo_modifier)
+        if not stats["overswing"]:
+            return result
+        selected_ergo = base_ergo + sum((mods[i].ergonomics_modifier or 0) for i in result["selected_items"])
+        _add_overswing_cut_at(cb, idx, mods, item_ids, base_ergo, base_weight, equip_ergo_modifier, selected_ergo)
+    return None
+
+
 def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices: dict, params):
     try:
         item_ids, idx, cb, item_to_valid_slots, base_ergo, base_weight, base_recoil_v = _build_constraints(
@@ -587,7 +606,24 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
 
     if not params.use_evo_ergo:
         c = _weighted_objective(item_ids, idx, mods, prices, params)
-        result = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices)
+        if params.prevent_overswing:
+            result = _solve_avoiding_overswing(
+                c,
+                cb,
+                n,
+                item_ids,
+                idx,
+                weapon,
+                mods,
+                item_to_valid_slots,
+                prices,
+                base_ergo,
+                base_weight,
+                params.equip_ergo_modifier,
+                params.strength_level,
+            )
+        else:
+            result = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices)
         if result is None:
             return {
                 "status": "infeasible",
@@ -610,8 +646,25 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
     best = None
     best_eed = None
     for k in anchors:
-        c = _evo_ergo_objective(k, item_ids, idx, mods, prices, params, base_recoil_v)
-        candidate = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices)
+        c = _evo_ergo_objective(k, item_ids, idx, mods, prices, params)
+        if params.prevent_overswing:
+            candidate = _solve_avoiding_overswing(
+                c,
+                cb,
+                n,
+                item_ids,
+                idx,
+                weapon,
+                mods,
+                item_to_valid_slots,
+                prices,
+                base_ergo,
+                base_weight,
+                params.equip_ergo_modifier,
+                params.strength_level,
+            )
+        else:
+            candidate = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices)
         if candidate is None:
             continue
         eed = _compute_stats(
