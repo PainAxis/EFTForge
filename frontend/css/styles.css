@@ -3341,6 +3341,37 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
   background: #1f1a10;
 }
 
+/* Shown the instant a card is clicked, before the (possibly slow) network
+   round trip that builds the tab/build panel resolves - without this the
+   only feedback on a slow connection is silence, which reads as a dead click. */
+.gun-card-loading img {
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+
+.gun-card-loading::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  border: 2px solid rgba(245, 197, 66, 0.25);
+  border-top-color: #f5c542;
+  background: none;
+  animation: gunCardSpin 0.7s linear infinite;
+  pointer-events: none;
+  z-index: 4;
+}
+
+@keyframes gunCardSpin {
+  to { transform: rotate(360deg); }
+}
+
 /* Mid-build highlight is a mobile-only safety net - desktop uses the tab strip instead */
 body[data-mobile="true"] .gun-card.mid-build {
   border-color: #c8a84b;

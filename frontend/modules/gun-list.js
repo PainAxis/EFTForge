@@ -45,28 +45,44 @@ function _applyMidBuildIndicator() {
     }
 }
 
+// Guards the whole pick flow, not just the desktop tab path - on a slow
+// connection the gap between click and the first visible UI change (tab
+// creation / layout switch) can be a full round trip, and a second gun
+// click landing in that gap would race the first one's currentGun/buildTree
+// writes. The card's own loading class is the "your click landed" signal
+// so the user isn't left guessing whether to click again.
+let _gunSelectInFlight = false;
+
 async function _selectGunOrRestoreSnapshot(gun, card) {
-    if (_isDesktopTabs()) {
-        await EFTForge.tabs.createTabForGun(gun, card);
-        return;
-    }
-    const snap = _readMidBuildSnapshot();
-    if (snap && snap.gunId === gun.id) {
-        clearSessionSnapshot();
-        card.classList.remove("mid-build");
-        const payload = decodeBuildCode(snap.code);
-        if (payload) {
-            await loadBuildFromPayload(payload, null, true);
-            // loadBuildFromPayload uses a dummyEl, manually mark the card
-            document.querySelectorAll(".gun-card").forEach(c => c.classList.remove("selected"));
-            card.classList.add("selected");
+    if (_gunSelectInFlight) return;
+    _gunSelectInFlight = true;
+    card.classList.add("gun-card-loading");
+    try {
+        if (_isDesktopTabs()) {
+            await EFTForge.tabs.createTabForGun(gun, card);
+            return;
+        }
+        const snap = _readMidBuildSnapshot();
+        if (snap && snap.gunId === gun.id) {
+            clearSessionSnapshot();
+            card.classList.remove("mid-build");
+            const payload = decodeBuildCode(snap.code);
+            if (payload) {
+                await loadBuildFromPayload(payload, null, true);
+                // loadBuildFromPayload uses a dummyEl, manually mark the card
+                document.querySelectorAll(".gun-card").forEach(c => c.classList.remove("selected"));
+                card.classList.add("selected");
+            } else {
+                await selectGun(gun, card);
+            }
+        } else if (snap) {
+            showDiscardChangesModal(snap, () => selectGun(gun, card));
         } else {
             await selectGun(gun, card);
         }
-    } else if (snap) {
-        showDiscardChangesModal(snap, () => selectGun(gun, card));
-    } else {
-        await selectGun(gun, card);
+    } finally {
+        _gunSelectInFlight = false;
+        card.classList.remove("gun-card-loading");
     }
 }
 
