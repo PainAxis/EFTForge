@@ -29,6 +29,7 @@ window.EFTForge.optimizer = (function () {
     let _activeTab = 'optimize';  // 'optimize' | 'gunsmith'
     let _result = null;   // last successful solve response, or null
     let _solving = false;
+    let _waitingForSlot = false;  // true between retries while every solver slot is busy
     let _error = null;
 
     let _gunsmithTasks = null;      // cached GET /build/gunsmith-tasks response
@@ -155,7 +156,11 @@ window.EFTForge.optimizer = (function () {
         document.getElementById('main-container')?.setAttribute('inert', '');
         if (document.activeElement) document.activeElement.blur();
 
-        _result = null;
+        // Keep the last solved build on screen across a close/reopen of the drawer,
+        // but only for the gun it was actually solved for - reopening on a different
+        // gun should land back on the placeholder rather than show a stale build.
+        const currentGunId = window.EFTForge.state?.currentGun?.id;
+        if (!_result || _result.gun_id !== currentGunId) _result = null;
         _error = null;
         _render();
     }
@@ -1566,26 +1571,76 @@ window.EFTForge.optimizer = (function () {
        SOLVE (shared) + RESULT
     =========================== */
 
+    // Every solver slot busy (optimizer.reason.serverBusy) is retried automatically
+    // instead of surfacing an error the user has to notice and re-click past - up to
+    // _SERVER_BUSY_MAX_WAIT_MS total, then it gives up like any other failure. The
+    // *other* 429s (alreadySolving, tooManyRequests) are not retried: alreadySolving
+    // usually means this same tab's own prior click is still in flight, and silently
+    // looping on that would mask a stuck request instead of surfacing it.
+    const _SERVER_BUSY_RETRY_DELAY_MS = 1500;
+    const _SERVER_BUSY_MAX_WAIT_MS = 45000;
+
+    // rejects with the same AbortError shape fetch() throws, so both share one catch.
+    function _sleep(ms, signal) {
+        return new Promise((resolve, reject) => {
+            if (signal.aborted) {
+                reject(new DOMException('Aborted', 'AbortError'));
+                return;
+            }
+            const onAbort = () => {
+                clearTimeout(id);
+                reject(new DOMException('Aborted', 'AbortError'));
+            };
+            const id = setTimeout(() => {
+                signal.removeEventListener('abort', onAbort);
+                resolve();
+            }, ms);
+            signal.addEventListener('abort', onAbort, { once: true });
+        });
+    }
+
     async function _runSolve(url, body) {
         _abortController = new AbortController();
+        const signal = _abortController.signal;
+        const deadline = Date.now() + _SERVER_BUSY_MAX_WAIT_MS;
         try {
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-                signal: _abortController.signal,
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            if (data.status === 'optimal') {
-                _result = data;
-            } else {
-                _error = _formatReason(data);
+            for (;;) {
+                if (_waitingForSlot) {
+                    _waitingForSlot = false;
+                    _renderResult();
+                }
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                    signal,
+                });
+                if (res.status === 429) {
+                    const data = await res.json().catch(() => null);
+                    const key = data?.detail?.reason_key;
+                    if (key === 'optimizer.reason.serverBusy' && Date.now() < deadline) {
+                        _waitingForSlot = true;
+                        _renderResult();
+                        await _sleep(_SERVER_BUSY_RETRY_DELAY_MS, signal);
+                        continue;
+                    }
+                    _error = key ? _t(key) : _t('optimizer.solveFailed');
+                    return;
+                }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                if (data.status === 'optimal') {
+                    _result = data;
+                } else {
+                    _error = _formatReason(data);
+                }
+                return;
             }
         } catch (err) {
             _error = err.name === 'AbortError' ? _t('optimizer.cancelled') : _t('optimizer.solveFailed');
         } finally {
             _solving = false;
+            _waitingForSlot = false;
             _abortController = null;
             _renderResult();
         }
@@ -2028,10 +2083,11 @@ window.EFTForge.optimizer = (function () {
         if (!container) return;
 
         if (_solving) {
+            const statusText = _waitingForSlot ? _t('optimizer.waitingForSlot') : _t('optimizer.solving');
             container.innerHTML = `
                 <div class="optimizer-result optimizer-results-status">
                     <div class="optimizer-spinner optimizer-spinner-lg"></div>
-                    <div>${_t('optimizer.solving')}</div>
+                    <div>${statusText}</div>
                     <button class="modal-btn" id="optimizer-cancel-btn">${_t('modal.cancel')}</button>
                 </div>
             `;

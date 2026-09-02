@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import contextlib
 import hashlib
 import hmac
 import json
@@ -1921,9 +1922,128 @@ _OPTIMIZE_CACHE_LOCK = threading.Lock()
 _OPTIMIZE_CACHE_MAX = 500
 MAX_INCLUDE_EXCLUDE_IDS = 100
 
+# Solve concurrency guard: a MILP solve can legitimately run up to
+# SOLVE_TIME_LIMIT_SECONDS (30s, see optimizer/milp.py) of CPU-bound work. Without
+# this, a spammed re-optimize button (or a script hitting these endpoints directly,
+# bypassing the frontend's re-click guard) can pile up many overlapping solves on one
+# worker's threadpool and starve every other request that worker is handling. Cap it
+# to one in-flight solve per IP, plus a small global cap per worker process, and fail
+# fast with 429 instead of silently queuing behind the threadpool.
+#
+# The per-IP part has to be a file, not an in-memory set: prod runs one Gunicorn
+# worker *process* per CPU core (reset.py), each with its own copy of this module's
+# state, so a plain dict/set would only catch a repeat request that happened to land
+# on the same worker as the first one. A lock file under RUNTIME_DIR is visible to
+# every worker, same as _SYNC_IN_PROGRESS_FILE above. The global semaphore is
+# deliberately left per-worker, not shared the same way - that's the right scaling
+# behavior, since it should track that one process's own CPU/threadpool budget.
+_SOLVE_LOCK_DIR = os.path.join(RUNTIME_DIR, "solve_locks")
+os.makedirs(_SOLVE_LOCK_DIR, exist_ok=True)
+_SOLVE_LOCK_STALE_SECONDS = 60  # 30s solver cap + a buffer for queueing/overhead
+_MAX_CONCURRENT_SOLVES = max(2, os.cpu_count() or 2)
+_SOLVE_CONCURRENCY_SEM = threading.BoundedSemaphore(_MAX_CONCURRENT_SOLVES)
+
+
+def _ip_solve_lock_path(ip: str) -> str:
+    # Hashed rather than the raw IP: keeps filenames filesystem-safe (IPv6 has
+    # colons) and avoids writing raw client IPs to disk.
+    return os.path.join(_SOLVE_LOCK_DIR, hashlib.sha256(ip.encode()).hexdigest() + ".lock")
+
+
+def _acquire_ip_solve_lock(ip: str) -> bool:
+    """Atomic create-if-absent (O_EXCL) across processes, so two workers racing
+    on the same IP can't both win. A lock left behind by a worker that crashed
+    mid-solve (instead of releasing normally) self-heals once it goes stale."""
+    path = _ip_solve_lock_path(ip)
+    for _ in range(2):  # 2nd pass only runs after clearing a stale lock
+        try:
+            os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return True
+        except FileExistsError:
+            try:
+                stale = time.time() - os.path.getmtime(path) > _SOLVE_LOCK_STALE_SECONDS
+            except OSError:
+                continue  # lock vanished between the failed create and this check - retry
+            if not stale:
+                return False
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    return False
+
+
+def _release_ip_solve_lock(ip: str) -> None:
+    try:
+        os.remove(_ip_solve_lock_path(ip))
+    except OSError:
+        pass
+
+
+# Per-IP request-rate throttle for the solve endpoints, separate from _solve_slot
+# above. An identical-params request that hits _OPTIMIZE_CACHE never reaches
+# _solve_slot at all (there's no solve to serialize) and returns in ~0ms - cheap
+# next to a real solve, but not free: every request still opens a DB session and
+# runs a real query (the weapon lookup) before the cache check ever runs. Without
+# this, an autoclicker spamming the same build would sail past the concurrency
+# guard entirely and still generate real per-request DB/HTTP load at whatever
+# rate it fires. Same cooldown-dict pattern as _publish_last/_comment_last below,
+# just keyed by IP instead of client_id_hash since these endpoints don't require
+# an X-Client-ID. Checked as the first thing in each endpoint, before any DB work.
+_solve_request_last: dict[str, float] = {}
+_SOLVE_REQUEST_COOLDOWN = 1.0
+
+
+def _check_solve_rate_limit(ip: str) -> None:
+    now = time.monotonic()
+    stale = [k for k, t in _solve_request_last.items() if now - t > _SOLVE_REQUEST_COOLDOWN * 20]
+    for k in stale:
+        del _solve_request_last[k]
+    last = _solve_request_last.get(ip, 0.0)
+    if now - last < _SOLVE_REQUEST_COOLDOWN:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "reason_key": "optimizer.reason.tooManyRequests",
+                "message": "Too many requests - please slow down.",
+            },
+        )
+    _solve_request_last[ip] = now
+
+
+@contextlib.contextmanager
+def _solve_slot(ip: str):
+    """detail carries a reason_key (mirroring the optimize result's own
+    reason_key/reason_params convention) so the frontend can render a
+    translated message instead of this English fallback text."""
+    if not _acquire_ip_solve_lock(ip):
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "reason_key": "optimizer.reason.alreadySolving",
+                "message": "You already have an optimization running - wait for it to finish.",
+            },
+        )
+    try:
+        if not _SOLVE_CONCURRENCY_SEM.acquire(blocking=False):
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "reason_key": "optimizer.reason.serverBusy",
+                    "message": "Server is busy solving other requests - try again shortly.",
+                },
+            )
+        try:
+            yield
+        finally:
+            _SOLVE_CONCURRENCY_SEM.release()
+    finally:
+        _release_ip_solve_lock(ip)
+
 
 @app.post("/build/optimize")
 def build_optimize(
+    request: Request,
     weapon_id: str = Body(...),
     max_price: float | None = Body(default=None),
     min_ergonomics: float | None = Body(default=None),
@@ -1950,6 +2070,7 @@ def build_optimize(
     evo_ergo_k: float | None = Body(default=None),
     db: Session = Depends(get_db),
 ):
+    _check_solve_rate_limit(_get_client_ip(request))
     if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
         raise HTTPException(
             status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}"
@@ -2037,7 +2158,8 @@ def build_optimize(
         use_evo_ergo=use_evo_ergo,
         evo_ergo_k=evo_ergo_k,
     )
-    result = optimize_weapon(db, weapon_id, params)
+    with _solve_slot(_get_client_ip(request)):
+        result = optimize_weapon(db, weapon_id, params)
 
     with _OPTIMIZE_CACHE_LOCK:
         if len(_OPTIMIZE_CACHE) >= _OPTIMIZE_CACHE_MAX:
@@ -2078,6 +2200,7 @@ def build_stat_ranges(
 
 @app.post("/build/moa-floor")
 def build_moa_floor(
+    request: Request,
     weapon_id: str = Body(...),
     trader_levels: dict | None = Body(default=None),
     flea_available: bool = Body(default=True),
@@ -2087,6 +2210,7 @@ def build_moa_floor(
     """Exact minimum achievable accuracy_moa for this weapon, via a binary
     search of real solves - slower than GET /build/stat-ranges's LP-relaxation
     estimate, only run when the optimizer's "Exact slider floor" toggle is on."""
+    _check_solve_rate_limit(_get_client_ip(request))
     if trader_levels is not None:
         for level in trader_levels.values():
             if not (0 <= level <= 4):
@@ -2097,7 +2221,8 @@ def build_moa_floor(
         raise HTTPException(status_code=404, detail="Weapon not found")
 
     params = OptimizeParams(trader_levels=trader_levels, flea_available=flea_available, player_level=player_level)
-    result = get_moa_floor(db, weapon_id, params)
+    with _solve_slot(_get_client_ip(request)):
+        result = get_moa_floor(db, weapon_id, params)
     if result["status"] == "error":
         raise HTTPException(status_code=404, detail=result["reason"])
     return result
@@ -2157,6 +2282,7 @@ def build_gunsmith_tasks(lang: str = "en", db: Session = Depends(get_db)):
 
 @app.post("/build/gunsmith-solve")
 def build_gunsmith_solve(
+    request: Request,
     task_name: str = Body(...),
     trader_levels: dict | None = Body(default=None),
     flea_available: bool = Body(default=True),
@@ -2165,6 +2291,7 @@ def build_gunsmith_solve(
     equip_ergo_modifier: float = Body(default=0.0),
     db: Session = Depends(get_db),
 ):
+    _check_solve_rate_limit(_get_client_ip(request))
     if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
         raise HTTPException(
             status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}"
@@ -2178,15 +2305,16 @@ def build_gunsmith_solve(
             if not (0 <= level <= 4):
                 raise HTTPException(status_code=422, detail="trader_levels values must be between 0 and 4")
 
-    result = solve_gunsmith_task(
-        db,
-        task_name,
-        trader_levels=trader_levels,
-        flea_available=flea_available,
-        player_level=player_level,
-        strength_level=strength_level,
-        equip_ergo_modifier=equip_ergo_modifier,
-    )
+    with _solve_slot(_get_client_ip(request)):
+        result = solve_gunsmith_task(
+            db,
+            task_name,
+            trader_levels=trader_levels,
+            flea_available=flea_available,
+            player_level=player_level,
+            strength_level=strength_level,
+            equip_ergo_modifier=equip_ergo_modifier,
+        )
     if result["status"] == "error":
         raise HTTPException(status_code=404, detail=result["reason"])
     return result

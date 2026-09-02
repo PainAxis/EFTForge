@@ -44,8 +44,14 @@ _NO_CONSTRAINTS_PARAMS = SimpleNamespace(
 # second; this only ever matters for a pathological case (an earlier attempt
 # at multi-slot placement variables produced a MILP that ran for 30+ minutes
 # without finishing). Without a cap, that kind of case would hang a backend
-# worker indefinitely instead of degrading gracefully.
-SOLVE_TIME_LIMIT_SECONDS = 120
+# worker indefinitely instead of degrading gracefully. Kept well above the
+# typical solve time so a legitimately hard-but-feasible constraint combo
+# doesn't get cut off before HiGHS proves it out and misreported as
+# infeasible (build_and_solve below doesn't distinguish "timed out" from
+# "actually infeasible") - see main.py's per-IP/global solve concurrency
+# guard for the actual defense against a slow solve being used to clog up
+# the site.
+SOLVE_TIME_LIMIT_SECONDS = 30
 
 # Objective exchange rates, mirroring the reference optimizer's lpBuilder.ts so
 # the same weight sliders produce the same trade-offs. There, at equal weights,
