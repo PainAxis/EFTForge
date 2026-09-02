@@ -647,7 +647,7 @@ window.EFTForge.optimizer = (function () {
             document.getElementById('optimizer-recoil-weight').addEventListener('input', (e) => _setWeights(_ergoWeight, Number(e.target.value), _priceWeight));
             document.getElementById('optimizer-price-weight').addEventListener('input', (e) => _setWeights(_ergoWeight, _recoilWeight, Number(e.target.value)));
         } else {
-            document.getElementById('optimizer-tp-svg').addEventListener('mousedown', _tpHandleMouseDown);
+            document.getElementById('optimizer-tp-svg')?.addEventListener('mousedown', _tpHandleMouseDown);
         }
         _updateWeightVisuals();
     }
@@ -1335,11 +1335,24 @@ window.EFTForge.optimizer = (function () {
         // .attachment-table.header-pinned), but scoped to this pane's own scroll
         // instead of .right-panel since the results pane now scrolls independently.
         const resultsPane = document.getElementById('optimizer-results-pane');
-        resultsPane.addEventListener('scroll', () => {
-            const table = resultsPane.querySelector('.optimizer-manifest-table');
-            if (table) table.classList.toggle('header-pinned', resultsPane.scrollTop > 10);
-        }, { passive: true });
-        setupEdgePanScroll(resultsPane);
+        if (resultsPane) {
+            let pinnedTable = null;
+            let isHeaderPinned = false;
+            resultsPane.addEventListener('scroll', () => {
+                const table = resultsPane.querySelector('.optimizer-manifest-table');
+                if (!table) return;
+                if (table !== pinnedTable) {
+                    pinnedTable = table;
+                    isHeaderPinned = table.classList.contains('header-pinned');
+                }
+                const shouldPin = resultsPane.scrollTop > 10;
+                if (shouldPin !== isHeaderPinned) {
+                    isHeaderPinned = shouldPin;
+                    table.classList.toggle('header-pinned', shouldPin);
+                }
+            }, { passive: true });
+            setupEdgePanScroll(resultsPane);
+        }
 
         document.getElementById('optimizer-preset-recoil').addEventListener('click', () => _setWeights(0, 100, 0));
         document.getElementById('optimizer-preset-ergo').addEventListener('click', () => _setWeights(100, 0, 0));

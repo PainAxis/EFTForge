@@ -6926,7 +6926,7 @@ button.build-tag-chip.active {
   position: fixed;
   top: 0; right: 0; bottom: 0;
   width: 84%;
-  min-width: 720px;
+  min-width: min(720px, 100vw);
   max-width: 1400px;
   background: #1a1a1a;
   z-index: 1101;
@@ -6939,6 +6939,8 @@ button.build-tag-chip.active {
   overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: #3a3a3a #1a1a1a;
+  contain: paint;
+  will-change: transform, opacity;
 }
 #optimizer-overlay::-webkit-scrollbar { width: 6px; }
 #optimizer-overlay::-webkit-scrollbar-track { background: #1a1a1a; }
@@ -7595,8 +7597,13 @@ button.build-tag-chip.active {
   scrollbar-color: #3a3a3a #1a1a1a;
 }
 @media (max-width: 900px) {
-  /* Stacked layout: drop the independent-scroll boxing and let the whole
-     drawer scroll as one region again, same as before the two-pane existed. */
+  /* Narrow-window layout: keep the drawer within the viewport and let the
+     stacked content scroll as one region. This is not a mobile layout. */
+  #optimizer-overlay {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
   .optimizer-panel-body { min-height: auto; overflow: visible; }
   #optimizer-tab-content,
   #optimizer-tab-content:has(> .optimizer-two-pane) {
@@ -7610,6 +7617,67 @@ button.build-tag-chip.active {
   .optimizer-results-pane {
     width: 100%;
     overflow: visible;
+  }
+  .optimizer-manifest {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .optimizer-manifest-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .optimizer-ternary-svg {
+    max-width: 100%;
+    height: auto;
+  }
+  .optimizer-preset-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    gap: 6px;
+  }
+  .optimizer-preset-btn {
+    padding: 7px 4px;
+    font-size: 11px;
+    text-align: center;
+  }
+  .optimizer-status-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .optimizer-results-split {
+    flex-direction: column;
+    gap: 14px;
+  }
+  .optimizer-results-gunimg,
+  .optimizer-results-statsblock {
+    width: 100%;
+    flex: none;
+  }
+  .optimizer-use-build-inline {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .optimizer-panel-header {
+    padding: 10px 12px;
+  }
+  .optimizer-panel-title {
+    font-size: 13px;
+    letter-spacing: 1px;
+  }
+  .optimizer-preset-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .optimizer-field-row {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .optimizer-constraint-slider-row {
+    gap: 6px;
   }
 }
 
