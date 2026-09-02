@@ -141,6 +141,7 @@ window.EFTForge.optimizer = (function () {
     =========================== */
 
     function showPanel() {
+        if (isMobileLayout()) return;
         const overlay = document.getElementById('optimizer-overlay');
         const backdrop = document.getElementById('optimizer-backdrop');
         if (!overlay) return;
@@ -203,8 +204,13 @@ window.EFTForge.optimizer = (function () {
         // to show there. build-manager.js flips it back to false before
         // _restoreNormalPlaceholder runs, so the tab correctly reappears once the
         // user leaves that screen (cancel, modify, or confirm).
+        // Keep the optimizer desktop-only, same as community publishing/comments
+        // (see #profile-nav-btn's mobile hide in styles.css) - the constraint
+        // widgets and ternary drag-plot aren't built for touch. Skip creating the
+        // edge-tab entirely here rather than just CSS-hiding it, so there's no
+        // element left for showPanel() to be invoked against on mobile.
         const placeholder = document.getElementById('attachment-placeholder');
-        if (placeholder) {
+        if (placeholder && !isMobileLayout()) {
             _ensureEdgeTab(placeholder);
             // The static tab in index.html ships with optimizer-edge-tab-pulse-snap
             // hardcoded (so a first-ever visitor gets the pre-expanded intro state
@@ -286,7 +292,10 @@ window.EFTForge.optimizer = (function () {
     let _hasPulsed = localStorage.getItem(PULSE_SEEN_KEY) === 'true';
 
     function pulse() {
-        if (_hasPulsed) return;
+        // Don't burn the once-ever "seen it" flag on a device that never gets
+        // the edge-tab in the first place - a mobile-first visitor should still
+        // get the intro pulse the first time they show up on desktop.
+        if (isMobileLayout() || _hasPulsed) return;
         _hasPulsed = true;
         localStorage.setItem(PULSE_SEEN_KEY, 'true');
         requestAnimationFrame(() => requestAnimationFrame(() => {

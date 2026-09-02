@@ -490,6 +490,15 @@ body[data-mobile="true"] #tab-bar {
   display: none !important;
 }
 
+/* Optimizer is desktop-only, same as community publishing/comments (see
+   #profile-nav-btn below) - its drag-plot and constraint sliders aren't
+   built for touch. optimizer.js also skips creating this element on mobile,
+   but the static tab still ships in index.html's initial markup, so hide it
+   here too for the moment before that JS runs. */
+body[data-mobile="true"] #optimizer-edge-tab {
+  display: none !important;
+}
+
 @keyframes tab-close-hint-float {
   0%   { opacity: 0; transform: translate(-50%, -100%); }
   12%  { opacity: 1; transform: translate(-50%, calc(-100% - 6px)); }
