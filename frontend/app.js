@@ -1307,6 +1307,8 @@ async function switchLang(lang) {
     let activeTarget = null;
     let _tipW = 0;
     let _tipH = 0;
+    let _lastX = 0;
+    let _lastY = 0;
 
     const OFFSET_X = 14;
     const OFFSET_Y = 18;
@@ -1351,7 +1353,18 @@ async function switchLang(lang) {
         activeTarget = null;
     }
 
+    // Re-reads target.dataset.tooltip and repaints - for callers that mutate
+    // the tooltip text of the currently-hovered element (e.g. a delete button
+    // swapping to a "Confirm?" prompt). mouseover only fires on a fresh
+    // hover, so without this the new text wouldn't show until the mouse left
+    // and re-entered the element.
+    function refresh(target) {
+        if (target === activeTarget) show(target, _lastX, _lastY);
+    }
+
     document.addEventListener("mousemove", (e) => {
+        _lastX = e.clientX;
+        _lastY = e.clientY;
         if (activeTarget) position(e.clientX, e.clientY);
     }, { passive: true });
 
@@ -1380,7 +1393,7 @@ async function switchLang(lang) {
     // Hide when mouse leaves the document
     document.addEventListener("mouseleave", hide, true);
 
-    window.EFTForge.tooltip = { hide };
+    window.EFTForge.tooltip = { hide, refresh };
 })();
 
 /* ===========================

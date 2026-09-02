@@ -51,6 +51,22 @@ window.EFTForge.optimizer = (function () {
     let _preventOverswing = localStorage.getItem('eftforge-optimizer-prevent-overswing') === 'true';
     let _requireSuppressor = localStorage.getItem('eftforge-optimizer-require-suppressor') === 'true';
 
+    // User-defined weight presets, stored alongside (not merged into) the 7
+    // built-in ones below. Each entry is {id, name, ergo, recoil, price}.
+    function _loadCustomPresets() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem('eftforge-optimizer-custom-presets') || '[]');
+            return Array.isArray(parsed) ? parsed : [];
+        } catch {
+            return [];
+        }
+    }
+    function _saveCustomPresets() {
+        localStorage.setItem('eftforge-optimizer-custom-presets', JSON.stringify(_customPresets));
+    }
+    let _customPresets = _loadCustomPresets();
+    let _presetAddOpen = false;
+
     // Mod Filter (GET /build/mods) - cached per weapon+lang so switching tabs
     // or re-rendering doesn't refetch.
     let _modFilterData = null;      // { weaponId, lang, mods: [{id,name,icon}] }
@@ -411,6 +427,107 @@ window.EFTForge.optimizer = (function () {
 
     function _ergoAxisLabel() {
         return _useEvoErgo ? _t('optimizer.evoErgoShort') : _t('optimizer.ergonomics');
+    }
+
+    function _customPresetRowHtml() {
+        const items = _customPresets.map(p => `
+            <div class="optimizer-preset-custom-item">
+                <button type="button" class="optimizer-preset-btn optimizer-preset-btn-custom" data-preset-apply="${_escape(p.id)}">${_escape(p.name)}</button>
+                <button type="button" class="optimizer-preset-delete-btn" data-preset-delete="${_escape(p.id)}" data-tooltip="${_escape(_t('optimizer.presetDeleteTitle'))}">&#x2715;</button>
+            </div>
+        `).join('');
+        return `${items}<button type="button" class="optimizer-preset-add-btn" id="optimizer-preset-add-btn" title="${_escape(_t('optimizer.presetSaveTitle'))}">+</button>`;
+    }
+
+    function _confirmDeletePreset(btn, id) {
+        if (btn.dataset.confirming === '1') {
+            _customPresets = _customPresets.filter(p => p.id !== id);
+            _saveCustomPresets();
+            _renderCustomPresetRow();
+            return;
+        }
+        btn.dataset.confirming = '1';
+        btn.classList.add('confirming');
+        btn.dataset.tooltip = _t('ui.confirm');
+        window.EFTForge.tooltip?.refresh(btn);
+        const reset = () => {
+            if (btn.dataset.confirming !== '1') return;
+            delete btn.dataset.confirming;
+            btn.classList.remove('confirming');
+            btn.dataset.tooltip = _t('optimizer.presetDeleteTitle');
+            window.EFTForge.tooltip?.refresh(btn);
+        };
+        setTimeout(reset, 3000);
+        btn.addEventListener('mouseleave', reset, { once: true });
+    }
+
+    function _renderCustomPresetRow() {
+        const el = document.getElementById('optimizer-preset-custom-row');
+        if (!el) return;
+        el.innerHTML = _customPresetRowHtml();
+
+        el.querySelectorAll('[data-preset-apply]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const preset = _customPresets.find(p => p.id === btn.dataset.presetApply);
+                if (preset) _setWeights(preset.ergo, preset.recoil, preset.price);
+            });
+        });
+        el.querySelectorAll('[data-preset-delete]').forEach(btn => {
+            btn.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                _confirmDeletePreset(btn, btn.dataset.presetDelete);
+            });
+        });
+        document.getElementById('optimizer-preset-add-btn').addEventListener('click', _toggleAddPresetForm);
+    }
+
+    function _presetAddFormHtml() {
+        return `
+            <input type="text" class="optimizer-input optimizer-preset-name-input" id="optimizer-preset-name-input"
+                   placeholder="${_escape(_t('optimizer.presetNamePlaceholder'))}" maxlength="30">
+            <button type="button" class="optimizer-preset-btn" id="optimizer-preset-add-confirm">${_t('modal.saveBtn')}</button>
+            <button type="button" class="optimizer-preset-btn" id="optimizer-preset-add-cancel">${_t('ui.cancel')}</button>
+        `;
+    }
+
+    function _toggleAddPresetForm() {
+        const row = document.getElementById('optimizer-preset-add-row');
+        if (!row) return;
+        _presetAddOpen = !_presetAddOpen;
+        if (!_presetAddOpen) {
+            row.classList.remove('open');
+            row.innerHTML = '';
+            return;
+        }
+        row.classList.add('open');
+        row.innerHTML = _presetAddFormHtml();
+        const input = document.getElementById('optimizer-preset-name-input');
+        input.focus();
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') _confirmAddPreset();
+            else if (ev.key === 'Escape') _toggleAddPresetForm();
+        });
+        document.getElementById('optimizer-preset-add-confirm').addEventListener('click', _confirmAddPreset);
+        document.getElementById('optimizer-preset-add-cancel').addEventListener('click', _toggleAddPresetForm);
+    }
+
+    function _confirmAddPreset() {
+        const input = document.getElementById('optimizer-preset-name-input');
+        const name = input.value.trim().slice(0, 30);
+        if (!name) {
+            input.focus();
+            return;
+        }
+        _customPresets.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name,
+            ergo: _ergoWeight,
+            recoil: _recoilWeight,
+            price: _priceWeight,
+        });
+        _saveCustomPresets();
+        _toggleAddPresetForm();
+        _renderCustomPresetRow();
     }
 
     function _setWeights(ergo, recoil, price) {
@@ -1109,6 +1226,8 @@ window.EFTForge.optimizer = (function () {
         _fleaAvailable = localStorage.getItem('eftforge-optimizer-flea-available') !== 'false';
         _preventOverswing = localStorage.getItem('eftforge-optimizer-prevent-overswing') === 'true';
         _requireSuppressor = localStorage.getItem('eftforge-optimizer-require-suppressor') === 'true';
+        _customPresets = _loadCustomPresets();
+        _presetAddOpen = false;
         _resetConstraintState();
         _includedModIds = [];
         _excludedModIds = [];
@@ -1133,7 +1252,9 @@ window.EFTForge.optimizer = (function () {
                         <button type="button" class="optimizer-preset-btn" id="optimizer-preset-performance">${_t('optimizer.presetPerformance')}</button>
                         <button type="button" class="optimizer-preset-btn" id="optimizer-preset-recoil-focus">${_t('optimizer.presetRecoilFocus')}</button>
                         <button type="button" class="optimizer-preset-btn" id="optimizer-preset-ergo-focus">${_t('optimizer.presetErgoFocus')}</button>
+                        <span class="optimizer-preset-custom-slot" id="optimizer-preset-custom-row"></span>
                     </div>
+                    <div class="optimizer-preset-add-row" id="optimizer-preset-add-row"></div>
                     <div class="optimizer-toggle-row">
                         <span class="stat-label">${_t('optimizer.useEvoErgo')}</span>
                         <button type="button" class="compare-toggle${_useEvoErgo ? ' active' : ''}" id="optimizer-evo-ergo-toggle">
@@ -1227,6 +1348,7 @@ window.EFTForge.optimizer = (function () {
         document.getElementById('optimizer-preset-performance').addEventListener('click', () => _setWeights(48, 48, 2));
         document.getElementById('optimizer-preset-recoil-focus').addEventListener('click', () => _setWeights(20, 70, 10));
         document.getElementById('optimizer-preset-ergo-focus').addEventListener('click', () => _setWeights(70, 20, 10));
+        _renderCustomPresetRow();
         document.getElementById('optimizer-evo-ergo-toggle').addEventListener('click', () => _setUseEvoErgo(!_useEvoErgo));
         document.getElementById('optimizer-weight-ui-sliders-btn').addEventListener('click', () => _setWeightUiMode('sliders'));
         document.getElementById('optimizer-weight-ui-triangle-btn').addEventListener('click', () => _setWeightUiMode('triangle'));
@@ -1518,13 +1640,10 @@ window.EFTForge.optimizer = (function () {
                 <div class="optimizer-status-bar">
                     <button type="button" class="modal-btn primary optimizer-reoptimize-btn" id="optimizer-reoptimize-btn">${_t('optimizer.reoptimize')}</button>
                     <div class="optimizer-status-meta">
-                        <span class="optimizer-status-ok">&#10003;</span>
-                        <span class="optimizer-status-label">${_t('optimizer.statusOptimal')}</span>
                         ${_result.solve_ms != null ? `<span class="optimizer-badge">${_result.solve_ms} ms</span>` : ''}
                     </div>
                 </div>
                 <div class="stats-divider"></div>
-                <div class="section-title stats-title-row"><span>${_t('optimizer.optimizedBuildTitle')}</span></div>
                 <div class="optimizer-results-split">
                     <div class="optimizer-results-statsblock">
                         <div class="optimizer-results-bars">
