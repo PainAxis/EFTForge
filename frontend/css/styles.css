@@ -7858,6 +7858,43 @@ body[data-mobile="true"] .optimizer-results-statsblock {
   flex-shrink: 0;
 }
 
+/* ---- Retained from Preset ---- */
+/* Reuses the .optimizer-section collapsible shell (config drawer) but drops its
+   reset button for a plain count pill - these parts aren't a "setting" to reset,
+   just what the chosen factory preset ships with. */
+.optimizer-retained-section {
+  margin-bottom: 12px;
+}
+.optimizer-retained-section .optimizer-section-header {
+  padding: 8px 10px;
+}
+.optimizer-retained-count {
+  background: #2a2a2a;
+  color: #ccc;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.optimizer-retained-section .optimizer-section-body-content {
+  padding: 8px 10px 10px;
+}
+.optimizer-retained-grid {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.optimizer-retained-grid .attachment-icon-wrapper {
+  width: 56px;
+  height: 56px;
+}
+.optimizer-retained-grid .attachment-icon {
+  width: 56px;
+  height: 56px;
+}
+
 /* ---- Build Manifest ---- */
 .optimizer-manifest {
   background: #161616;

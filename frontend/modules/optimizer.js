@@ -80,6 +80,11 @@ window.EFTForge.optimizer = (function () {
     // open; Mod Filter and Market & Trader Access start collapsed).
     let _sectionOpen = { weight: true, constraints: true, modFilter: false, market: false };
 
+    // Results-panel "Retained from Preset" group - starts collapsed, unlike the
+    // Weight Adjustment/Hard Constraints sections, since it's supplementary info
+    // rather than something the user needs to act on for every solve.
+    let _retainedOpen = false;
+
     function _sectionHeaderHtml(id, titleKey) {
         return `
             <div class="optimizer-section-header" data-section-toggle="${id}">
@@ -1848,6 +1853,51 @@ window.EFTForge.optimizer = (function () {
         `;
     }
 
+    // Shell for the "Retained from Preset" group - only rendered when the solve
+    // priced the build off the factory preset AND at least one selected part came
+    // bundled with it (see solver.py's retained_from_preset). The item rows
+    // themselves are filled in by _populateManifest once resolved, same async
+    // hand-off the build manifest table below it uses.
+    function _retainedFromPresetHtml() {
+        const ids = (_result && _result.retained_from_preset) || [];
+        if (!ids.length) return '';
+        return `
+            <div class="optimizer-section optimizer-retained-section${_retainedOpen ? ' open' : ''}" data-section="retained">
+                <div class="optimizer-section-header" data-section-toggle="retained">
+                    <span class="optimizer-section-chevron">&#9656;</span>
+                    <span class="optimizer-section-title">${_t('optimizer.retainedFromPreset')}</span>
+                    <span class="optimizer-retained-count">${ids.length}</span>
+                </div>
+                <div class="optimizer-section-body" data-section-body>
+                    <div class="optimizer-section-body-inner">
+                        <div class="optimizer-section-body-content optimizer-retained-grid" id="optimizer-retained-body">
+                            <div class="optimizer-manifest-loading">${_t('optimizer.loadingItems')}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function _wireRetainedSection() {
+        document.querySelector('[data-section-toggle="retained"]')?.addEventListener('click', () => {
+            _retainedOpen = !_retainedOpen;
+            document.querySelector('.optimizer-section[data-section="retained"]')?.classList.toggle('open', _retainedOpen);
+        });
+    }
+
+    // One retained-part icon: just the icon square with its short name overlaid,
+    // exactly like the attachment table's own icon cell - no separate row, no
+    // stats, since these parts weren't optimization choices to weigh.
+    function _retainedItemHtml(item) {
+        return `
+            <div class="attachment-icon-wrapper" title="${escapeHtml(item.name)}">
+                <img src="${escapeHtml(item.icon_link)}" class="attachment-icon" loading="lazy" decoding="async" onerror="this.style.display='none'" />
+                <div class="slot-shortname">${escapeHtml(item.short_name)}</div>
+            </div>
+        `;
+    }
+
     function _manifestTheadHtml() {
         return `
             <thead>
@@ -2002,6 +2052,7 @@ window.EFTForge.optimizer = (function () {
 
                 <div class="optimizer-manifest">
                     ${_weaponCardHtml()}
+                    ${_retainedFromPresetHtml()}
 
                     <div class="optimizer-manifest-header">
                         <span class="optimizer-manifest-title">${_t('optimizer.buildManifest')}</span>
@@ -2019,6 +2070,7 @@ window.EFTForge.optimizer = (function () {
         `;
         document.getElementById('optimizer-reoptimize-btn').addEventListener('click', _solveOptimize);
         document.getElementById('optimizer-use-build-btn').addEventListener('click', _useBuild);
+        _wireRetainedSection();
 
         // Grow the stat bars from 0% to their targets, same as the main stats panel.
         requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -2054,13 +2106,24 @@ window.EFTForge.optimizer = (function () {
         try { await ensureFleaPrices(resolved.map(i => i.id)); } catch {}
         if (_result !== result) return;
 
+        // Parts retained from the factory preset get pulled out into their own group
+        // (see _retainedFromPresetHtml) rather than cluttering the manifest as if
+        // they'd been actively chosen alongside the optimized ones.
+        const retainedIds = new Set(result.retained_from_preset || []);
+        const retainedBody = document.getElementById('optimizer-retained-body');
+        if (retainedBody) {
+            const retainedItems = resolved.filter(i => retainedIds.has(i.id));
+            retainedBody.innerHTML = retainedItems.map(_retainedItemHtml).join('');
+        }
+
         const body = document.getElementById('optimizer-manifest-body');
         if (!body) return;
-        if (!resolved.length) {
+        const manifestItems = resolved.filter(i => !retainedIds.has(i.id));
+        if (!manifestItems.length) {
             body.innerHTML = `<tr><td colspan="11" class="optimizer-manifest-loading">${_t('optimizer.noItems')}</td></tr>`;
             return;
         }
-        body.innerHTML = resolved.map(_manifestRowHtml).join('');
+        body.innerHTML = manifestItems.map(_manifestRowHtml).join('');
         _wireManifestButtons();
     }
 

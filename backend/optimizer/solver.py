@@ -188,6 +188,16 @@ def optimize_weapon(db, weapon_id: str, params: OptimizeParams) -> dict:
         result["base"], result["grand_total_rub"] = _choose_base(
             db, weapon, params, result["selected_items"], prices, result["total_price_rub"]
         )
+        # Selected parts that ship free on the weapon's factory preset - only
+        # meaningful when that preset is actually the cheaper base (result["base"]),
+        # since otherwise the build is priced off the bare receiver and every part
+        # is bought on its own. Lets the manifest UI split these out into their own
+        # "Retained from Preset" group instead of listing them as if they were
+        # deliberately chosen alongside the optimized parts.
+        factory_ids = set(weapon.factory_attachment_ids.split(",")) if weapon.factory_attachment_ids else set()
+        result["retained_from_preset"] = (
+            sorted(factory_ids & set(result["selected_items"])) if result["base"]["kind"] == "preset" else []
+        )
 
     return result
 
