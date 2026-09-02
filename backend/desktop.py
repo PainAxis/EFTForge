@@ -25,6 +25,8 @@ import sys
 import threading
 import time
 
+from solver_cache_epoch import bump_solver_cache_epoch
+
 import requests
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.responses import HTMLResponse, Response
@@ -301,7 +303,11 @@ def _run_sync() -> None:
         if os.path.exists(_SCRATCH_DB_PATH):
             os.remove(_SCRATCH_DB_PATH)
 
-        env = {**os.environ, "DATABASE_URL": "sqlite:///" + _SCRATCH_DB_PATH.replace("\\", "/")}
+        env = {
+            **os.environ,
+            "DATABASE_URL": "sqlite:///" + _SCRATCH_DB_PATH.replace("\\", "/"),
+            "EFTFORGE_SKIP_SOLVER_CACHE_EPOCH": "1",
+        }
         _logger.info("desktop sync: fetching tarkov.dev data into scratch DB...")
         result = subprocess.run(
             _sync_worker_command(),
@@ -318,6 +324,7 @@ def _run_sync() -> None:
         changed = after is not None and after != before
         if changed:
             _copy_scratch_into_live()
+            bump_solver_cache_epoch()
             if _clear_caches:
                 _clear_caches()
             # Same notice file reset.py's dev sync writes: the frontend already

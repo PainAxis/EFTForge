@@ -30,6 +30,7 @@ from stats import _compute_stats
 from optimizer.solver import optimize_weapon, get_stat_ranges, get_moa_floor, OptimizeParams
 from optimizer.gunsmith import get_gunsmith_tasks, solve_gunsmith_task
 from optimizer.compat_map import build_compatibility_map
+from solver_cache_epoch import SolverCacheEpochTracker
 from database_changelog import changelog_engine, ChangelogSessionLocal, ChangelogBase
 from models_stat_changelog import StatChangeLog  # noqa: F401 - registers table with ChangelogBase.metadata
 
@@ -1467,6 +1468,7 @@ def combo_full(
     exclude_item_ids: List[str] = Body(default=[]),
     db: Session = Depends(get_db),
 ):
+    _combo_started = time.perf_counter()
     if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
         raise HTTPException(
             status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}"
@@ -1481,6 +1483,7 @@ def combo_full(
     _cap_list("exclude_item_ids", exclude_item_ids, 2000)
 
     _cache_key = (
+        _solver_cache_generation(),
         base_item_id,
         tuple(sorted(installed_ids)),
         root_slot_id,
@@ -1493,9 +1496,17 @@ def combo_full(
     with _COMBO_FULL_CACHE_LOCK:
         cached = _COMBO_FULL_CACHE.get(_cache_key)
     if cached is not None:
+        cached_result = {
+            **cached,
+            "metrics": {
+                **cached.get("metrics", {}),
+                "cache_hit": True,
+                "processing_ms": round((time.perf_counter() - _combo_started) * 1000, 3),
+            },
+        }
 
         def _cached_stream():
-            yield f"data: {json.dumps({'type': 'result', 'data': cached})}\n\n"
+            yield f"data: {json.dumps({'type': 'result', 'data': cached_result})}\n\n"
 
         return StreamingResponse(
             _cached_stream(),
@@ -1550,7 +1561,27 @@ def combo_full(
     base_stats = _compute_stats(base_item, installed_ids, items_map, strength_level, equip_ergo_modifier)
 
     if not all_parents:
-        return {"base": base_stats, "combos": []}
+        return {
+            "base": base_stats,
+            "combos": [],
+            "timed_out": False,
+            "truncated": False,
+            "truncation_reasons": [],
+            "metrics": {
+                "root_candidate_count": 0,
+                "child_candidate_edge_count": 0,
+                "nested_candidate_edge_count": 0,
+                "reachable_item_count": 0,
+                "frontier_peak": 0,
+                "frontier_states_generated": 0,
+                "frontier_cap_hits": 0,
+                "nested_expansion_skips": 0,
+                "combo_count_before_dedup": 0,
+                "combo_count": 0,
+                "cache_hit": False,
+                "processing_ms": round((time.perf_counter() - _combo_started) * 1000, 3),
+            },
+        }
 
     all_parent_ids = [p.id for p in all_parents]
 
@@ -1781,10 +1812,25 @@ def combo_full(
 
     # 10. Frontier expansion + stats (pure Python, no further DB queries)
     _FRONTIER_CAP = 10_000
+    _combo_metrics = {
+        "root_candidate_count": len(all_parents),
+        "child_candidate_edge_count": sum(len(items) for items in child_items_by_slot.values()),
+        "nested_candidate_edge_count": sum(len(items) for items in nested_items_by_slot.values()),
+        "reachable_item_count": len(
+            set(all_parent_ids)
+            | {item.id for items in child_items_by_slot.values() for item in items}
+            | {item.id for items in nested_items_by_slot.values() for item in items}
+        ),
+        "frontier_peak": 0,
+        "frontier_states_generated": 0,
+        "frontier_cap_hits": 0,
+        "nested_expansion_skips": 0,
+    }
 
     def _stream():
         all_combos = []
         any_truncated = False
+        truncation_reasons = set()
 
         for parent in all_parents:
             child_slots = child_slots_by_parent.get(parent.id, [])
@@ -1849,17 +1895,24 @@ def combo_full(
                                 _est *= 1 + len(nested_items_by_slot.get(_ns.id, []))
                             if _est > 50_000:
                                 next_frontier.append(new_state)
+                                any_truncated = True
+                                truncation_reasons.add("nested_expansion_limit")
+                                _combo_metrics["nested_expansion_skips"] += 1
                             else:
                                 next_frontier.extend(_expand_item(new_state, ci))
                         else:
                             next_frontier.append(new_state)
 
+                _combo_metrics["frontier_states_generated"] += len(next_frontier)
+                _combo_metrics["frontier_peak"] = max(_combo_metrics["frontier_peak"], len(next_frontier))
                 frontier = next_frontier
                 capped = False
                 if len(frontier) > _FRONTIER_CAP:
                     frontier = frontier[:_FRONTIER_CAP]
                     capped = True
                     any_truncated = True
+                    truncation_reasons.add("frontier_cap")
+                    _combo_metrics["frontier_cap_hits"] += 1
                 yield f"data: {json.dumps({'type': 'progress', 'parent': parent_name, 'slot': cs.slot_name, 'frontier': len(frontier), 'cap': _FRONTIER_CAP, 'capped': capped})}\n\n"
 
             for state in frontier:
@@ -1884,7 +1937,20 @@ def combo_full(
 
         clean = _dedup_by_stats([c for c in all_combos if not c.get("conflict")])
         conflicted = _dedup_by_stats([c for c in all_combos if c.get("conflict")])
-        result = {"base": base_stats, "combos": clean + conflicted, "timed_out": False, "truncated": any_truncated}
+        result = {
+            "base": base_stats,
+            "combos": clean + conflicted,
+            "timed_out": False,
+            "truncated": any_truncated,
+            "truncation_reasons": sorted(truncation_reasons),
+            "metrics": {
+                **_combo_metrics,
+                "combo_count_before_dedup": len(all_combos),
+                "combo_count": len(clean) + len(conflicted),
+                "cache_hit": False,
+                "processing_ms": round((time.perf_counter() - _combo_started) * 1000, 3),
+            },
+        }
 
         with _COMBO_FULL_CACHE_LOCK:
             if len(_COMBO_FULL_CACHE) >= _COMBO_FULL_CACHE_MAX:
@@ -1911,6 +1977,25 @@ _OPTIMIZE_CACHE: dict = {}
 _OPTIMIZE_CACHE_LOCK = threading.Lock()
 _OPTIMIZE_CACHE_MAX = 500
 MAX_INCLUDE_EXCLUDE_IDS = 100
+_SOLVER_CACHE_EPOCH_LOCK = threading.Lock()
+_SOLVER_CACHE_EPOCH_TRACKER = SolverCacheEpochTracker()
+
+
+def _clear_solver_caches():
+    """Invalidate every result derived from the synchronized item graph."""
+    with _COMBO_FULL_CACHE_LOCK:
+        _COMBO_FULL_CACHE.clear()
+    with _OPTIMIZE_CACHE_LOCK:
+        _OPTIMIZE_CACHE.clear()
+
+
+def _solver_cache_generation() -> str:
+    """Clear this worker's caches after another process publishes a sync."""
+    with _SOLVER_CACHE_EPOCH_LOCK:
+        generation, changed = _SOLVER_CACHE_EPOCH_TRACKER.refresh()
+        if changed:
+            _clear_solver_caches()
+        return generation
 
 
 @app.post("/build/optimize")
@@ -1971,6 +2056,7 @@ def build_optimize(
         raise HTTPException(status_code=404, detail="Weapon not found")
 
     _cache_key = (
+        _solver_cache_generation(),
         weapon_id,
         max_price,
         min_ergonomics,
@@ -2001,7 +2087,11 @@ def build_optimize(
     with _OPTIMIZE_CACHE_LOCK:
         cached = _OPTIMIZE_CACHE.get(_cache_key)
     if cached is not None:
-        return {**cached, "solve_ms": round((time.perf_counter() - _solve_start) * 1000)}
+        return {
+            **cached,
+            "metrics": {**cached.get("metrics", {}), "cache_hit": True},
+            "solve_ms": round((time.perf_counter() - _solve_start) * 1000),
+        }
 
     params = OptimizeParams(
         max_price=max_price,
@@ -2029,6 +2119,7 @@ def build_optimize(
         evo_ergo_k=evo_ergo_k,
     )
     result = optimize_weapon(db, weapon_id, params)
+    result = {**result, "metrics": {**result.get("metrics", {}), "cache_hit": False}}
 
     with _OPTIMIZE_CACHE_LOCK:
         if len(_OPTIMIZE_CACHE) >= _OPTIMIZE_CACHE_MAX:
@@ -3728,8 +3819,7 @@ async def _run_sync_once() -> bool:
         )
         if ret == 0:
             _last_sync_at = time.time()
-            with _COMBO_FULL_CACHE_LOCK:
-                _COMBO_FULL_CACHE.clear()
+            _clear_solver_caches()
             _logger.info("Hyperactive sync completed.")
             return True
         _logger.error("Hyperactive sync exited with code %s.", ret)
@@ -5483,7 +5573,6 @@ if DESKTOP_MODE:
     from desktop import init_desktop
 
     def _desktop_clear_caches():
-        with _COMBO_FULL_CACHE_LOCK:
-            _COMBO_FULL_CACHE.clear()
+        _clear_solver_caches()
 
     init_desktop(app, clear_caches=_desktop_clear_caches)

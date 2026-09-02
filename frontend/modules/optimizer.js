@@ -1563,7 +1563,7 @@ window.EFTForge.optimizer = (function () {
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            if (data.status === 'optimal') {
+            if (data.status === 'optimal' || data.status === 'feasible') {
                 _result = data;
             } else {
                 _error = _formatReason(data);
@@ -1620,6 +1620,7 @@ window.EFTForge.optimizer = (function () {
     // axes it optimizes. Total cost (the optimizer's own headline number) takes the
     // price panel's cost-total-row slot at the bottom.
     function _statTilesHtml(s) {
+        const isFeasible = _result.status === 'feasible';
         const totalErgo = parseFloat(s.total_ergo ?? 0);
         const ergoText = Math.abs(totalErgo - Math.round(totalErgo)) < 0.001 ? Math.round(totalErgo) : totalErgo.toFixed(1);
         const ergoTarget = Math.max(0, Math.min(totalErgo, 100));
@@ -1653,6 +1654,8 @@ window.EFTForge.optimizer = (function () {
                 <div class="optimizer-status-bar">
                     <button type="button" class="modal-btn primary optimizer-reoptimize-btn" id="optimizer-reoptimize-btn">${_t('optimizer.reoptimize')}</button>
                     <div class="optimizer-status-meta">
+                        <span class="optimizer-status-ok${isFeasible ? ' warning' : ''}">${isFeasible ? '&#9888;' : '&#10003;'}</span>
+                        <span class="optimizer-status-label">${_t(isFeasible ? 'optimizer.statusFeasible' : 'optimizer.statusOptimal')}</span>
                         ${_result.solve_ms != null ? `<span class="optimizer-badge">${_result.solve_ms} ms</span>` : ''}
                     </div>
                 </div>
