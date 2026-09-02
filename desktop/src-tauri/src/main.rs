@@ -830,9 +830,27 @@ fn main() {
                         CommandEvent::Stderr(bytes) => {
                             eprintln!("[backend] {}", String::from_utf8_lossy(&bytes).trim_end());
                         }
-                        CommandEvent::Error(err) => eprintln!("[backend] spawn error: {err}"),
+                        CommandEvent::Error(err) => {
+                            eprintln!("[backend] spawn error: {err}");
+                            let message = format!("spawn error: {err}");
+                            if let Ok(payload) = serde_json::to_string(&message) {
+                                let _ = window.eval(&format!(
+                                    "window.__eftforgeError && window.__eftforgeError({payload})"
+                                ));
+                            }
+                        }
                         CommandEvent::Terminated(status) => {
                             eprintln!("[backend] exited: {status:?}");
+                            // Harmless no-op if this fires after the splash has
+                            // already navigated away (e.g. the sidecar dying
+                            // during normal app shutdown) - __eftforgeError only
+                            // exists on the splash page.
+                            let message = format!("backend exited unexpectedly: {status:?}");
+                            if let Ok(payload) = serde_json::to_string(&message) {
+                                let _ = window.eval(&format!(
+                                    "window.__eftforgeError && window.__eftforgeError({payload})"
+                                ));
+                            }
                         }
                         _ => {}
                     }

@@ -83,6 +83,7 @@
   .log-entry.current { color: #bbb; }
   .log-entry.current::before { color: #f5c542; }
   .err { display: none; margin-top: 16px; font-size: 12px; color: #c0564f; line-height: 1.7; max-width: 440px; }
+  .err-detail { display: none; margin-top: 10px; font-size: 10.5px; color: #8a7a5c; line-height: 1.5; max-width: 440px; word-break: break-word; }
   /* The window has no native title bar (see main.rs), so the splash needs
      its own minimal chrome: the whole page is draggable, and a small close
      button covers the "stuck on splash and can't get rid of it" case. */
@@ -114,6 +115,7 @@
       Startup is taking too long. Try restarting the app; if this persists,
       please open an issue on GitHub / Gitee.
     </div>
+    <div class="err-detail" id="err-detail"></div>
   </div>
   <script>
     // Startup stages the backend/launcher can report via
@@ -170,6 +172,22 @@
     setTimeout(function () {
       document.getElementById("err").style.display = "block";
     }, 25000);
+
+    // Called by the launcher (via eval) when the backend sidecar itself
+    // fails - spawn error or an unexpected exit before ever reporting its
+    // port. Unlike the 25s timeout above (which only means "still
+    // waiting"), this means startup has definitely failed, so it shows
+    // right away instead of waiting out the timer, plus whatever detail
+    // the launcher has (e.g. the OS spawn error or exit code) so a user's
+    // bug report actually carries a reason instead of just "it hung".
+    window.__eftforgeError = function (message) {
+      document.getElementById("err").style.display = "block";
+      if (message) {
+        var detail = document.getElementById("err-detail");
+        detail.textContent = message;
+        detail.style.display = "block";
+      }
+    };
 
     document.getElementById("splash-close").addEventListener("click", function () {
       if (window.__TAURI__) window.__TAURI__.window.getCurrentWindow().close();
