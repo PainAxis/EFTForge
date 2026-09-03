@@ -180,6 +180,28 @@ const _TOAST_FADE_MS = 180;
 const _TOAST_REFILL_MS = 300;   // progress bar refill-then-drain transition
 const _TOAST_WIDTH_MS = 300;    // must match the "width" duration in the .toast CSS transition
 
+// Pauses the dismiss countdown and freezes the progress bar at its current width.
+// Only acts while the bar is actually draining (not during the replace fade/refill window),
+// since remainingMs/drainStartedAt are only meaningful once startDrain has run.
+function _pauseToastTimer(state) {
+    if (!state.timerId || state.progressEl.style.animationName !== "toast-progress-drain") return;
+    clearTimeout(state.timerId);
+    state.timerId = null;
+    state.remainingMs = Math.max(0, state.remainingMs - (Date.now() - state.drainStartedAt));
+    state.progressEl.style.animationPlayState = "paused";
+}
+
+function _resumeToastTimer(state) {
+    if (state.timerId || state.remainingMs == null || state.progressEl.style.animationName !== "toast-progress-drain") return;
+    if (state.remainingMs <= 0) {
+        state.dismiss();
+        return;
+    }
+    state.drainStartedAt = Date.now();
+    state.timerId = setTimeout(state.dismiss, state.remainingMs);
+    state.progressEl.style.animationPlayState = "running";
+}
+
 function _swapToastActions(state, actions) {
     if (state.actionsEl) {
         state.actionsEl.remove();
@@ -257,8 +279,12 @@ function _applyToastContent(toast, state, title, message, duration, color, actio
         state.progressEl.style.animationName = "none";
         state.progressEl.style.animationDuration = duration + "ms";
         void state.progressEl.offsetWidth; // force reflow so the drain animation restarts from full
+        state.progressEl.style.animationPlayState = "running";
         state.progressEl.style.animationName = "toast-progress-drain";
+        state.remainingMs = duration;
+        state.drainStartedAt = Date.now();
         state.timerId = setTimeout(state.dismiss, duration);
+        if (state.isHovered) _pauseToastTimer(state); // toast is being replaced while the cursor is still over it
     };
 
     if (duration > 0) {
@@ -316,7 +342,15 @@ function showToast(title, message, duration = 3000, color = "#e74c3c", actions =
     progressEl.className = "toast-progress";
     toast.appendChild(progressEl);
 
-    const state = { titleEl, bodyEl, contentEl, iconColEl, progressEl, actionsEl: null, timerId: null };
+    const state = { titleEl, bodyEl, contentEl, iconColEl, progressEl, actionsEl: null, timerId: null, isHovered: false };
+    toast.addEventListener("mouseenter", () => {
+        state.isHovered = true;
+        _pauseToastTimer(state);
+    });
+    toast.addEventListener("mouseleave", () => {
+        state.isHovered = false;
+        _resumeToastTimer(state);
+    });
     state.dismiss = () => {
         toast.classList.remove("show");
         state.progressEl.style.display = "none";
