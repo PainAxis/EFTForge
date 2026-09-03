@@ -81,6 +81,13 @@ def _compute_stats(
         if total_recoil_h is not None:
             total_recoil_h = round(total_recoil_h * (1 + total_recoil_modifier))
 
+    # Ergonomics has no further in-game effect past 100 (or below 0) - clamp here so
+    # every downstream use (EED/overswing's KG(E), arm stamina, and the reported stat
+    # itself) agrees with what the game actually does, matching the reference
+    # optimizer's capped_ergo (lpBuilder.ts) instead of letting attachments stack
+    # ergo indefinitely.
+    total_ergo = max(0.0, min(100.0, total_ergo))
+
     b = equip_ergo_modifier
     E = total_ergo * (1 + b)
     KG = 0.0007556 * (E**2) + 0.02736 * E + 2.9159

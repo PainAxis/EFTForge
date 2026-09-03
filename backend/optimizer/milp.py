@@ -283,7 +283,10 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
     candidate_set = set(item_ids)
     item_to_valid_slots = _item_to_valid_slots(compat_map, candidate_set)
 
-    cb = ConstraintBuilder(n)
+    # One extra continuous column (index n, after every item's binary x_i) for
+    # capped_ergo - mirrors the reference optimizer's capped_ergo (lpBuilder.ts).
+    ergo_idx = n
+    cb = ConstraintBuilder(n + 1)
 
     # 1. Slot mutex - at most one item per slot.
     for slot_id, items in compat_map.slot_items.items():
@@ -380,8 +383,16 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
     if params.max_price is not None:
         cb.le({idx[i]: prices[i]["price_rub"] for i in item_ids}, params.max_price)
 
+    # capped_ergo <= base_ergo + sum(ergo_modifier_i * x_i), bounded [0, 100] by
+    # _solve_once's Bounds - ergonomics does nothing further past 100 (or below 0)
+    # in-game, so this is what the objective's ergo term and min_ergonomics below
+    # both read from, instead of the raw (potentially >100) attachment sum.
+    ergo_cap_coeffs = {idx[i]: -(mods[i].ergonomics_modifier or 0) for i in item_ids}
+    ergo_cap_coeffs[ergo_idx] = 1
+    cb.le(ergo_cap_coeffs, base_ergo)
+
     if params.min_ergonomics is not None:
-        cb.ge({idx[i]: (mods[i].ergonomics_modifier or 0) for i in item_ids}, params.min_ergonomics - base_ergo)
+        cb.ge({ergo_idx: 1}, params.min_ergonomics)
 
     if params.max_recoil_v is not None and base_recoil_v is not None:
         cb.le(
@@ -457,7 +468,7 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
     if params.max_moa is not None:
         _add_max_moa_constraint(cb, idx, mods, weapon, item_ids, params.max_moa)
 
-    return item_ids, idx, cb, item_to_valid_slots, base_ergo, base_weight, base_recoil_v
+    return item_ids, idx, cb, item_to_valid_slots, base_ergo, base_weight, base_recoil_v, ergo_idx
 
 
 def _weighted_objective(item_ids, idx, mods, prices, params):
@@ -469,13 +480,16 @@ def _weighted_objective(item_ids, idx, mods, prices, params):
     # the objective scores recoil as a percentage and the weapon's absolute base
     # recoil never enters here. A recoil-reducing mod has a negative modifier, so
     # its recoil_term is negative and pulls the (minimized) objective down.
-    c = np.zeros(len(item_ids))
+    n_items = len(item_ids)
+    c = np.zeros(n_items + 1)
     for item_id in item_ids:
         i = idx[item_id]
-        ergo_term = -ergo_w * ERGO_OBJ_COEFF * (mods[item_id].ergonomics_modifier or 0)
         recoil_term = recoil_w * RECOIL_OBJ_COEFF * (mods[item_id].recoil_modifier or 0)
         price_term = price_w * PRICE_OBJ_COEFF * prices[item_id]["price_rub"]
-        c[i] = ergo_term + recoil_term + price_term
+        c[i] = recoil_term + price_term
+    # capped_ergo (see _build_constraints) instead of a raw per-item ergo term -
+    # ergo past 100 is worthless in-game, so the objective must stop rewarding it there.
+    c[n_items] = -ergo_w * ERGO_OBJ_COEFF
     return c
 
 
@@ -496,7 +510,11 @@ def _evo_ergo_objective(k, item_ids, idx, mods, prices, params):
     recoil_w = max(params.recoil_weight, TIEBREAK)
     price_w = max(params.price_weight, TIEBREAK)
 
-    c = np.zeros(len(item_ids))
+    # capped_ergo (index len(item_ids), see _build_constraints) plays no part in
+    # EvoErgo mode - the tangent-linearized term below replaces it entirely - so
+    # it's left at coefficient 0 here; the shared constraint set still carries the
+    # column, it's just an unused free variable for this objective.
+    c = np.zeros(len(item_ids) + 1)
     for item_id in item_ids:
         i = idx[item_id]
         evo_ergo_term = (
@@ -517,8 +535,10 @@ def _evo_ergo_k_for_anchor(ergo_anchor, equip_ergo_modifier):
 
 def _solve_once(c, cb, n, item_ids, weapon_id, item_to_valid_slots, prices):
     constraints = cb.build()
-    bounds = Bounds(0, 1)
-    integrality = np.ones(n)
+    # n binary x_i columns plus the trailing continuous capped_ergo column
+    # (index n, see _build_constraints) bounded [0, 100] instead of [0, 1].
+    bounds = Bounds(np.zeros(n + 1), np.concatenate([np.ones(n), [100.0]]))
+    integrality = np.concatenate([np.ones(n), [0.0]])
 
     res = milp(
         c,
@@ -588,14 +608,18 @@ def _solve_avoiding_overswing(
         stats = _compute_stats(weapon, result["selected_items"], mods, strength_level, equip_ergo_modifier)
         if not stats["overswing"]:
             return result
+        # Clamp to [0, 100] to match stats.py's own clamp on total_ergo - the tangent
+        # must be anchored where the real KG(E) curve is actually evaluated, not at a
+        # raw sum that can run past the point ergo stops doing anything.
         selected_ergo = base_ergo + sum((mods[i].ergonomics_modifier or 0) for i in result["selected_items"])
+        selected_ergo = max(0.0, min(100.0, selected_ergo))
         _add_overswing_cut_at(cb, idx, mods, item_ids, base_ergo, base_weight, equip_ergo_modifier, selected_ergo)
     return None
 
 
 def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices: dict, params):
     try:
-        item_ids, idx, cb, item_to_valid_slots, base_ergo, base_weight, base_recoil_v = _build_constraints(
+        item_ids, idx, cb, item_to_valid_slots, base_ergo, base_weight, base_recoil_v, _ergo_idx = _build_constraints(
             weapon, mods, compat_map, candidate_ids, prices, params
         )
     except _Infeasible as exc:
@@ -698,11 +722,13 @@ def _moa_stat_range(cb, idx, mods, item_ids, weapon):
     coi_items = [i for i in item_ids if mods[i].center_of_impact is not None]
     acc_items = [i for i in item_ids if mods[i].center_of_impact is None]
 
+    # cb (built by _build_constraints) carries one extra column past the items for
+    # capped_ergo - pad to match even though this range doesn't care about ergo.
     n = len(item_ids)
-    acc_coeffs = np.zeros(n)
+    acc_coeffs = np.zeros(n + 1)
     for i in acc_items:
         acc_coeffs[idx[i]] = mods[i].accuracy_modifier or 0
-    acc_lo, acc_hi = _lp_stat_range(cb, n, acc_coeffs)
+    acc_lo, acc_hi = _lp_stat_range(cb, n + 1, acc_coeffs)
 
     candidate_cois = [mods[i].center_of_impact for i in coi_items]
     if weapon.center_of_impact is not None:
@@ -725,7 +751,7 @@ def compute_stat_ranges(weapon, mods: dict, compat_map, candidate_ids: list, pri
     uses a fixed range there, matched in the frontend instead of here.
     """
     try:
-        item_ids, idx, cb, item_to_valid_slots, base_ergo, base_weight, base_recoil_v = _build_constraints(
+        item_ids, idx, cb, item_to_valid_slots, base_ergo, base_weight, base_recoil_v, _ergo_idx = _build_constraints(
             weapon, mods, compat_map, candidate_ids, prices, _NO_CONSTRAINTS_PARAMS
         )
     except _Infeasible:
