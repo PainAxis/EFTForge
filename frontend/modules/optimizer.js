@@ -1736,10 +1736,16 @@ window.EFTForge.optimizer = (function () {
                         </div>
                         <div class="stats-divider"></div>
                         <div class="optimizer-results-substats stat-subsection">
-                            <div class="stat-row"><span class="stat-label">${_t('stats.weight')}</span><span>${s.total_weight.toFixed(3)} kg</span></div>
+                            <div class="stat-subsection-cols">
+                            <div class="stat-col">
                             <div class="stat-row"><span class="stat-label">${_t('stats.eedLabelShort')}</span><span class="${eedClass}">${eedText}</span></div>
                             <div class="stat-row"><span class="stat-label">${_t('stats.overswing')}</span><span class="${overswingClass}">${overswingText}</span></div>
+                            </div>
+                            <div class="stat-col">
+                            <div class="stat-row"><span class="stat-label">${_t('stats.weight')}</span><span>${s.total_weight.toFixed(3)} kg</span></div>
                             ${sightingRow}
+                            </div>
+                            </div>
                         </div>
                     </div>
                     <div class="optimizer-results-gunimg">
@@ -2240,6 +2246,12 @@ window.EFTForge.optimizer = (function () {
         _syncManifestIcons();
         // Keep the Attachment Filtering section's tags in sync if it's mounted.
         if (document.getElementById('optimizer-mod-filter-widget')) _renderModFilterWidget();
+        // Surface the change: a lock/ban from the manifest table edits the same
+        // Attachment Filtering section, so pop it open if the user has it collapsed.
+        if (!_sectionOpen.modFilter) {
+            _sectionOpen.modFilter = true;
+            document.querySelector('.optimizer-section[data-section="modFilter"]')?.classList.add('open');
+        }
     }
 
     async function _useBuild() {
