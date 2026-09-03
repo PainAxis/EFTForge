@@ -2189,6 +2189,7 @@ window.EFTForge.optimizer = (function () {
 
         const body = document.getElementById('optimizer-manifest-body');
         if (!body) return;
+        _clearMarqueeTimers();
         const manifestItems = resolved.filter(i => !retainedIds.has(i.id));
         if (!manifestItems.length) {
             body.innerHTML = `<tr><td colspan="11" class="optimizer-manifest-loading">${_t('optimizer.noItems')}</td></tr>`;
@@ -2196,6 +2197,7 @@ window.EFTForge.optimizer = (function () {
         }
         body.innerHTML = manifestItems.map(_manifestRowHtml).join('');
         _wireManifestButtons();
+        _initMarqueeText(body, { hoverOnly: !isMobileLayout() });
     }
 
     function _wireManifestButtons() {
