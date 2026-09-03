@@ -216,7 +216,7 @@ _SYNC_LOCK_FILE = os.path.join(RUNTIME_DIR, "sync_in_progress.lock")
 
 # Tables rewritten on every sync. Children deleted before parents, parents
 # inserted before children (mirrors reset.py).
-_SYNC_TABLES = ("slot_allowed_items", "slots", "items", "traders")
+_SYNC_TABLES = ("slot_allowed_items", "slots", "item_offers", "items", "traders")
 
 # Skip the automatic startup sync if data is fresher than this.
 _AUTO_SYNC_MAX_AGE_SECS = 12 * 3600

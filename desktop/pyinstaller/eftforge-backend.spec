@@ -12,6 +12,8 @@
 
 import os
 
+from PyInstaller.utils.hooks import collect_submodules
+
 spec_dir    = os.path.dirname(os.path.abspath(SPEC))
 repo_root   = os.path.normpath(os.path.join(spec_dir, "..", ".."))
 backend_dir = os.path.join(repo_root, "backend")
@@ -39,6 +41,13 @@ a = Analysis(
         "uvicorn.protocols.websockets.auto",
         "uvicorn.lifespan",
         "uvicorn.lifespan.on",
+        # scipy 1.18 moved its vendored array_api_compat from scipy._lib to
+        # scipy._external; PyInstaller's bundled scipy hook still only lists
+        # the old _lib location as a hidden import, so the _external copy
+        # (which scipy.optimize actually imports) gets missed and crashes
+        # the frozen exe with ModuleNotFoundError. Collect it explicitly
+        # until the hook catches up.
+        *collect_submodules("scipy._external"),
     ],
     hookspath=[],
     runtime_hooks=[],
@@ -52,8 +61,12 @@ a = Analysis(
         "pytest",
         "black",
         "tkinter",
-        "unittest",
-        "pydoc",
+        # Don't add "unittest" or "pydoc" here even though they look test/dev-
+        # only - I tried that and scipy.optimize (needed by optimizer/milp.py)
+        # imports both for real at runtime via numpy.testing and
+        # scipy._lib._docscrape, not just for tests/interactive help.
+        # Excluding either crashes the frozen exe on startup with
+        # ModuleNotFoundError before uvicorn ever binds the port.
     ],
     noarchive=False,
 )
