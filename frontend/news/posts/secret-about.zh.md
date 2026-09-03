@@ -36,7 +36,7 @@ hallo！我是 <img src="./news/images/devProfilePic.jpg" alt="Morph1ne的猫" t
 
 随着时间推移，项目 API 对接变得成熟，计算功能越来越智能，EvoErgo 公式也经过了重写。UI/UX 从"能用"进化成了我引以为傲的东西。网站的每一个元素都是我从零搭起来的，借助了 AI 的帮助 _（是的我vibe code，有意见请你去散步）_。到了 v0.7.0，中文本地化终于上线。我终于有信心录了一个完整的功能演示视频发布到了哔哩哔哩：
 
-<iframe src="//player.bilibili.com/player.html?isOutside=true&aid=116222888774871&bvid=BV1MswHzYEHg&cid=36678667793&p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true" style="width:100%; aspect-ratio:16/9; border-radius:6px; margin:12px 0;"></iframe>
+<iframe src="//player.bilibili.com/player.html?isOutside=true&aid=116222888774871&bvid=BV1MswHzYEHg&cid=36678667793&p=1&muted=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true" style="width:100%; aspect-ratio:16/9; border-radius:6px; margin:12px 0;"></iframe>
 
 ---
 

@@ -34,7 +34,7 @@ But the API fetch for the guns worked. Kind of.
 
 Over time, the API integration got real, the build calculator got smarter, and the EvoErgo formula rewritten. The UI/UX went from "functional" to something I'm actually proud of. I build every element of this site from the ground up, with the help of AI _(Yes I vibe code, go and take a walk)_. And then with patch v0.7.0 came Chinese localization. I was finally confident enough to record a full site functionality demonstration to post onto bilibili:
 
-<iframe src="//player.bilibili.com/player.html?isOutside=true&aid=116222888774871&bvid=BV1MswHzYEHg&cid=36678667793&p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true" style="width:100%; aspect-ratio:16/9; border-radius:6px; margin:12px 0;"></iframe>
+<iframe src="//player.bilibili.com/player.html?isOutside=true&aid=116222888774871&bvid=BV1MswHzYEHg&cid=36678667793&p=1&muted=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true" style="width:100%; aspect-ratio:16/9; border-radius:6px; margin:12px 0;"></iframe>
 
 ---
 
