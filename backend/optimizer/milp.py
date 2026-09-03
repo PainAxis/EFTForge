@@ -384,15 +384,19 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
         cb.le({idx[i]: prices[i]["price_rub"] for i in item_ids}, params.max_price)
 
     # capped_ergo <= base_ergo + sum(ergo_modifier_i * x_i), bounded [0, 100] by
-    # _solve_once's Bounds - ergonomics does nothing further past 100 (or below 0)
-    # in-game, so this is what the objective's ergo term and min_ergonomics below
-    # both read from, instead of the raw (potentially >100) attachment sum.
+    # _solve_once's Bounds. This feeds ONLY the objective's ergo term (see
+    # _weighted_objective) - past 100 ergo does nothing further for ranking builds
+    # against each other, so the solver shouldn't keep spending recoil/price budget
+    # chasing it. It's deliberately NOT used for min_ergonomics or reported anywhere:
+    # stats.py's total_ergo (what the build panel displays, and what EED/overswing/
+    # arm stamina are computed from) stays the real uncapped sum - the display must
+    # show the actual computed number, not a solver-internal scoring artifact.
     ergo_cap_coeffs = {idx[i]: -(mods[i].ergonomics_modifier or 0) for i in item_ids}
     ergo_cap_coeffs[ergo_idx] = 1
     cb.le(ergo_cap_coeffs, base_ergo)
 
     if params.min_ergonomics is not None:
-        cb.ge({ergo_idx: 1}, params.min_ergonomics)
+        cb.ge({idx[i]: (mods[i].ergonomics_modifier or 0) for i in item_ids}, params.min_ergonomics - base_ergo)
 
     if params.max_recoil_v is not None and base_recoil_v is not None:
         cb.le(
@@ -608,11 +612,7 @@ def _solve_avoiding_overswing(
         stats = _compute_stats(weapon, result["selected_items"], mods, strength_level, equip_ergo_modifier)
         if not stats["overswing"]:
             return result
-        # Clamp to [0, 100] to match stats.py's own clamp on total_ergo - the tangent
-        # must be anchored where the real KG(E) curve is actually evaluated, not at a
-        # raw sum that can run past the point ergo stops doing anything.
         selected_ergo = base_ergo + sum((mods[i].ergonomics_modifier or 0) for i in result["selected_items"])
-        selected_ergo = max(0.0, min(100.0, selected_ergo))
         _add_overswing_cut_at(cb, idx, mods, item_ids, base_ergo, base_weight, equip_ergo_modifier, selected_ergo)
     return None
 
