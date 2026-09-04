@@ -16,6 +16,7 @@ from models_traders import Trader
 from models_stat_changelog import StatChangeLog
 from models_item_offers import ItemOffer
 from models_weapon_presets import WeaponDefaultPreset
+from solver_cache_epoch import bump_solver_cache_epoch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -984,6 +985,11 @@ def sync_items(sync_source: str = "scheduled"):
     # Write fresh snapshot to disk for the next sync to diff against
     _save_snapshot_to_file(db)
     _save_last_sync_time(sync_time)
+
+    # Scratch-DB workers are followed by an atomic copy into the live DB; their
+    # parent publishes the generation only after that copy finishes.
+    if os.environ.get("EFTFORGE_SKIP_SOLVER_CACHE_EPOCH") != "1":
+        bump_solver_cache_epoch()
 
     db.close()
     changelog_db.close()

@@ -1961,11 +1961,35 @@ async function openComboView() {
         slotEmptiedIds = baseIds.filter(id => !idsToRemove.has(id));
     }
 
-    const cacheKey = `combo__${rootSlotId}__${slotEmptiedIds.slice().sort().join(",")}`;
+    const comboRequest = {
+        base_item_id:             EFTForge.state.currentGun.id,
+        installed_ids:            slotEmptiedIds,
+        root_slot_id:              rootSlotId,
+        lang:                      _lang(),
+        strength_level:            EFTForge.state.currentStrengthLevel ?? 10,
+        equip_ergo_modifier:       EFTForge.state.currentEquipErgoModifier ?? 0,
+        exclude_child_slot_names: (isLeftQueueRoot && typeof _AG_LEFT_ORDER !== "undefined")
+                                      ? _AG_LEFT_ORDER.filter(n => n !== EFTForge.state.lastSlot?.slot_name) : [],
+        exclude_item_ids:          EFTForge.config.COMBO_EXCLUDE_ITEM_IDS ?? [],
+    };
+    const cacheKey = `combo__${JSON.stringify({
+        base_item_id: comboRequest.base_item_id,
+        root_slot_id: comboRequest.root_slot_id,
+        installed_ids: comboRequest.installed_ids.slice().sort(),
+        lang: comboRequest.lang,
+        strength_level: comboRequest.strength_level,
+        equip_ergo_modifier: comboRequest.equip_ergo_modifier,
+        exclude_child_slot_names: comboRequest.exclude_child_slot_names.slice().sort(),
+        exclude_item_ids: comboRequest.exclude_item_ids.slice().sort(),
+    })}`;
 
     if (EFTForge.state.combosCache[cacheKey]) {
-        EFTForge.state.lastComboItems     = EFTForge.state.combosCache[cacheKey].items;
-        EFTForge.state.lastComboWasCapped = false;
+        const cachedCombo = EFTForge.state.combosCache[cacheKey];
+        EFTForge.state.lastComboItems     = cachedCombo.items;
+        EFTForge.state.lastComboWasCapped = !!cachedCombo.truncated;
+        if (cachedCombo.truncated) {
+            showToast(t("ui.comboTruncatedTitle"), t("ui.comboTruncatedMsg"), 8000, "#f5a623");
+        }
         applyComboSort();
         return;
     }
@@ -1995,17 +2019,7 @@ async function openComboView() {
 
     let result;
     try {
-        result = await comboFull({
-            base_item_id:              EFTForge.state.currentGun.id,
-            installed_ids:             slotEmptiedIds,
-            root_slot_id:              rootSlotId,
-            lang:                      _lang(),
-            strength_level:            EFTForge.state.currentStrengthLevel ?? 10,
-            equip_ergo_modifier:       EFTForge.state.currentEquipErgoModifier ?? 0,
-            exclude_child_slot_names:  (isLeftQueueRoot && typeof _AG_LEFT_ORDER !== "undefined")
-                                           ? _AG_LEFT_ORDER.filter(n => n !== EFTForge.state.lastSlot?.slot_name) : [],
-            exclude_item_ids:          EFTForge.config.COMBO_EXCLUDE_ITEM_IDS ?? [],
-        }, signal, (ev) => {
+        result = await comboFull(comboRequest, signal, (ev) => {
             const progressEl = document.getElementById("combo-loading-progress");
             if (!progressEl) return;
             const text = t(ev.capped ? "ui.comboProgressCapped" : "ui.comboProgress")
@@ -2094,9 +2108,13 @@ async function openComboView() {
         };
     });
 
-    EFTForge.state.combosCache[cacheKey] = { items: processedCombos };
+    EFTForge.state.combosCache[cacheKey] = {
+        items: processedCombos,
+        truncated: !!result.truncated,
+        truncationReasons: result.truncation_reasons ?? [],
+    };
     EFTForge.state.lastComboItems        = processedCombos;
-    EFTForge.state.lastComboWasCapped    = false;
+    EFTForge.state.lastComboWasCapped    = !!result.truncated;
 
     applyComboSort();
 }

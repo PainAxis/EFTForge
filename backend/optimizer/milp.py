@@ -5,6 +5,7 @@ Solved with scipy.optimize.milp (HiGHS backend) - the same solver engine the
 original optimizer's WASM frontend already uses.
 """
 
+import time
 from collections import deque
 from types import SimpleNamespace
 
@@ -40,17 +41,16 @@ _NO_CONSTRAINTS_PARAMS = SimpleNamespace(
     require_suppressor=False,
 )
 
-# Hard cap on a single HiGHS solve. A normal solve finishes in well under a
+# Shared wall-clock budget for one build_and_solve call. A normal solve finishes in well under a
 # second; this only ever matters for a pathological case (an earlier attempt
 # at multi-slot placement variables produced a MILP that ran for 30+ minutes
-# without finishing). Without a cap, that kind of case would hang a backend
-# worker indefinitely instead of degrading gracefully. Kept well above the
+# without finishing). Every HiGHS invocation receives only the time remaining
+# in this budget, including overswing-cut retries and the EvoErgo anchor sweep.
+# Without a shared cap, those nested solves could hold a backend worker for
+# many minutes instead of degrading gracefully. Kept well above the
 # typical solve time so a legitimately hard-but-feasible constraint combo
-# doesn't get cut off before HiGHS proves it out and misreported as
-# infeasible (build_and_solve below doesn't distinguish "timed out" from
-# "actually infeasible") - see main.py's per-IP/global solve concurrency
-# guard for the actual defense against a slow solve being used to clog up
-# the site.
+# normally has time to finish; see main.py's per-IP/global solve concurrency
+# guard for the surrounding request-level protection.
 SOLVE_TIME_LIMIT_SECONDS = 30
 
 # Objective exchange rates, mirroring the reference optimizer's lpBuilder.ts so
@@ -537,32 +537,140 @@ def _evo_ergo_k_for_anchor(ergo_anchor, equip_ergo_modifier):
     return 15 * kg_prime * (1 + b)  # chain rule through E = ergo*(1+b)
 
 
-def _solve_once(c, cb, n, item_ids, weapon_id, item_to_valid_slots, prices):
+def _milp_metadata(res):
+    """Normalize SciPy/HiGHS termination data into JSON-safe fields."""
+    out = {
+        "solver_status_code": int(res.status),
+        "solver_message": str(res.message),
+    }
+    for key in ("mip_node_count", "mip_dual_bound", "mip_gap"):
+        value = getattr(res, key, None)
+        if value is not None and np.isfinite(value):
+            out[key] = int(value) if key == "mip_node_count" else float(value)
+    return out
+
+
+def _empty_result(status, reason, metadata, metrics):
+    result = {
+        "status": status,
+        "reason": reason,
+        "selected_items": [],
+        "slot_pairs": [],
+        "termination": metadata,
+        "metrics": metrics,
+    }
+    if status == "infeasible":
+        result["reason_key"] = "optimizer.infeasible"
+    return result
+
+
+def _deadline_timeout(matrix_ms=0.0):
+    reason = "The overall solver time limit was reached before finding a feasible build."
+    return _empty_result(
+        "timeout",
+        reason,
+        {
+            "solver_status_code": 1,
+            "solver_message": "Overall solver time limit reached.",
+        },
+        {
+            "matrix_build_ms": round(matrix_ms, 3),
+            "solver_ms": 0.0,
+            "solve_count": 0,
+            "solve_status_counts": {},
+        },
+    )
+
+
+def _solve_once(c, cb, n, item_ids, weapon_id, item_to_valid_slots, prices, deadline=None):
+    matrix_start = time.perf_counter()
     constraints = cb.build()
+    matrix_ms = (time.perf_counter() - matrix_start) * 1000
     # n binary x_i columns plus the trailing continuous capped_ergo column
     # (index n, see _build_constraints) bounded [0, 100] instead of [0, 1].
     bounds = Bounds(np.zeros(n + 1), np.concatenate([np.ones(n), [100.0]]))
     integrality = np.concatenate([np.ones(n), [0.0]])
 
+    time_limit = SOLVE_TIME_LIMIT_SECONDS
+    if deadline is not None:
+        time_limit = min(time_limit, deadline - time.perf_counter())
+        if time_limit <= 0:
+            return _deadline_timeout(matrix_ms)
+
+    solve_start = time.perf_counter()
     res = milp(
         c,
         constraints=constraints,
         bounds=bounds,
         integrality=integrality,
-        options={"time_limit": SOLVE_TIME_LIMIT_SECONDS},
+        options={"time_limit": time_limit},
     )
-    if not res.success:
-        return None
+    solve_ms = (time.perf_counter() - solve_start) * 1000
+    metadata = _milp_metadata(res)
+    metrics = {"matrix_build_ms": round(matrix_ms, 3), "solver_ms": round(solve_ms, 3)}
+
+    # scipy.optimize.milp status codes: 0=optimal, 1=iteration/time limit,
+    # 2=infeasible, 3=unbounded, 4=other solver failure. A limit result may
+    # still carry a valid incumbent; preserve it, but never label it optimal.
+    has_incumbent = (
+        res.x is not None
+        and len(res.x) == n + 1
+        and np.all(np.isfinite(res.x))
+        and np.all(np.asarray(res.x[:n]) >= -1e-6)
+        and np.all(np.asarray(res.x[:n]) <= 1 + 1e-6)
+        and np.allclose(res.x[:n], np.rint(res.x[:n]), atol=1e-5)
+        and -1e-6 <= res.x[n] <= 100 + 1e-6
+    )
+    if res.status == 2:
+        return _empty_result("infeasible", "No feasible build satisfies these constraints.", metadata, metrics)
+    if res.status == 1 and not has_incumbent:
+        return _empty_result(
+            "timeout", "The solver reached its time limit before finding a feasible build.", metadata, metrics
+        )
+    if res.status not in (0, 1) or not has_incumbent:
+        return _empty_result("error", f"MILP solver failed: {res.message}", metadata, metrics)
 
     selected_ids = [item_ids[i] for i in range(n) if res.x[i] > 0.5]
     selected_set = set(selected_ids)
     slot_pairs = _order_pairs_parent_first(selected_ids, item_to_valid_slots, weapon_id, selected_set)
 
     return {
-        "status": "optimal",
+        "status": "optimal" if res.status == 0 else "feasible",
+        "reason": (
+            None if res.status == 0 else "The solver reached its time limit; showing the best feasible build found."
+        ),
         "selected_items": selected_ids,
         "slot_pairs": slot_pairs,
         "total_price_rub": sum(prices[i]["price_rub"] for i in selected_ids),
+        "termination": metadata,
+        "metrics": metrics,
+    }
+
+
+def _aggregate_attempt_metrics(attempts):
+    """Combine direct solves and nested lazy-cut solves without undercounting."""
+    status_counts = {}
+    solve_count = 0
+    matrix_build_ms = 0.0
+    solver_ms = 0.0
+    for attempt in attempts:
+        metrics = attempt.get("metrics", {})
+        matrix_build_ms += metrics.get("matrix_build_ms", 0.0)
+        solver_ms += metrics.get("solver_ms", 0.0)
+        nested_counts = metrics.get("solve_status_counts")
+        if nested_counts is not None:
+            for status, count in nested_counts.items():
+                status_counts[status] = status_counts.get(status, 0) + count
+            solve_count += metrics.get("solve_count", sum(nested_counts.values()))
+        else:
+            status = attempt["status"]
+            status_counts[status] = status_counts.get(status, 0) + 1
+            solve_count += 1
+    return {
+        "matrix_build_ms": round(matrix_build_ms, 3),
+        "solver_ms": round(solver_ms, 3),
+        "solve_count": solve_count,
+        "solve_status_counts": status_counts,
     }
 
 
@@ -586,6 +694,7 @@ def _solve_avoiding_overswing(
     base_weight,
     equip_ergo_modifier,
     strength_level,
+    deadline=None,
 ):
     """Same contract as _solve_once, but hard-constrains the result to
     stats.py's own "overswing" definition (total_weight <= KG(effective_ergo))
@@ -605,19 +714,47 @@ def _solve_avoiding_overswing(
     and retries. cb accumulates cuts across calls, so repeat calls (e.g. the
     EvoErgo anchor sweep below) never rediscover the same violation twice.
     """
+    attempts = []
     for _ in range(MAX_OVERSWING_CUT_ITERS):
-        result = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices)
-        if result is None:
-            return None
+        result = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices, deadline=deadline)
+        attempts.append(result)
+        if result["status"] not in ("optimal", "feasible"):
+            result["metrics"] = _aggregate_attempt_metrics(attempts)
+            return result
         stats = _compute_stats(weapon, result["selected_items"], mods, strength_level, equip_ergo_modifier)
         if not stats["overswing"]:
+            incomplete = any(attempt["status"] != "optimal" for attempt in attempts)
+            if incomplete:
+                result = {**result}
+                result["status"] = "feasible"
+                result["reason"] = (
+                    "At least one overswing-cut solve reached a limit; showing the best feasible build found."
+                )
+                result["termination"] = {
+                    "solver_status_code": 1,
+                    "solver_message": "Overswing-cut solve incomplete.",
+                    "attempts": [attempt.get("termination", {}) for attempt in attempts],
+                }
+            result["metrics"] = _aggregate_attempt_metrics(attempts)
             return result
         selected_ergo = base_ergo + sum((mods[i].ergonomics_modifier or 0) for i in result["selected_items"])
         _add_overswing_cut_at(cb, idx, mods, item_ids, base_ergo, base_weight, equip_ergo_modifier, selected_ergo)
-    return None
+    reason = "Overswing constraint cut iteration limit reached before finding a feasible build."
+    return _empty_result(
+        "error",
+        reason,
+        {
+            "solver_status_code": 4,
+            "solver_message": reason,
+            "attempts": [attempt.get("termination", {}) for attempt in attempts],
+        },
+        _aggregate_attempt_metrics(attempts),
+    )
 
 
 def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices: dict, params):
+    model_start = time.perf_counter()
+    deadline = model_start + SOLVE_TIME_LIMIT_SECONDS
     try:
         item_ids, idx, cb, item_to_valid_slots, base_ergo, base_weight, base_recoil_v, _ergo_idx = _build_constraints(
             weapon, mods, compat_map, candidate_ids, prices, params
@@ -630,9 +767,16 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
             "reason_params": exc.params,
             "selected_items": [],
             "slot_pairs": [],
+            "metrics": {"model_build_ms": round((time.perf_counter() - model_start) * 1000, 3)},
         }
 
     n = len(item_ids)
+    model_metrics = {
+        "variable_count": n,
+        "constraint_count": len(cb.rows),
+        "coefficient_count": sum(len(coeffs) for coeffs, _, _ in cb.rows),
+        "model_build_ms": round((time.perf_counter() - model_start) * 1000, 3),
+    }
 
     if not params.use_evo_ergo:
         c = _weighted_objective(item_ids, idx, mods, prices, params)
@@ -651,17 +795,17 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
                 base_weight,
                 params.equip_ergo_modifier,
                 params.strength_level,
+                deadline=deadline,
             )
         else:
-            result = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices)
-        if result is None:
-            return {
-                "status": "infeasible",
-                "reason": "No feasible build satisfies these constraints.",
-                "reason_key": "optimizer.infeasible",
-                "selected_items": [],
-                "slot_pairs": [],
-            }
+            result = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices, deadline=deadline)
+        solve_metrics = (
+            result["metrics"] if "solve_count" in result["metrics"] else _aggregate_attempt_metrics([result])
+        )
+        result["metrics"] = {
+            **model_metrics,
+            **solve_metrics,
+        }
         return result
 
     # EvoErgo mode: sweep tangent anchors, keep whichever candidate has the
@@ -675,7 +819,12 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
 
     best = None
     best_eed = None
+    attempts = []
+    deadline_exhausted = False
     for k in anchors:
+        if time.perf_counter() >= deadline:
+            deadline_exhausted = True
+            break
         c = _evo_ergo_objective(k, item_ids, idx, mods, prices, params)
         if params.prevent_overswing:
             candidate = _solve_avoiding_overswing(
@@ -692,10 +841,14 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
                 base_weight,
                 params.equip_ergo_modifier,
                 params.strength_level,
+                deadline=deadline,
             )
         else:
-            candidate = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices)
-        if candidate is None:
+            candidate = _solve_once(c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices, deadline=deadline)
+        attempts.append(candidate)
+        if candidate["status"] == "timeout" and time.perf_counter() >= deadline:
+            deadline_exhausted = True
+        if candidate["status"] not in ("optimal", "feasible"):
             continue
         eed = _compute_stats(
             weapon, candidate["selected_items"], mods, params.strength_level, params.equip_ergo_modifier
@@ -704,13 +857,31 @@ def build_and_solve(weapon, mods: dict, compat_map, candidate_ids: list, prices:
             best, best_eed = candidate, eed
 
     if best is None:
-        return {
-            "status": "infeasible",
-            "reason": "No feasible build satisfies these constraints.",
-            "reason_key": "optimizer.infeasible",
-            "selected_items": [],
-            "slot_pairs": [],
+        result = _deadline_timeout() if deadline_exhausted else None
+        if result is None:
+            result = next((r for r in attempts if r["status"] == "timeout"), None)
+        if result is None:
+            result = next((r for r in attempts if r["status"] == "error"), attempts[0])
+        result["metrics"] = {
+            **model_metrics,
+            **_aggregate_attempt_metrics(attempts),
         }
+        return result
+
+    incomplete = deadline_exhausted or len(attempts) < len(anchors) or any(r["status"] != "optimal" for r in attempts)
+    if incomplete:
+        best = {**best}
+        best["status"] = "feasible"
+        best["reason"] = "At least one EvoErgo solve reached a limit; showing the best feasible build found."
+        best["termination"] = {
+            "solver_status_code": 1,
+            "solver_message": "EvoErgo sweep incomplete.",
+            "attempts": [r.get("termination", {}) for r in attempts],
+        }
+    best["metrics"] = {
+        **model_metrics,
+        **_aggregate_attempt_metrics(attempts),
+    }
     return best
 
 
