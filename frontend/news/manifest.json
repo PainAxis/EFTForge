@@ -6,6 +6,10 @@
       "title_zh": "v1.5.0 - 武器改装优化器",
       "date": "2026-09-04",
       "tags": ["patch-notes", "major-update"],
+      "title_media": "./news/images/v150/v150Tmedia.mp4",
+      "thumbnail": "./news/images/v150/v150Thumbnail.png",
+      "thumbnail_style": "width: 70%;",
+      "thumbnail_img_style": "object-position: center 16%; transform: translateX(16px);",
       "file": "2026-09-04-v150-release.md",
       "file_zh": "2026-09-04-v150-release.zh.md"
     },
