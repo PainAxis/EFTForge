@@ -35,6 +35,15 @@ EFTForge 是一个逃离塔科夫武器配置模拟器与社区平台。它提�
 - **组合计算器** - 对当前槽位进行 BFS 搜索，枚举所有合法配件组合并按所选属性排序；结果实时流式显示并附进度提示；点击一行即安装完整组合
 - **配件图表** - 将当前槽位所有配件以两个可配置坐标轴（纵向后坐力、横向后坐力、人机、后坐力修正）绘制散点图；支持缩放、平移、聚簇浏览；可自定义跨武器图表并以 4x 分辨率导出
 
+### 优化器
+基于约束求解（MILP，HiGHS 求解器）的武器改装方案求解器，一次性为所有槽位选出最优配件组合，而非逐槽调整。
+- **配置优化** - 通过滑动条或三角控件设置人机工效（或 Evo人机工效）、后坐力、价格的权重优先级，并可设置硬性约束：预算上限、最低人机工效、最大重量、最低弹匣容量、最低瞄准距离、最大MOA、消音器需求，以及防止过摆
+- **配件过滤** - 强制包含或禁用指定配件后重新求解；也可直接在配件清单中锁定或禁用某个已选配件后重新求解
+- **权重预设** - 保存并复用自定义的权重滑块设置，同时内置常用预设（性价比、最低可用、均衡性能、后坐优先、人机优先）
+- **机匣与工厂预设比价** - 比较购买机匣与直接购买武器工厂预设的总价，并按更划算的方案计费
+- 与应用其他部分共用相同的商人忠诚度等级、跳蚤市场开关与玩家等级过滤条件
+- 优化器的原作者见下方[致谢](#致谢)部分
+
 ### 属性计算
 - 实时属性：人机功效、后坐力、重量、手臂耐力、瞄准距离
 - 完整弹匣装弹重量建模
@@ -226,6 +235,7 @@ launch.bat
 |---|---|
 | 物品 | `GET /guns`、`GET /ammo/{caliber}`、`GET /items/{id}/slots`、`GET /slots/{id}/allowed-items`、`GET /graph/searchable-items` |
 | 装配 | `POST /build/validate`、`POST /build/calculate`、`POST /build/batch-process`、`POST /build/combo-batch-process`、`POST /build/combo-full`、`GET /guns/{gun_id}/init` |
+| 优化器 | `POST /build/optimize`、`POST /build/stat-ranges`、`POST /build/moa-floor`、`GET /build/mods`、`GET /build/default-preset`、`GET /build/gunsmith-tasks`、`POST /build/gunsmith-solve` |
 | 图像生成 | `POST /build-image` |
 | 评分 | `GET /ratings/attachments/bulk`、`POST /ratings/attachments/{id}/vote`、`DELETE /ratings/attachments/{id}/vote`、`GET /ratings/builds/bulk`、`POST /ratings/builds/{id}/vote` |
 | 社区方案 | `POST /builds/publish`、`GET /builds/public`、`GET /builds/mine`、`POST /builds/{id}/load`、`DELETE /builds/{id}` |

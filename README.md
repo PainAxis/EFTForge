@@ -35,6 +35,15 @@ EFTForge is a full-stack Escape from Tarkov weapon build simulator and community
 - **Combo Calculator** - BFS search across all valid attachment combinations for a slot, ranked by a chosen stat; results stream live with a progress indicator; installs the full combination in one click
 - **Attachment Graph** - scatter plot of all attachments for the current slot on two configurable axes (V-Recoil, H-Recoil, Ergo, Recoil Modifier); zoom, pan, cluster cycling; custom cross-weapon graphs; exportable at 4x resolution
 
+### Optimizer
+Constraint-based weapon build solver (MILP, HiGHS backend) that fills every attachment slot at once instead of tuning one at a time.
+- **Optimize mode** - weighted priorities (Ergonomics, or EvoErgo, Recoil, Price) via sliders or a triangle control, plus hard constraints: budget limit, min ergonomics, max weight, min magazine capacity, min sighting range, max MOA, suppressor requirement, and prevent overswing
+- **Attachment Filtering** - force-include or ban specific mods, then re-optimize; results can also be locked or banned per part directly from the build manifest
+- **Weight presets** - save and reuse custom priority-slider setups, alongside built-in presets (Balanced, Min. operable, Performance, Recoil+, Ergo+)
+- **Receiver vs. Factory Preset costing** - compares buying the base receiver against buying the weapon's factory preset, and prices the result off whichever is cheaper
+- Respects the same trader loyalty levels, flea market toggle, and player level filters as the rest of the app
+- See [Credits & Acknowledgements](#credits--acknowledgements) for the original creator of the optimizer feature
+
 ### Stat Calculation
 - Real-time stats: ergonomics, recoil, weight, arm stamina, sighting range, etc.
 - Full magazine ammo weight modeling
@@ -226,6 +235,7 @@ The backend runs at `http://127.0.0.1:8000` by default. Interactive docs are ava
 |---|---|
 | Items | `GET /guns`, `GET /ammo/{caliber}`, `GET /items/{id}/slots`, `GET /slots/{id}/allowed-items`, `GET /graph/searchable-items` |
 | Build | `POST /build/validate`, `POST /build/calculate`, `POST /build/batch-process`, `POST /build/combo-batch-process`, `POST /build/combo-full`, `GET /guns/{gun_id}/init` |
+| Optimizer | `POST /build/optimize`, `POST /build/stat-ranges`, `POST /build/moa-floor`, `GET /build/mods`, `GET /build/default-preset`, `GET /build/gunsmith-tasks`, `POST /build/gunsmith-solve` |
 | Image Gen | `POST /build-image` |
 | Ratings | `GET /ratings/attachments/bulk`, `POST /ratings/attachments/{id}/vote`, `DELETE /ratings/attachments/{id}/vote`, `GET /ratings/builds/bulk`, `POST /ratings/builds/{id}/vote` |
 | Community Builds | `POST /builds/publish`, `GET /builds/public`, `GET /builds/mine`, `POST /builds/{id}/load`, `DELETE /builds/{id}` |
