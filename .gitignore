@@ -13,6 +13,8 @@ backend/*.db
 backend/stat_snapshot.json
 backend/last_sync.json
 backend/dev_sync_notice.json
+backend/solver_cache_epoch
+backend/.solver-cache-epoch-*
 
 # Patchright persistent Chrome profile (cookies, cache, local state)
 backend/pw_profile/

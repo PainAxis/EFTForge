@@ -21,6 +21,7 @@ never a separately-derived formula, so the optimizer and the Combo
 Calculator always agree on what a given attachment set's stats are.
 """
 
+import time
 from dataclasses import dataclass
 from typing import Optional, List, Dict
 
@@ -145,10 +146,17 @@ def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
 
 
 def optimize_weapon(db, weapon_id: str, params: OptimizeParams) -> dict:
+    started = time.perf_counter()
     weapon, compat_map, mods, loaded = _load_candidates_and_prices(db, weapon_id, params)
+    candidate_load_ms = (time.perf_counter() - started) * 1000
     if weapon is None:
         return {"status": "error", "reason": f"Unknown weapon id: {weapon_id}", "selected_items": [], "slot_pairs": []}
     candidate_ids, prices = loaded
+    input_metrics = {
+        "reachable_candidate_count": len(compat_map.reachable_ids),
+        "market_candidate_count": len(candidate_ids),
+        "candidate_load_ms": round(candidate_load_ms, 3),
+    }
 
     reasons = check_feasibility(weapon, mods, candidate_ids, params)
     if reasons:
@@ -158,11 +166,13 @@ def optimize_weapon(db, weapon_id: str, params: OptimizeParams) -> dict:
             "reason_details": [{"key": r["key"], "params": r["params"]} for r in reasons],
             "selected_items": [],
             "slot_pairs": [],
+            "metrics": {**input_metrics, "processing_ms": round((time.perf_counter() - started) * 1000, 3)},
         }
 
     result = build_and_solve(weapon, mods, compat_map, candidate_ids, prices, params)
+    result["metrics"] = {**input_metrics, **result.get("metrics", {})}
 
-    if result["status"] == "optimal":
+    if result["status"] in ("optimal", "feasible"):
         final_stats = _compute_stats(
             weapon, result["selected_items"], mods, params.strength_level, params.equip_ergo_modifier
         )
@@ -199,6 +209,7 @@ def optimize_weapon(db, weapon_id: str, params: OptimizeParams) -> dict:
             sorted(factory_ids & set(result["selected_items"])) if result["base"]["kind"] == "preset" else []
         )
 
+    result["metrics"]["processing_ms"] = round((time.perf_counter() - started) * 1000, 3)
     return result
 
 
@@ -310,8 +321,10 @@ def get_moa_floor(db, weapon_id: str, params: OptimizeParams) -> dict:
     )
 
     seed = build_and_solve(weapon, mods, compat_map, candidate_ids, prices, base_params)
-    if seed["status"] != "optimal":
+    if seed["status"] == "infeasible":
         return {"status": "ok", "floor": 0.0}
+    if seed["status"] not in ("optimal", "feasible"):
+        return {"status": seed["status"], "reason": seed.get("reason"), "floor": None}
     seed_stats = _compute_stats(weapon, seed["selected_items"], mods)
     hi = seed_stats["accuracy_moa"] or 0.0
     lo = 0.0
@@ -330,10 +343,12 @@ def get_moa_floor(db, weapon_id: str, params: OptimizeParams) -> dict:
             max_moa=mid,
         )
         result = build_and_solve(weapon, mods, compat_map, candidate_ids, prices, trial_params)
-        if result["status"] == "optimal":
+        if result["status"] in ("optimal", "feasible"):
             stats = _compute_stats(weapon, result["selected_items"], mods)
             hi = min(hi, stats["accuracy_moa"] or hi)
-        else:
+        elif result["status"] == "infeasible":
             lo = mid
+        else:
+            return {"status": result["status"], "reason": result.get("reason"), "floor": None}
 
     return {"status": "ok", "floor": round(hi, 3)}

@@ -7,6 +7,8 @@ import threading
 import time
 import sys
 
+from solver_cache_epoch import bump_solver_cache_epoch
+
 DB_FILE = "tarkov.db"
 
 # Written by the background dev sync when it detects that data actually
@@ -62,7 +64,11 @@ def _sync_to_scratch():
     if os.path.exists(SCRATCH_DB):
         os.remove(SCRATCH_DB)
     print("Syncing tarkov.dev data into scratch DB...")
-    env = {**os.environ, "DATABASE_URL": f"sqlite:///{SCRATCH_DB}"}
+    env = {
+        **os.environ,
+        "DATABASE_URL": f"sqlite:///{SCRATCH_DB}",
+        "EFTFORGE_SKIP_SOLVER_CACHE_EPOCH": "1",
+    }
     subprocess.run([sys.executable, "sync_tarkov_dev.py"], check=True, env=env)
 
 
@@ -113,6 +119,7 @@ def _sync_in_background():
         after = _items_fingerprint(SCRATCH_DB)
         if after is not None and after != before:
             _copy_scratch_into_live()
+            bump_solver_cache_epoch()
             with open(NOTICE_FILE, "w", encoding="utf-8") as f:
                 json.dump({"changed": True, "at": time.time()}, f)
             print("Background sync found new data - live DB updated, frontend will be notified.")
