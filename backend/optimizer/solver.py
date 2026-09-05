@@ -29,6 +29,7 @@ from models_items import Item
 from models_item_offers import ItemOffer
 from models_weapon_presets import WeaponDefaultPreset
 from stats import _compute_stats
+from compatibility import CompatibilityIndex
 
 from optimizer.compat_map import build_compatibility_map
 from optimizer.pricing import get_best_price, offers_by_item
@@ -142,6 +143,32 @@ def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
         candidate_ids.append(item_id)
         prices[item_id] = best
 
+    pruning_started = time.perf_counter()
+    # Only the weapon is fixed here. Optional-item conflicts still belong to
+    # the MILP; indexing them during every slider request would add unused work.
+    index = CompatibilityIndex(compat_map.slots_by_id.values(), compat_map.slot_items, {weapon_id: weapon})
+    # Preserve the MILP's fixed-weapon exclusions. Includes remain requirements,
+    # not a whitelist; pricing exemptions above must survive preprocessing.
+    blocked = set(index.item_conflicts.get(weapon_id, ()))
+    for sid in index.slot_conflicts.get(weapon_id, ()):
+        blocked.update(index.slot_items.get(sid, ()))
+    pruned = index.prune(
+        compat_map.item_to_slots.get(weapon_id, ()), set(candidate_ids) - blocked, require_complete=True
+    )
+    market_count = len(candidate_ids)
+    candidate_ids = [iid for iid in candidate_ids if iid in pruned.item_ids]
+    compat_map.pruning_metrics = {
+        "market_candidate_count": market_count,
+        "pruned_candidate_count": len(candidate_ids),
+        "unreachable_candidate_count": pruned.unreachable_count,
+        "required_failure_candidate_count": pruned.required_failure_count,
+        "weapon_conflict_candidate_count": len(set(prices) & blocked),
+        "pruning_passes": pruned.passes,
+        "pruning_ms": round((time.perf_counter() - pruning_started) * 1000, 3),
+    }
+    # Keep the original slot constraints while shrinking the item variables.
+    # Dropping slots owned by removed items would loosen the existing MILP's
+    # multi-parent mutex/conflict semantics (placement variables are out of scope).
     return weapon, compat_map, mods, (candidate_ids, prices)
 
 
@@ -156,6 +183,7 @@ def optimize_weapon(db, weapon_id: str, params: OptimizeParams) -> dict:
         "reachable_candidate_count": len(compat_map.reachable_ids),
         "market_candidate_count": len(candidate_ids),
         "candidate_load_ms": round(candidate_load_ms, 3),
+        **compat_map.pruning_metrics,
     }
 
     reasons = check_feasibility(weapon, mods, candidate_ids, params)

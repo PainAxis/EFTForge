@@ -20,6 +20,7 @@ class CompatMap:
         self.slot_owner = {}  # slot_id -> id of the item (or weapon) that owns this slot
         self.item_to_slots = {}  # owner item id -> [slot_id, ...] it owns
         self.slots_by_id = {}  # slot_id -> Slot row, for slot_name / required
+        self.pruning_metrics = {}  # request-local measurements after market filtering
 
 
 def build_compatibility_map(db, weapon_id: str) -> CompatMap:
