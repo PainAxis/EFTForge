@@ -130,10 +130,6 @@ jobs:
       - name: Chromium multi-viewport smoke test through tunnel
         run: python .github/smoke/pr2_smoke.py
 
-      - name: Keep tunnel available for cloud browser inspection
-        if: always() && env.BASE_URL != ''
-        run: sleep 900
-
       - name: Stop temporary services
         if: always()
         shell: bash

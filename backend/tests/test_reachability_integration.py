@@ -178,6 +178,18 @@ def test_pruning_preserves_legacy_multi_parent_slot_constraints(db):
     assert len(result["selected_items"]) == 1
 
 
+def test_fixed_weapon_conflicts_still_cover_slots_of_removed_owners(db):
+    setup_graph(
+        db,
+        {("root", "gun"): ["a", "b", "unavailable"], ("blocked", "unavailable"): ["a"]},
+        fields={"gun": {"conflicting_slot_ids": "blocked"}},
+    )
+    result = optimize_weapon(db, "gun", OptimizeParams(exclude_items=["unavailable"]))
+    assert result["status"] == "optimal"
+    assert result["selected_items"] == ["b"]
+    assert result["metrics"]["weapon_conflict_candidate_count"] == 1
+
+
 async def consume(response):
     if isinstance(response, dict):
         return response

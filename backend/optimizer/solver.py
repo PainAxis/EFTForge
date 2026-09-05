@@ -144,17 +144,22 @@ def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
         prices[item_id] = best
 
     pruning_started = time.perf_counter()
+    available = set(candidate_ids)
+    # Slots of inaccessible owners cannot support a root path. Restrict the
+    # index before building its reverse edges, especially for low trader levels.
+    active_slots = [
+        s for s in compat_map.slots_by_id.values() if s.parent_item_id == weapon_id or s.parent_item_id in available
+    ]
+    active_edges = {s.id: [iid for iid in compat_map.slot_items[s.id] if iid in available] for s in active_slots}
     # Only the weapon is fixed here. Optional-item conflicts still belong to
     # the MILP; indexing them during every slider request would add unused work.
-    index = CompatibilityIndex(compat_map.slots_by_id.values(), compat_map.slot_items, {weapon_id: weapon})
+    index = CompatibilityIndex(active_slots, active_edges, {weapon_id: weapon})
     # Preserve the MILP's fixed-weapon exclusions. Includes remain requirements,
     # not a whitelist; pricing exemptions above must survive preprocessing.
     blocked = set(index.item_conflicts.get(weapon_id, ()))
     for sid in index.slot_conflicts.get(weapon_id, ()):
-        blocked.update(index.slot_items.get(sid, ()))
-    pruned = index.prune(
-        compat_map.item_to_slots.get(weapon_id, ()), set(candidate_ids) - blocked, require_complete=True
-    )
+        blocked.update(compat_map.slot_items.get(sid, ()))
+    pruned = index.prune(compat_map.item_to_slots.get(weapon_id, ()), available - blocked, require_complete=True)
     market_count = len(candidate_ids)
     candidate_ids = [iid for iid in candidate_ids if iid in pruned.item_ids]
     compat_map.pruning_metrics = {
