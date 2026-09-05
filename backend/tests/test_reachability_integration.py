@@ -13,7 +13,6 @@ os.environ.setdefault("IP_HASH_SECRET", "reachability-test-secret")
 os.environ.setdefault("ADMIN_API_KEY", "reachability-test-admin")
 os.environ.setdefault("DISABLE_BG_MIGRATE", "1")
 
-import main  # noqa: E402
 from compatibility import CompatibilityIndex  # noqa: E402
 from database import Base  # noqa: E402
 from models_items import Item  # noqa: E402
@@ -33,6 +32,10 @@ from optimizer.solver import (  # noqa: E402
 
 @pytest.fixture
 def db():
+    # Import during execution, after all real-data tests have decided whether
+    # a synced database exists. main's import creates an empty development DB.
+    import main
+
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     main._clear_solver_caches()
@@ -188,6 +191,8 @@ async def consume(response):
 
 
 def combo(db, installed=(), excluded=()):
+    import main
+
     main._clear_solver_caches()
     return asyncio.run(consume(main.combo_full("gun", list(installed), "root", "en", 10, 0, [], list(excluded), db)))
 
