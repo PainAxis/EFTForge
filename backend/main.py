@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from fastapi import BackgroundTasks, FastAPI, Body, Depends, HTTPException, Header, Request
 from fastapi.responses import StreamingResponse
@@ -1741,9 +1742,26 @@ def combo_full(
         "pruning_passes": 0,
     }
 
+    # Deep trees repeatedly aggregate the same loaded scalar fields. Snapshot
+    # once to avoid ORM descriptor dispatch in every build; the shared stats
+    # function remains the sole implementation of the formulas.
+    stats_items_map: dict = items_map
+    if combo_index is not None:
+        columns = tuple(column.key for column in Item.__table__.columns)
+        stats_items_map = {
+            iid: SimpleNamespace(**{key: getattr(item, key) for key in columns}) for iid, item in items_map.items()
+        }
+    stats_base_item = stats_items_map[base_item_id]
+
     # 8. Helper to serialize an item for the response
+    serialized_items: dict[str, dict] = {}
+
     def _ser(item):
-        return {
+        # Records are read-only throughout result assembly and deduplication.
+        # Reuse one per item instead of allocating one per occurrence in builds.
+        if item.id in serialized_items:
+            return serialized_items[item.id]
+        record = {
             "id": item.id,
             "name": _item_name(item, lang),
             "short_name": _item_short_name(item, lang),
@@ -1775,6 +1793,8 @@ def combo_full(
             "task_unlock_name": item.task_unlock_name,
             "task_unlock_name_zh": item.task_unlock_name_zh,
         }
+        serialized_items[item.id] = record
+        return record
 
     # 9. Conflict helpers and caches
     _valid_cache: dict = {}
@@ -1922,7 +1942,7 @@ def combo_full(
 
             if not child_slots:
                 combo_ids = installed_ids + [parent.id]
-                stats = _compute_stats(base_item, combo_ids, items_map, strength_level, equip_ergo_modifier)
+                stats = _compute_stats(stats_base_item, combo_ids, stats_items_map, strength_level, equip_ergo_modifier)
                 all_combos.append(
                     {
                         "parent_item": _ser(parent),
@@ -1999,7 +2019,7 @@ def combo_full(
 
             for state in frontier:
                 combo_ids = installed_ids + [parent.id] + [ci.id for ci in state["child_items"]]
-                stats = _compute_stats(base_item, combo_ids, items_map, strength_level, equip_ergo_modifier)
+                stats = _compute_stats(stats_base_item, combo_ids, stats_items_map, strength_level, equip_ergo_modifier)
                 _nested_sid_set = set(parent_child_slot_ids)
                 for _ci in state["child_items"]:
                     for _s in nested_slots_by_item.get(_ci.id, []):

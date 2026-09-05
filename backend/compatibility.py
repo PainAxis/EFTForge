@@ -113,18 +113,25 @@ class CompatibilityIndex:
         roots = frozenset(root_slots)
         alive = set(allowed_ids)
         blocked = blocked_edges or {}
-        edges = {
-            s: tuple(i for i in ids if i in alive and i not in blocked.get(s, ())) for s, ids in self.slot_items.items()
-        }
+        if not blocked and self.incoming_slots.keys() <= alive:
+            # The optimizer already filters its input edges. Reuse both
+            # directions instead of allocating the same adjacency lists twice.
+            edges = self.slot_items
+            incoming = self.incoming_slots
+        else:
+            edges = {
+                s: tuple(i for i in ids if i in alive and i not in blocked.get(s, ()))
+                for s, ids in self.slot_items.items()
+            }
+            incoming = defaultdict(list)
+            for sid, ids in edges.items():
+                for iid in ids:
+                    incoming[iid].append(sid)
         counts = {s: len(ids) for s, ids in edges.items()}
         required = self.required_slots if require_complete else frozenset()
         # Only traversable slots belong to this view; other owner slots may
         # still be indexed for conflict checks.
         required = required & (edges.keys() | roots)
-        incoming = defaultdict(list)
-        for sid, ids in edges.items():
-            for iid in ids:
-                incoming[iid].append(sid)
         failed_owners = deque(self.slot_owner[s] for s in required if counts.get(s, 0) == 0 and s not in roots)
         unreachable_count = required_failure_count = passes = 0
         while True:

@@ -57,6 +57,21 @@ def test_conflict_index_preserves_both_directions_and_slot_context():
     assert blocked == {"left": {"a", "b", "c", "d"}, "right": {"a", "b", "c"}}
 
 
+def test_prefiltered_and_filtered_graphs_propagate_identical_required_failures():
+    # Exercise both adjacency reuse and filtered views with a cascade through
+    # a shared child. A later request must still see the original edges.
+    edges = {"root": ["a", "b", "removed"], "as": ["c"], "bs": ["c"], "cs": []}
+    owners = {"root": "gun", "as": "a", "bs": "b", "cs": "c"}
+    available = {"a", "b", "c"}
+    full = index(edges, owners, ["as", "cs"])
+    filtered = index({s: [i for i in ids if i in available] for s, ids in edges.items()}, owners, ["as", "cs"])
+    expected = full.prune(["root"], available, require_complete=True)
+    actual = filtered.prune(["root"], available, require_complete=True)
+    assert actual == expected
+    assert actual.item_ids == {"b"}
+    assert filtered.prune(["root"], available).item_ids == available
+
+
 def test_exhaustive_small_graphs_never_lose_a_valid_complete_configuration():
     # Enumerate concrete slot placements (including empty), then independently
     # require selected owners to be rooted and all their required slots filled.
