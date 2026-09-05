@@ -60,7 +60,8 @@ with sync_playwright() as p:
             payload = solved.value.json()
             assert payload["status"] in ("optimal", "feasible"), payload
             page.locator("#optimizer-use-build-btn").wait_for(state="visible", timeout=45000)
-            page.locator(".optimizer-manifest-loading").wait_for(state="hidden", timeout=45000)
+            page.wait_for_function("""() => ![...document.querySelectorAll('.optimizer-manifest-loading')].some(el => el.textContent.includes('Loading'))""", timeout=45000)
+            assert page.locator('#optimizer-manifest-body [data-lock-id], #optimizer-retained-body tr').count() > 0, 'Selected items did not populate the manifest' 
             bounds = page.locator("#optimizer-overlay").bounding_box()
             assert bounds and bounds["x"] >= -1 and bounds["x"] + bounds["width"] <= width + 1
             page.screenshot(path=str(out / f"optimizer-{gun}-{width}.png"), full_page=True)

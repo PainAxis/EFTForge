@@ -132,7 +132,7 @@ jobs:
 
       - name: Keep tunnel available for cloud browser inspection
         if: always() && env.BASE_URL != ''
-        run: sleep 480
+        run: sleep 900
 
       - name: Stop temporary services
         if: always()

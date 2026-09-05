@@ -14,7 +14,7 @@ async def app(scope, receive, send):
     if scope["type"] == "http":
         path, method = scope["path"], scope["method"]
         if path.startswith("/admin") or (
-            method not in ("GET", "HEAD") and not (method == "POST" and path.startswith("/build/"))
+            method not in ("GET", "HEAD") and not (method == "POST" and (path.startswith("/build/") or path in ("/slots/allowed-items/batch", "/items/slots/batch")))
         ):
             return await PlainTextResponse("Read/calculation test only", status_code=405)(scope, receive, send)
     return await main.app(scope, receive, send)
