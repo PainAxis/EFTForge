@@ -62,3 +62,33 @@ The database-independent tests in `test_reachability.py` enumerate concrete
 small-graph placements to check soundness. `test_reachability_integration.py`
 uses in-memory endpoint fixtures for filter, pricing, required-slot, auxiliary
 range, conflict-display and request-isolation regressions.
+
+## Request-local preparation follow-up
+
+Deep Combo requests reuse serialized item records and scalar snapshots for
+the unchanged stats function. Nested optimizer graphs load scalar slot, item
+and offer records; root-only graphs retain the cheaper small-input path.
+Already-filtered adjacency lists are reused by pruning. None of these records
+are cached across requests.
+
+A local comparison against the first PR2 version (`938c463`) used the same
+September 1 game-data snapshot, Python 3.12 and `PYTHONHASHSEED=0`. Revisions
+were alternated, with result caches and garbage collection cleared before
+each timed sample. The following are median milliseconds, including Combo
+SSE serialization and decoding; they do not measure network/browser latency.
+
+| Case | First PR2 | Follow-up | Samples per revision |
+| --- | ---: | ---: | ---: |
+| M4A1 receiver/barrel Combo, handguards excluded | 11846.8 | 9568.2 | 3 |
+| M4A1 Stock Combo | 30.7 | 27.5 | 11 |
+| M4A1 optimizer | 127.4 | 124.8 | 11 |
+| M4A1 optimizer, LL1 without flea | 47.1 | 44.0 | 11 |
+| M4A1 optimizer, mounts excluded | 105.2 | 102.2 | 11 |
+| PPSh-41 Combo | 3.51 | 3.50 | 11 |
+| PPSh-41 optimizer | 4.59 | 4.62 | 11 |
+
+All result digests matched, including all 51,820 deep-tree Combo results.
+The deep Combo improvement is the clearest; optimizer changes are modest
+and the shallow cases are effectively unchanged. These observations are
+not a general speed guarantee or a CI threshold. Large Combo response
+serialization and decoding remain a substantial part of the request time.

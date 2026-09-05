@@ -28,6 +28,7 @@ from optimizer.solver import (  # noqa: E402
     get_stat_ranges,
     optimize_weapon,
 )
+from stats import _compute_stats  # noqa: E402
 
 
 @pytest.fixture
@@ -162,6 +163,53 @@ def test_request_views_do_not_leak_and_factory_parts_keep_pricing_exemption(db):
     assert not unfiltered[1]["adapter"].get("no_price")
 
 
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize(
+    "params, expected_vendor, expected_price",
+    [
+        (OptimizeParams(), "flea-market", 10),
+        (OptimizeParams(player_level=1), "mechanic", 20),
+        (OptimizeParams(flea_available=False, trader_levels={"mechanic": 1}), "prapor", 100),
+        (OptimizeParams(flea_available=False, trader_levels={"mechanic": 0}), "prapor", 100),
+    ],
+)
+def test_projected_offers_preserve_access_filters_and_price_selection(
+    db, nested, params, expected_vendor, expected_price
+):
+    edges = {("root", "gun"): ["a"]}
+    if nested:
+        edges[("child", "a")] = []
+    setup_graph(db, edges)
+    db.query(ItemOffer).filter_by(item_id="a").delete()
+    for vendor, level, price, flea in [
+        ("prapor", 1, 100, False),
+        ("mechanic", 4, 20, False),
+        ("flea-market", None, 10, True),
+        ("skier", 1, None, False),
+    ]:
+        db.add(
+            ItemOffer(
+                item_id="a",
+                vendor_normalized=vendor,
+                trader_level=level,
+                price=price,
+                currency="RUB",
+                price_rub=price,
+                is_flea=flea,
+                min_level_flea=15 if flea else None,
+            )
+        )
+    db.commit()
+    _, _, _, (candidates, prices) = _load_candidates_and_prices(db, "gun", params)
+    assert candidates == ["a"]
+    assert prices["a"] == {
+        "price": expected_price,
+        "currency": "RUB",
+        "price_rub": expected_price,
+        "vendor": expected_vendor,
+    }
+
+
 def test_pruning_preserves_legacy_multi_parent_slot_constraints(db):
     setup_graph(
         db,
@@ -271,3 +319,33 @@ def test_combo_nested_owner_conflict_is_pruned_without_changing_results(db):
     result = combo(db)
     assert result["combos"] == reference["combos"]
     assert result["metrics"]["pruned_candidate_edge_count"] == 1
+
+
+def test_combo_snapshots_preserve_factory_stats_and_request_local_names(db):
+    import main
+
+    setup_graph(
+        db,
+        {("root", "gun"): ["parent"], ("child", "parent"): ["adapter"], ("nested", "adapter"): ["tip"]},
+        fields={
+            "gun": {
+                "factory_attachment_ids": "parent,adapter",
+                "factory_weight": 3.5,
+                "factory_ergonomics": 70,
+                "factory_recoil_vertical": 40,
+                "factory_recoil_horizontal": 80,
+            },
+            "parent": {"name_zh": "父件", "short_name_zh": "父", "velocity_modifier": 5},
+            "adapter": {"heat_factor": 1.3, "cooling_factor": 0.8, "durability_burn_factor": 1.4},
+            "tip": {"center_of_impact": 0.12, "sighting_range": 300, "accuracy_modifier": 10},
+        },
+    )
+    original_items = {i.id: i for i in db.query(Item).all()}
+    for lang, strength, equipment in [("en", 10, 0), ("zh", 51, -0.1)]:
+        result = asyncio.run(consume(main.combo_full("gun", [], "root", lang, strength, equipment, [], [], db)))
+        assert len(result["combos"]) > 1
+        for build in result["combos"]:
+            ids = [build["parent_item"]["id"]] + [i["id"] for i in build["child_items"]]
+            expected = _compute_stats(original_items["gun"], ids, original_items, strength, equipment)
+            assert {key: build[key] for key in expected} == expected
+            assert build["parent_item"]["name"] == ("父件" if lang == "zh" else "parent")

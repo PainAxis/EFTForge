@@ -23,6 +23,7 @@ Calculator always agree on what a given attachment set's stats are.
 
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Optional, List, Dict
 
 from models_items import Item
@@ -94,14 +95,38 @@ def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
 
     compat_map = build_compatibility_map(db, weapon_id)
     all_mod_ids = list(compat_map.reachable_ids)
+    shallow = len(compat_map.item_to_slots) == 1
 
-    mods = {}
+    mods: dict[str, Item | SimpleNamespace] = {}
     if all_mod_ids:
-        mods = {m.id: m for m in db.query(Item).filter(Item.id.in_(all_mod_ids)).all()}
+        # Solving is read-only. Plain scalar records avoid ORM tracking and
+        # descriptor overhead across model construction and repeated stat calls.
+        # For a single level, that setup costs more than the few repeated reads.
+        if shallow:
+            mods = {m.id: m for m in db.query(Item).filter(Item.id.in_(all_mod_ids)).all()}
+        else:
+            rows = db.query(*Item.__table__.columns).filter(Item.id.in_(all_mod_ids)).all()
+            mods = {row.id: SimpleNamespace(**row._mapping) for row in rows}
 
     offers_map = {}
     if all_mod_ids:
-        offer_rows = db.query(ItemOffer).filter(ItemOffer.item_id.in_(all_mod_ids)).all()
+        # Pricing needs only these scalar columns, not tracked ORM instances
+        # or barter payloads. Keep offer order and get_best_price unchanged.
+        offer_query = (
+            db.query(ItemOffer)
+            if shallow
+            else db.query(
+                ItemOffer.item_id,
+                ItemOffer.vendor_normalized,
+                ItemOffer.trader_level,
+                ItemOffer.price,
+                ItemOffer.currency,
+                ItemOffer.price_rub,
+                ItemOffer.is_flea,
+                ItemOffer.min_level_flea,
+            )
+        )
+        offer_rows = offer_query.filter(ItemOffer.item_id.in_(all_mod_ids)).all()
         offers_map = offers_by_item(offer_rows)
 
     exclude = set(params.exclude_items or [])
