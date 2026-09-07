@@ -1983,13 +1983,13 @@ async function openComboView() {
     };
     // Gun/tab switches clear the slot without necessarily starting another
     // combo request. Its old response must not populate that new context either.
-    const isCurrentRequest = () => requestGen === _comboRequestGen
+    const isCurrentView = () => requestGen === _comboRequestGen
         && EFTForge.state.comboMode
         && EFTForge.state.buildTree === requestTree
         && EFTForge.state.lastSlot === requestSlot
         && EFTForge.state.lastParentNode === requestParent
-        && EFTForge.state.currentGun?.id === comboRequest.base_item_id
-        && _lang() === comboRequest.lang
+        && EFTForge.state.currentGun?.id === comboRequest.base_item_id;
+    const isCurrentRequest = () => isCurrentView() && _lang() === comboRequest.lang
         && (EFTForge.state.currentStrengthLevel ?? 10) === comboRequest.strength_level
         && (EFTForge.state.currentEquipErgoModifier ?? 0) === comboRequest.equip_ergo_modifier;
     const cacheKey = `combo__${JSON.stringify({
@@ -2053,10 +2053,19 @@ async function openComboView() {
                 .replace("{cap}",      ev.cap);
             progressEl.textContent = text;
         });
-        if (!isCurrentRequest()) return;
+        if (!isCurrentRequest()) {
+            // A setting changed while receiving: refresh the same view with its
+            // current inputs instead of leaving a finished loading row behind.
+            if (isCurrentView()) return openComboView();
+            return;
+        }
         processedCombos = _prepareComboItems(result);
     } catch (err) {
-        if (!isCurrentRequest() || err.name === "AbortError") return;
+        if (!isCurrentRequest()) {
+            if (isCurrentView()) return openComboView();
+            return;
+        }
+        if (err.name === "AbortError") return;
         console.error("Combo full failed:", err);
         if (tbody && EFTForge.state.comboMode) {
             tbody.innerHTML = `<tr><td colspan="10" class="combo-status-row combo-error">${escapeHtml(t("ui.comboError"))}</td></tr>`;

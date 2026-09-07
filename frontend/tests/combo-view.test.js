@@ -142,10 +142,8 @@ test("empty results clear old rows and remain empty when sorted or cached", asyn
 for (const changeContext of [
     state => { state.currentGun = null; state.buildTree = null; state.lastSlot = null; state.lastParentNode = null; },
     state => { state.buildTree = { item: state.currentGun, children: {} }; },
-    state => { state.currentStrengthLevel = 51; },
-    state => { state.currentEquipErgoModifier = -0.1; },
 ]) {
-    test("a changed gun, tab or stat context discards the pending result", async () => {
+    test("a changed gun or tab discards the pending result", async () => {
         const v = view(), request = v.select("A");
         changeContext(v.state);
         v.pending[0].onProgress({ capped: true });
@@ -156,6 +154,30 @@ for (const changeContext of [
         assert.equal(Object.keys(v.state.combosCache).length, 0);
         assert.equal(v.toasts.length, 0);
         assert.equal(v.errors.length, 0);
+        assert.equal(v.inFlight(), false);
+        assert.equal(v.intervals.size, 0);
+    });
+}
+
+for (const [field, value, requestField] of [
+    ["currentStrengthLevel", 51, "strength_level"],
+    ["currentEquipErgoModifier", -0.1, "equip_ergo_modifier"],
+]) for (const failed of [false, true]) {
+    test("changed stat inputs restart the current view after an outdated response or error", async () => {
+        const v = view(), request = v.select("A");
+        v.state[field] = value;
+        if (failed) v.pending[0].reject(new Error("outdated failure"));
+        else v.pending[0].resolve(result("old", true));
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(v.pending.length, 2);
+        assert.equal(v.pending[1].payload[requestField], value);
+        assert.equal(v.inFlight(), true);
+        assert.equal(v.toasts.length, 0);
+        assert.equal(v.errors.length, 0);
+        v.pending[1].resolve(result("current"));
+        await request;
+        assert.equal(v.state.lastComboItems[0].parentEntry.item.id, "current");
+        assert.equal(Object.keys(v.state.combosCache).length, 1);
         assert.equal(v.inFlight(), false);
         assert.equal(v.intervals.size, 0);
     });
