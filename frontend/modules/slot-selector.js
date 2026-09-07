@@ -1951,6 +1951,9 @@ async function openComboView() {
     // Cache hits and already-resolved fetches must also invalidate the old request.
     _abortComboCalc();
     const requestGen = _comboRequestGen;
+    const requestTree = EFTForge.state.buildTree;
+    const requestSlot = EFTForge.state.lastSlot;
+    const requestParent = EFTForge.state.lastParentNode;
     _disconnectComboObserver();
 
     const { t } = EFTForge.lang;
@@ -1978,6 +1981,17 @@ async function openComboView() {
                                       ? _AG_LEFT_ORDER.filter(n => n !== EFTForge.state.lastSlot?.slot_name) : [],
         exclude_item_ids:          EFTForge.config.COMBO_EXCLUDE_ITEM_IDS ?? [],
     };
+    // Gun/tab switches clear the slot without necessarily starting another
+    // combo request. Its old response must not populate that new context either.
+    const isCurrentRequest = () => requestGen === _comboRequestGen
+        && EFTForge.state.comboMode
+        && EFTForge.state.buildTree === requestTree
+        && EFTForge.state.lastSlot === requestSlot
+        && EFTForge.state.lastParentNode === requestParent
+        && EFTForge.state.currentGun?.id === comboRequest.base_item_id
+        && _lang() === comboRequest.lang
+        && (EFTForge.state.currentStrengthLevel ?? 10) === comboRequest.strength_level
+        && (EFTForge.state.currentEquipErgoModifier ?? 0) === comboRequest.equip_ergo_modifier;
     const cacheKey = `combo__${JSON.stringify({
         base_item_id: comboRequest.base_item_id,
         root_slot_id: comboRequest.root_slot_id,
@@ -2015,7 +2029,7 @@ async function openComboView() {
     let _loadingDots = 1;
     const _loadingBaseText = t("ui.comboLoading");
     const _dotsInterval = setInterval(() => {
-        if (requestGen !== _comboRequestGen) return;
+        if (!isCurrentRequest()) return;
         const el = document.getElementById("combo-loading-main");
         if (el) el.textContent = _loadingBaseText + ".".repeat(_loadingDots);
         _loadingDots = _loadingDots >= 3 ? 1 : _loadingDots + 1;
@@ -2029,7 +2043,7 @@ async function openComboView() {
     let processedCombos;
     try {
         result = await comboFull(comboRequest, signal, (ev) => {
-            if (requestGen !== _comboRequestGen) return;
+            if (!isCurrentRequest()) return;
             const progressEl = document.getElementById("combo-loading-progress");
             if (!progressEl) return;
             const text = t(ev.capped ? "ui.comboProgressCapped" : "ui.comboProgress")
@@ -2039,10 +2053,10 @@ async function openComboView() {
                 .replace("{cap}",      ev.cap);
             progressEl.textContent = text;
         });
-        if (requestGen !== _comboRequestGen || !EFTForge.state.comboMode) return;
+        if (!isCurrentRequest()) return;
         processedCombos = _prepareComboItems(result);
     } catch (err) {
-        if (requestGen !== _comboRequestGen || err.name === "AbortError") return;
+        if (!isCurrentRequest() || err.name === "AbortError") return;
         console.error("Combo full failed:", err);
         if (tbody && EFTForge.state.comboMode) {
             tbody.innerHTML = `<tr><td colspan="10" class="combo-status-row combo-error">${escapeHtml(t("ui.comboError"))}</td></tr>`;

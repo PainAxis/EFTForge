@@ -139,6 +139,28 @@ test("empty results clear old rows and remain empty when sorted or cached", asyn
     assert.match(v.nodes.get("attachment-body").innerHTML, /ui.comboNone/);
 });
 
+for (const changeContext of [
+    state => { state.currentGun = null; state.buildTree = null; state.lastSlot = null; state.lastParentNode = null; },
+    state => { state.buildTree = { item: state.currentGun, children: {} }; },
+    state => { state.currentStrengthLevel = 51; },
+    state => { state.currentEquipErgoModifier = -0.1; },
+]) {
+    test("a changed gun, tab or stat context discards the pending result", async () => {
+        const v = view(), request = v.select("A");
+        changeContext(v.state);
+        v.pending[0].onProgress({ capped: true });
+        assert.equal(v.nodes.has("combo-loading-progress"), false);
+        v.pending[0].resolve(result("A", true));
+        await request;
+        assert.equal(v.state.lastComboItems.length, 0);
+        assert.equal(Object.keys(v.state.combosCache).length, 0);
+        assert.equal(v.toasts.length, 0);
+        assert.equal(v.errors.length, 0);
+        assert.equal(v.inFlight(), false);
+        assert.equal(v.intervals.size, 0);
+    });
+}
+
 for (const value of [
     { ...result("A"), response_format: "future" },
     { ...compact(result("A")), items: {} },
