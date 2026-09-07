@@ -2,6 +2,7 @@
   "name": "eftforge-frontend",
   "private": true,
   "scripts": {
+    "test": "node --test tests/*.test.js",
     "lint": "eslint . --ext .js --ignore-pattern lzstring.min.js --ignore-pattern marked.min.js -c ../.eslintrc.json"
   },
   "devDependencies": {

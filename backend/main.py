@@ -19,7 +19,7 @@ from fastapi.responses import StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware as GZIPMiddleware
 from sqlalchemy import case, func, text
 from sqlalchemy.orm import Session
-from typing import List, Literal, Optional
+from typing import Annotated, List, Literal, Optional
 
 from database import SessionLocal, engine, Base
 from models_items import Item
@@ -30,6 +30,7 @@ from models_item_offers import ItemOffer  # noqa: F401 - registers table with Ba
 from models_weapon_presets import WeaponDefaultPreset  # noqa: F401 - registers table with Base.metadata
 from stats import _compute_stats, apply_full_mag_ammo
 from compatibility import CompatibilityIndex
+from combo_transport import ComboResponseFormat, combo_result_event, format_combo_result
 from optimizer.solver import optimize_weapon, get_stat_ranges, get_moa_floor, OptimizeParams
 from optimizer.gunsmith import get_gunsmith_tasks, solve_gunsmith_task
 from optimizer.compat_map import build_compatibility_map
@@ -1478,6 +1479,7 @@ def combo_full(
     exclude_child_slot_names: List[str] = Body(default=[]),
     exclude_item_ids: List[str] = Body(default=[]),
     db: Session = Depends(get_db),
+    response_format: Annotated[ComboResponseFormat, Body()] = "legacy",
 ):
     _combo_started = time.perf_counter()
     if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
@@ -1517,7 +1519,7 @@ def combo_full(
         }
 
         def _cached_stream():
-            yield f"data: {json.dumps({'type': 'result', 'data': cached_result})}\n\n"
+            yield combo_result_event(cached_result, response_format)
 
         return StreamingResponse(
             _cached_stream(),
@@ -1572,7 +1574,7 @@ def combo_full(
     base_stats = _compute_stats(base_item, installed_ids, items_map, strength_level, equip_ergo_modifier)
 
     if not all_parents:
-        return {
+        result = {
             "base": base_stats,
             "combos": [],
             "timed_out": False,
@@ -1596,6 +1598,7 @@ def combo_full(
                 "processing_ms": round((time.perf_counter() - _combo_started) * 1000, 3),
             },
         }
+        return format_combo_result(result, response_format)
 
     all_parent_ids = [p.id for p in all_parents]
 
@@ -2060,7 +2063,7 @@ def combo_full(
                     del _COMBO_FULL_CACHE[k]
             _COMBO_FULL_CACHE[_cache_key] = result
 
-        yield f"data: {json.dumps({'type': 'result', 'data': result})}\n\n"
+        yield combo_result_event(result, response_format)
 
     return StreamingResponse(
         _stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
