@@ -119,35 +119,78 @@ async function comboFull(payload, signal, onProgress) {
     const res = await fetch(`${_base()}/build/combo-full`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify(payload),
+        body:    JSON.stringify({ response_format: "items-v1", ...payload }),
         signal,
     });
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
 
-    const reader  = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const parts = buf.split("\n\n");
-        buf = parts.pop() ?? "";
-        for (const part of parts) {
-            const line = part.split("\n").find(l => l.startsWith("data: "));
-            if (!line) continue;
-            const event = JSON.parse(line.slice(6));
-            if (event.type === "progress") {
-                onProgress?.(event);
-            } else if (event.type === "result") {
-                return event.data;
-            } else if (event.type === "error") {
-                throw new Error(event.message ?? "combo-full stream error");
-            }
-        }
+    const checkAbort = () => {
+        if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
+    };
+    // Empty candidate sets use a normal JSON response, including on older servers.
+    if (res.headers.get("content-type")?.split(";")[0].trim() === "application/json") {
+        const result = await res.json();
+        checkAbort();
+        return result;
     }
-    throw new Error("combo-full stream ended without result");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let fragments = [];
+    let dataLines = [];
+    let skipLF = false;
+    const acceptLine = line => {
+        if (line === "") {
+            if (!dataLines.length) return null;
+            const event = JSON.parse(dataLines.join("\n"));
+            dataLines = [];
+            return event;
+        }
+        if (line.startsWith("data:")) dataLines.push(line.slice(line[5] === " " ? 6 : 5));
+        return null;
+    };
+    try {
+        while (true) {
+            checkAbort();
+            const { done, value } = await reader.read();
+            checkAbort();
+            if (done) break;
+            const text = decoder.decode(value, { stream: true });
+            let from = 0;
+            if (skipLF && text.length) {
+                if (text[0] === "\n") from = 1;
+                skipLF = false;
+            }
+            // Scan only this chunk. A large unfinished JSON line is joined once,
+            // when its terminator arrives, instead of copied/scanned on every read.
+            const breaks = /[\r\n]/g;
+            breaks.lastIndex = from;
+            let match;
+            while ((match = breaks.exec(text))) {
+                fragments.push(text.slice(from, match.index));
+                const line = fragments.length === 1 ? fragments[0] : fragments.join("");
+                fragments = [];
+                from = match.index + 1;
+                if (match[0] === "\r") {
+                    if (text[from] === "\n") from++;
+                    else if (from === text.length) skipLF = true;
+                }
+                breaks.lastIndex = from;
+                const event = acceptLine(line);
+                if (!event) continue;
+                if (event.type === "progress") onProgress?.(event);
+                checkAbort();
+                if (event.type === "result") return event.data;
+                if (event.type === "error") throw new Error(event.message ?? "combo-full stream error");
+            }
+            if (from < text.length) fragments.push(text.slice(from));
+        }
+        throw new Error("combo-full stream ended without result");
+    } finally {
+        fragments = dataLines = [];
+        try { await reader.cancel(); } catch { /* Preserve the original error. */ }
+        reader.releaseLock();
+    }
 }
 
 // tarkov.dev's JSON API serves the full item list per game mode (avg24hPrice

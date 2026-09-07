@@ -1771,6 +1771,7 @@ const _comboChildSlotCache   = {};   // item_id -> slots[]  (used only for avail
 let _comboAvailableChecked = false; // true once we've finished the availability check for the current slot
 let _comboAbortController  = null;  // AbortController for the in-flight comboFull request
 let _comboCalcInFlight     = false; // true while a comboFull fetch is in progress
+let _comboRequestGen       = 0;     // only the current request may update the view
 
 const _COMBO_BATCH_SIZE  = 60;
 let _comboLazyItems      = [];   // full sorted list for lazy rendering
@@ -1797,6 +1798,7 @@ function _disconnectComboObserver() {
 }
 
 function _abortComboCalc() {
+    _comboRequestGen++;
     if (_comboAbortController) {
         _comboAbortController.abort();
         _comboAbortController = null;
@@ -1946,6 +1948,13 @@ function _showComboToggle(visible) {
 
 async function openComboView() {
     if (!EFTForge.state.lastSlot || !EFTForge.state.lastParentNode) return;
+    // Cache hits and already-resolved fetches must also invalidate the old request.
+    _abortComboCalc();
+    const requestGen = _comboRequestGen;
+    const requestTree = EFTForge.state.buildTree;
+    const requestSlot = EFTForge.state.lastSlot;
+    const requestParent = EFTForge.state.lastParentNode;
+    _disconnectComboObserver();
 
     const { t } = EFTForge.lang;
 
@@ -1972,6 +1981,17 @@ async function openComboView() {
                                       ? _AG_LEFT_ORDER.filter(n => n !== EFTForge.state.lastSlot?.slot_name) : [],
         exclude_item_ids:          EFTForge.config.COMBO_EXCLUDE_ITEM_IDS ?? [],
     };
+    // Gun/tab switches clear the slot without necessarily starting another
+    // combo request. Its old response must not populate that new context either.
+    const isCurrentView = () => requestGen === _comboRequestGen
+        && EFTForge.state.comboMode
+        && EFTForge.state.buildTree === requestTree
+        && EFTForge.state.lastSlot === requestSlot
+        && EFTForge.state.lastParentNode === requestParent
+        && EFTForge.state.currentGun?.id === comboRequest.base_item_id;
+    const isCurrentRequest = () => isCurrentView() && _lang() === comboRequest.lang
+        && (EFTForge.state.currentStrengthLevel ?? 10) === comboRequest.strength_level
+        && (EFTForge.state.currentEquipErgoModifier ?? 0) === comboRequest.equip_ergo_modifier;
     const cacheKey = `combo__${JSON.stringify({
         base_item_id: comboRequest.base_item_id,
         root_slot_id: comboRequest.root_slot_id,
@@ -1994,6 +2014,8 @@ async function openComboView() {
         return;
     }
 
+    EFTForge.state.lastComboItems = [];
+    EFTForge.state.lastComboWasCapped = false;
     const tbody = document.getElementById("attachment-body");
     if (tbody) {
         _clearMarqueeTimers();
@@ -2007,19 +2029,21 @@ async function openComboView() {
     let _loadingDots = 1;
     const _loadingBaseText = t("ui.comboLoading");
     const _dotsInterval = setInterval(() => {
+        if (!isCurrentRequest()) return;
         const el = document.getElementById("combo-loading-main");
         if (el) el.textContent = _loadingBaseText + ".".repeat(_loadingDots);
         _loadingDots = _loadingDots >= 3 ? 1 : _loadingDots + 1;
     }, 500);
 
-    _abortComboCalc();
     _comboAbortController = new AbortController();
     _comboCalcInFlight = true;
     const signal = _comboAbortController.signal;
 
     let result;
+    let processedCombos;
     try {
         result = await comboFull(comboRequest, signal, (ev) => {
+            if (!isCurrentRequest()) return;
             const progressEl = document.getElementById("combo-loading-progress");
             if (!progressEl) return;
             const text = t(ev.capped ? "ui.comboProgressCapped" : "ui.comboProgress")
@@ -2029,9 +2053,18 @@ async function openComboView() {
                 .replace("{cap}",      ev.cap);
             progressEl.textContent = text;
         });
+        if (!isCurrentRequest()) {
+            // A setting changed while receiving: refresh the same view with its
+            // current inputs instead of leaving a finished loading row behind.
+            if (isCurrentView()) return openComboView();
+            return;
+        }
+        processedCombos = _prepareComboItems(result);
     } catch (err) {
-        _comboCalcInFlight = false;
-        clearInterval(_dotsInterval);
+        if (!isCurrentRequest()) {
+            if (isCurrentView()) return openComboView();
+            return;
+        }
         if (err.name === "AbortError") return;
         console.error("Combo full failed:", err);
         if (tbody && EFTForge.state.comboMode) {
@@ -2040,21 +2073,51 @@ async function openComboView() {
         EFTForge.state.comboMode = false;
         _updateViewBtns();
         return;
+    } finally {
+        clearInterval(_dotsInterval);
+        if (requestGen === _comboRequestGen) {
+            _comboCalcInFlight = false;
+            _comboAbortController = null;
+        }
     }
-
-    _comboCalcInFlight = false;
-    clearInterval(_dotsInterval);
 
     if (result.truncated) {
         showToast(t("ui.comboTruncatedTitle"), t("ui.comboTruncatedMsg"), 8000, "#f5a623");
     }
 
-    if (!EFTForge.state.comboMode) return;
+    EFTForge.state.combosCache[cacheKey] = {
+        items: processedCombos,
+        truncated: !!result.truncated,
+        truncationReasons: result.truncation_reasons ?? [],
+    };
+    EFTForge.state.lastComboItems        = processedCombos;
+    EFTForge.state.lastComboWasCapped    = !!result.truncated;
 
-    if (!result.combos.length) {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="combo-status-row">${escapeHtml(t("ui.comboNone"))}</td></tr>`;
-        return;
+    applyComboSort();
+}
+
+function _prepareComboItems(result) {
+    const compact = result.response_format === "items-v1";
+    if ((result.response_format != null && result.response_format !== "legacy" && !compact)
+        || !Array.isArray(result.combos)) {
+        throw new Error("Invalid combo response format");
     }
+    const resolveItem = id => {
+        const item = result.items?.[id];
+        if (!item || item.id !== id) throw new Error(`Missing combo item: ${id}`);
+        return item;
+    };
+    // Prices depend on the current market/player settings. Memoize only within
+    // this preparation, never across requests or settings changes.
+    const metadata = new Map();
+    const itemMeta = item => {
+        let entry = metadata.get(item.id);
+        if (!entry) {
+            entry = { price: _getPriceRub(item), name: item.name.toLowerCase() };
+            metadata.set(item.id, entry);
+        }
+        return entry;
+    };
 
     const base       = result.base;
     const baseEED     = parseFloat(base.evo_ergo_delta ?? 0);
@@ -2062,7 +2125,9 @@ async function openComboView() {
     const baseErgo    = parseFloat(base.total_ergo ?? 0);
     const baseWeight  = parseFloat(base.total_weight ?? 0);
 
-    const processedCombos = result.combos.map(combo => {
+    return result.combos.map(combo => {
+        const parent = compact ? resolveItem(combo.parent_item_id) : combo.parent_item;
+        const children = compact ? combo.child_item_ids.map(resolveItem) : combo.child_items;
         const simEED     = parseFloat(combo.evo_ergo_delta ?? 0);
         const simErgo    = parseFloat(combo.total_ergo ?? 0);
         const simWeight  = parseFloat(combo.total_weight ?? 0);
@@ -2073,14 +2138,16 @@ async function openComboView() {
         const comboWeightDelta = simWeight - baseWeight;
         const comboRecoilPct   = (baseRecoilV && simRecoilV !== null)
             ? (simRecoilV / baseRecoilV - 1) * 100
-            : parseFloat(combo.parent_item.recoil_modifier ?? 0) * 100
-              + combo.child_items.reduce((s, ci) => s + parseFloat(ci.recoil_modifier ?? 0) * 100, 0);
+            : parseFloat(parent.recoil_modifier ?? 0) * 100
+              + children.reduce((s, ci) => s + parseFloat(ci.recoil_modifier ?? 0) * 100, 0);
 
         let totalPrice = 0; let hasPrice = false;
-        for (const item of [combo.parent_item, ...combo.child_items]) {
-            const p = _getPriceRub(item);
+        let sortName = itemMeta(parent).name;
+        for (const item of [parent, ...children]) {
+            const p = itemMeta(item).price;
             if (p !== null) { totalPrice += p; hasPrice = true; }
         }
+        for (const child of children) sortName += " " + itemMeta(child).name;
         const finalPrice = hasPrice ? totalPrice : null;
 
         // ₽/Recoil: rubles per 1% recoil reduction; null when no price or no recoil reduction
@@ -2088,14 +2155,11 @@ async function openComboView() {
             ? finalPrice / Math.abs(comboRecoilPct)
             : null;
 
-        const sortName = combo.parent_item.name.toLowerCase()
-            + combo.child_items.map(ci => " " + ci.name.toLowerCase()).join("");
-
         return {
-            parentEntry:                { item: combo.parent_item, hasConflict: false,
-                                          recoilPercent: parseFloat(combo.parent_item.recoil_modifier ?? 0) * 100,
-                                          sortName: combo.parent_item.name.toLowerCase() },
-            childItems:                 combo.child_items,
+            parentEntry:                { item: parent, hasConflict: false,
+                                          recoilPercent: parseFloat(parent.recoil_modifier ?? 0) * 100,
+                                          sortName: itemMeta(parent).name },
+            childItems:                 children,
             childSlotIds:               combo.child_slot_ids,
             childSlotParentItemIds:     combo.child_slot_parent_item_ids ?? [],
             allChildSlotIds:            combo.all_child_slot_ids,
@@ -2107,16 +2171,6 @@ async function openComboView() {
             comboRublePerRecoil,
         };
     });
-
-    EFTForge.state.combosCache[cacheKey] = {
-        items: processedCombos,
-        truncated: !!result.truncated,
-        truncationReasons: result.truncation_reasons ?? [],
-    };
-    EFTForge.state.lastComboItems        = processedCombos;
-    EFTForge.state.lastComboWasCapped    = !!result.truncated;
-
-    applyComboSort();
 }
 
 function applyComboSort() {
@@ -2191,13 +2245,21 @@ function _updateComboColumnVisibility(items) {
     const table = document.querySelector(".attachment-table");
     if (!table) return;
 
-    const allItems = items.flatMap(e => [e.parentEntry.item, ...e.childItems]);
-
-    const hasWeight = allItems.some(it => parseFloat(it.weight ?? 0) !== 0);
-    const hasRecoil = allItems.some(it => it.recoil_modifier != null && it.recoil_modifier !== 0);
-    const hasErgo   = allItems.some(it => it.ergonomics_modifier != null && it.ergonomics_modifier !== 0);
-    const hasEvo    = hasErgo && items.some(e => Math.abs(e.comboEEDDelta) > 0.05);
-    const hasPrice  = items.some(e => e.totalPrice !== null);
+    let hasWeight = false, hasRecoil = false, hasErgo = false, hasEED = false, hasPrice = false;
+    for (const entry of items) {
+        hasEED ||= Math.abs(entry.comboEEDDelta) > 0.05;
+        hasPrice ||= entry.totalPrice !== null;
+        if (!hasWeight || !hasRecoil || !hasErgo) {
+            for (const item of [entry.parentEntry.item, ...entry.childItems]) {
+                hasWeight ||= parseFloat(item.weight ?? 0) !== 0;
+                hasRecoil ||= item.recoil_modifier != null && item.recoil_modifier !== 0;
+                hasErgo   ||= item.ergonomics_modifier != null && item.ergonomics_modifier !== 0;
+                if (hasWeight && hasRecoil && hasErgo) break;
+            }
+        }
+        if (hasWeight && hasRecoil && hasErgo && hasEED && hasPrice) break;
+    }
+    const hasEvo = hasErgo && hasEED;
 
     table.classList.toggle("hide-col-weight", !hasWeight);
     table.classList.toggle("hide-col-recoil", !hasRecoil);
