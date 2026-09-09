@@ -395,8 +395,8 @@ async function openSlotSelector(parentNode, slot) {
                     <th id="th-weight" onclick="changeSort('weight')">
                         ${t("th.weight")} <span class="sort-indicator"></span>
                     </th>
-                    <th id="th-recoil" onclick="changeSort('recoil')" data-tooltip="${escapeHtml(t('th.recoilTooltipList'))}">
-                        <span id="th-recoil-label">${t("th.recoilList")}</span> <span class="sort-indicator"></span>
+                    <th id="th-recoil" onclick="changeSort('recoil')">
+                        <span id="th-recoil-label">${t("th.recoil")}</span> <span class="sort-indicator"></span>
                     </th>
                     <th id="th-acc" onclick="changeSort('acc')">
                         ${t("th.accuracy")} <span class="sort-indicator"></span>
@@ -1837,9 +1837,8 @@ function setListView() {
 
     _updateViewBtns();
     _updateGraphHeader();
-    document.getElementById("th-recoil")?.setAttribute("data-tooltip", EFTForge.lang.t("th.recoilTooltipList"));
     const _recoilLabelList = document.getElementById("th-recoil-label");
-    if (_recoilLabelList) _recoilLabelList.textContent = EFTForge.lang.t("th.recoilList");
+    if (_recoilLabelList) _recoilLabelList.textContent = EFTForge.lang.t("th.recoil");
 
     const slideTable = document.querySelector(".attachment-table");
     if (slideTable) {
@@ -1870,9 +1869,8 @@ function setComboView(wantCombo) {
     EFTForge.state.comboMode = true;
     _updateViewBtns();
     _updateGraphHeader();
-    document.getElementById("th-recoil")?.setAttribute("data-tooltip", EFTForge.lang.t("th.recoilTooltipCombo"));
     const _recoilLabelCombo = document.getElementById("th-recoil-label");
-    if (_recoilLabelCombo) _recoilLabelCombo.textContent = EFTForge.lang.t("th.recoilCombo");
+    if (_recoilLabelCombo) _recoilLabelCombo.textContent = EFTForge.lang.t("th.recoil");
 
     const slideTableCombo = document.querySelector(".attachment-table");
     if (slideTableCombo) {
@@ -2136,10 +2134,8 @@ function _prepareComboItems(result) {
         const comboEEDDelta    = simEED - baseEED;
         const comboErgoDelta   = simErgo - baseErgo;
         const comboWeightDelta = simWeight - baseWeight;
-        const comboRecoilPct   = (baseRecoilV && simRecoilV !== null)
-            ? (simRecoilV / baseRecoilV - 1) * 100
-            : parseFloat(parent.recoil_modifier ?? 0) * 100
-              + children.reduce((s, ci) => s + parseFloat(ci.recoil_modifier ?? 0) * 100, 0);
+        const comboRecoilPct   = parseFloat(parent.recoil_modifier ?? 0) * 100
+            + children.reduce((s, ci) => s + parseFloat(ci.recoil_modifier ?? 0) * 100, 0);
 
         let totalPrice = 0; let hasPrice = false;
         let sortName = itemMeta(parent).name;
@@ -2361,7 +2357,6 @@ function _buildComboRow(entry) {
             : `-`;
     }
 
-    const recoilCls = entry.comboRecoilPct <= 0 ? "positive" : "negative";
     const ergoCls   = entry.comboErgoDelta >= 0 ? "ergo-positive" : "ergo-negative";
     const evoCls    = entry.comboEEDDelta  >= 0 ? "evo-positive" : "evo-negative";
 
@@ -2378,7 +2373,7 @@ function _buildComboRow(entry) {
         <td>${priceCellHtml}</td>
         <td>${rrCellHtml}</td>
         <td>${fmtSign(entry.comboWeightDelta, 3)}</td>
-        <td class="${recoilCls}">${fmtSign(entry.comboRecoilPct)}%</td>
+        <td>${fmtSign(entry.comboRecoilPct)}%</td>
         <td class="acc-cell"></td>
         <td class="${ergoCls}">${entry.comboErgoDelta >= 0 ? "+" : ""}${formatStat(entry.comboErgoDelta)}</td>
         <td class="${evoCls}">${fmtSign(entry.comboEEDDelta)}</td>

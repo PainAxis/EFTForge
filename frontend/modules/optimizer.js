@@ -2184,7 +2184,7 @@ window.EFTForge.optimizer = (function () {
                     <th>${_t('th.price')}</th>
                     <th>${_t('th.rubRecoil')}</th>
                     <th>${_t('th.weight')}</th>
-                    <th>${_t('th.recoilList')}</th>
+                    <th>${_t('th.recoil')}</th>
                     <th>${_t('th.accuracy')}</th>
                     <th>${_t('th.ergo')}</th>
                     <th>${_t('th.evoErgo')}</th>

@@ -29,8 +29,8 @@ window.EFTForge.config = {
     // Format: [{id, message, level, expires_at, dismissible}] - use string IDs like "maint-2026-05-25".
     STATIC_ANNOUNCEMENTS_URL: "/offline/announcements.json",
 
-    APP_VERSION:    "v1.5.1",
-    APP_BUILD_DATE: "2026-09-06T18:17:49.396Z", // new Date().toISOString()
+    APP_VERSION:    "v1.5.2",
+    APP_BUILD_DATE: "2026-09-07T17:03:32.849Z", // new Date().toISOString()
 
     CALIBER_DISPLAY_MAP: {
         "Caliber20x1mm":      "20x1mm disk",
@@ -108,6 +108,10 @@ window.EFTForge.config = {
     // Item IDs to exclude from combo calc child/grandchild slots.
     // Add item IDs here to prevent them from appearing as combo options.
     COMBO_EXCLUDE_ITEM_IDS: [
+        "69fa0168e72acd254602c64a",
+        "6a157e289bbb889992032c22",
+        "6a16dc0b82cfbdc3ab09f58a",
+        "6a16dc17b7b9778bee072c65",
         "6269545d0e57f218e4548ca2",
         "689c8b454b91399db3085f2a",
         "669a6a4a525be1d2d004b8eb",
