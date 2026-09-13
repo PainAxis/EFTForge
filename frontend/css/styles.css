@@ -7216,7 +7216,6 @@ button.build-tag-chip.active {
   min-width: 360px;
   max-height: 380px;
   overflow: visible;
-  cursor: crosshair;
 }
 .optimizer-explore-svg-wrap {
   position: relative;
