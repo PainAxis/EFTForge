@@ -203,7 +203,7 @@ async function comboFull(payload, signal, onProgress) {
 // solver slot is acquired before the streaming response starts (see main.py's
 // build_explore) - so the caller can read err.status/err.reasonKey to decide
 // whether to retry, same as it already does for the other solve endpoints.
-async function exploreStream(payload, signal, onProgress) {
+async function exploreStream(payload, signal, onProgress, onStart) {
     const res = await fetch(`${_base()}/build/explore`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -217,6 +217,7 @@ async function exploreStream(payload, signal, onProgress) {
         error.reasonKey = data?.detail?.reason_key;
         throw error;
     }
+    onStart?.();
     return _readEventStream(res, signal, onProgress);
 }
 

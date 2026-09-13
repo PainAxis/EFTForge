@@ -1802,8 +1802,6 @@ window.EFTForge.optimizer = (function () {
         _explore = null;
         _exploreSelected = 0;
         _solveProgress = { phase: null, done: 0, total: _exploreSteps + 1, points: [], previewBuild: null };
-        _solveStartedAt = Date.now();
-        _solveElapsedTimer = setInterval(_tickSolveElapsed, 100);
         const controller = new AbortController();
         _abortController = controller;
         const signal = controller.signal;
@@ -1836,6 +1834,9 @@ window.EFTForge.optimizer = (function () {
                             previewBuild: ev.point ? ev.point.build : _solveProgress.previewBuild,
                         };
                         _scheduleSolveRender();
+                    }, () => {
+                        _solveStartedAt = Date.now();
+                        _solveElapsedTimer = setInterval(_tickSolveElapsed, 100);
                     });
                 } catch (err) {
                     if (err.status === 429 && err.reasonKey === 'optimizer.reason.serverBusy' && Date.now() < deadline) {
