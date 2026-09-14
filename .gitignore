@@ -16,6 +16,9 @@ backend/dev_sync_notice.json
 backend/solver_cache_epoch
 backend/.solver-cache-epoch-*
 
+# Scratch sync test dirs (contain locally-generated admin/secret keys)
+/scratch_sync*/
+
 # Patchright persistent Chrome profile (cookies, cache, local state)
 backend/pw_profile/
 
