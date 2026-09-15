@@ -1534,9 +1534,7 @@ function _applyPublicBuildsFilter() {
 
         const gunObj    = (EFTForge.state.allGuns || []).find(g => g.id === b.gun_id);
         const gunImgSrc = gunObj ? (gunObj.image_512_link || gunObj.icon_link || "") : "";
-        // card_image_url is gitee-hosted like avatars - proxy it the same way so it
-        // doesn't hotlink gitee directly (slow/unreliable) while the avatar loads fast.
-        const cardImgSrc = proxyAvatarUrl(b.card_image_url) || gunImgSrc;
+        const cardImgSrc = b.card_image_url || gunImgSrc;
 
         const s        = b.stats || {};
         const hasStats = b.stats !== null && b.stats !== undefined;
@@ -1954,9 +1952,7 @@ function _applyMyCommunityFilter() {
         const gunObj     = gunById(b.gun_id);
         const gunName    = (gunObj && (gunObj.short_name || gunObj.name)) || b.gun_name || "";
         const gunImgSrc  = gunObj ? (gunObj.image_512_link || gunObj.icon_link || "") : "";
-        // card_image_url is gitee-hosted like avatars - proxy it the same way so it
-        // doesn't hotlink gitee directly (slow/unreliable) while the avatar loads fast.
-        const cardImgSrc = proxyAvatarUrl(b.card_image_url) || gunImgSrc;
+        const cardImgSrc = b.card_image_url || gunImgSrc;
 
         const s        = b.stats || {};
         const hasStats = b.stats !== null && b.stats !== undefined;

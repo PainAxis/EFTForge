@@ -235,9 +235,7 @@ window.EFTForge.leaderboard = (function () {
                 const rankClass = entry.rank === 1 ? ' lb-rank-gold' : entry.rank === 2 ? ' lb-rank-silver' : entry.rank === 3 ? ' lb-rank-bronze' : '';
                 const gunObj    = allGuns.find(function (g) { return g.id === entry.gun_id; });
                 const gunName   = (gunObj && gunObj.name) || entry.gun_name || entry.gun_id;
-                // card_image_url is gitee-hosted like avatars - proxy it the same way so it
-                // doesn't hotlink gitee directly (slow/unreliable) while the avatar loads fast.
-                const imgSrc    = proxyAvatarUrl(entry.card_image_url) || (gunObj && (gunObj.image_512_link || gunObj.icon_link)) || '';
+                const imgSrc    = entry.card_image_url || (gunObj && (gunObj.image_512_link || gunObj.icon_link)) || '';
                 const imgHtml   = imgSrc
                     ? '<img class="lb-build-img" src="' + _escHtml(imgSrc) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
                     : '<div class="lb-build-img-placeholder"></div>';
