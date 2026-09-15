@@ -73,8 +73,9 @@ Focus on *why* a change was made, not just what changed.
 
 ## Build date
 
-When your PR is ready to merge, please bump `APP_BUILD_DATE` in
-`frontend/modules/config.js` to the current time with `new Date().toISOString()`.
+Don't bump `APP_BUILD_DATE` in `frontend/modules/config.js` yourself, it should be 
+stamped automatically by `frontend/release_prep.py`, which should be ran right
+before a prod release.
 
 ## Release notes / news posts
 
