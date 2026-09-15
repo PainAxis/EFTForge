@@ -13,7 +13,7 @@ import numpy as np
 from scipy.optimize import milp, LinearConstraint, Bounds
 from scipy.sparse import csc_array
 
-from stats import _compute_stats, apply_full_mag_ammo, full_mag_ammo_weight
+from stats import KG_A, KG_B, KG_C, MOA_K, _compute_stats, apply_full_mag_ammo, full_mag_ammo_weight
 
 TIEBREAK = 0.01
 
@@ -108,13 +108,10 @@ EVO_ERGO_ERGO_ANCHORS = [30, 55, 80, 105, 130, 155]
 # stops moving), repeats a k I've already tried, or the shared deadline hits.
 MAX_EVO_ERGO_REFINE_ITERS = 3
 
-# stats.py's KG(E) overswing-threshold curve: KG = KG_A*E^2 + KG_B*E + KG_C.
-# Must stay in sync with _compute_stats() there - this is a re-derivation for
-# the MILP's linear tangent-cut approximation, not an independent formula.
-KG_A, KG_B, KG_C = 0.0007556, 0.02736, 2.9159
+# KG_A/KG_B/KG_C (stats.py's KG(E) overswing-threshold curve) and MOA_K (its
+# accuracy_moa formula) are imported from stats.py above, not re-typed here - this
+# module's tangent-cut approximation must stay derived from the exact same curve.
 
-# stats.py's accuracy_moa formula: MOA = MOA_K * COI * (1 - total_accuracy_mod/100).
-MOA_K = 34.36
 # Safe upper bound on the per-candidate-barrel MOA gate terms below - real
 # values (COI a few units, accuracy mods a few hundred percent at most) stay
 # well under this, mirroring the reference optimizer's own big-M choice.
@@ -618,7 +615,7 @@ def _evo_ergo_objective(k, item_ids, idx, mods, prices, params, solve_stats=None
 def _evo_ergo_k_for_anchor(ergo_anchor, equip_ergo_modifier):
     b = equip_ergo_modifier
     E0 = ergo_anchor * (1 + b)
-    kg_prime = 0.0015112 * E0 + 0.02736  # d/dE of stats.py's KG(E) = 0.0007556*E^2 + 0.02736*E + 2.9159
+    kg_prime = 2 * KG_A * E0 + KG_B  # d/dE of stats.py's KG(E) = KG_A*E^2 + KG_B*E + KG_C
     return 15 * kg_prime * (1 + b)  # chain rule through E = ergo*(1+b)
 
 
