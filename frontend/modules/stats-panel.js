@@ -947,7 +947,7 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
     <div class="stats-section">
       <div class="section-title stats-title-row">
         <span>${t("stats.title")}</span>
-        <button class="hidden-stats-btn${EFTForge.state.hiddenStatsOpen ? " open" : ""}" id="hidden-stats-btn" data-tooltip="${t("hidden.tooltip")}"><span class="hidden-stats-label">${t("hidden.title")}</span><span class="hidden-stats-arrow">&#9654;</span></button>
+        <button class="hidden-stats-btn${EFTForge.state.hiddenStatsOpen ? " open" : ""}" id="hidden-stats-btn" data-tooltip="${t("hidden.tooltip")}"><span class="hidden-stats-label">${t("hidden.title")}</span><span class="hidden-stats-arrow">&#9656;</span></button>
       </div>
 
       <div class="stat-bar-row">

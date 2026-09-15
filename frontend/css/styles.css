@@ -1306,7 +1306,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
 }
 
 .hidden-stats-arrow {
-  font-size: 8px;
+  font-size: 14px;
   color: #666;
   transition: transform 0.2s, color 0.15s;
   display: inline-block;
