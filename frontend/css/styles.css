@@ -5080,6 +5080,7 @@ body[data-mobile="true"] .gun-card.mid-build {
   align-items: flex-start;
   cursor: pointer;
   margin: 0 0 12px 0;
+  user-select: none;
 }
 
 .imggen-check-box-wrap {
@@ -7635,6 +7636,20 @@ button.build-tag-chip.active {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.beta-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: #f5c542;
+  border: 1px solid #f5c542;
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  letter-spacing: 1px;
+  vertical-align: middle;
+  opacity: 0.85;
+  display: inline-block;
 }
 
 /* Each constraint is a label row plus a detail slot that only fills in once the

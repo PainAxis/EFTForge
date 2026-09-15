@@ -790,8 +790,12 @@ window.EFTForge.optimizer = (function () {
     function _setUseEvoErgo(value) {
         _useEvoErgo = value;
         localStorage.setItem('eftforge-optimizer-use-evo-ergo', String(value));
-        document.getElementById('optimizer-evo-ergo-toggle')?.classList.toggle('active', value);
+        // Two toggles drive the same state: the weight section's (hidden while the
+        // Explore tab is active) and the Explore controls' own copy - keep both in
+        // sync regardless of which one is actually visible right now.
+        document.querySelectorAll('[data-evo-ergo-toggle]').forEach(el => el.classList.toggle('active', value));
         _renderWeightWidget();
+        _refreshExploreAxisOptions();
     }
 
     function _setFleaAvailable(value) {
@@ -1532,7 +1536,7 @@ window.EFTForge.optimizer = (function () {
                     <div class="optimizer-preset-add-row" id="optimizer-preset-add-row"></div>
                     <div class="optimizer-toggle-row">
                         <span class="stat-label">${_t('optimizer.useEvoErgo')}</span>
-                        <button type="button" class="compare-toggle${_useEvoErgo ? ' active' : ''}" id="optimizer-evo-ergo-toggle">
+                        <button type="button" class="compare-toggle${_useEvoErgo ? ' active' : ''}" id="optimizer-evo-ergo-toggle" data-evo-ergo-toggle>
                             <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
                         </button>
                     </div>
@@ -1737,6 +1741,30 @@ window.EFTForge.optimizer = (function () {
         else await _runSolve(`${EFTForge.config.API_BASE}/build/optimize`, body);
     }
 
+    // "price"/"recoil" tradeoffs plot Ergonomics against another stat - under
+    // the EvoErgo toggle that axis is true EED instead (see explore.py's
+    // solve()), so its label swaps too. "ergo" (Recoil vs. Price) never
+    // involves ergo/EED at all, so it's untouched either way.
+    function _exploreAxesLabel(tradeoff, useEvoErgo) {
+        const key = useEvoErgo && tradeoff !== 'ergo' ? `optimizer.exploreAxes.${tradeoff}Evo` : `optimizer.exploreAxes.${tradeoff}`;
+        return _t(key);
+    }
+
+    function _exploreAxisOptionsHtml() {
+        return ['price', 'recoil', 'ergo']
+            .map(axis => `<option value="${axis}" ${axis === _exploreTradeoff ? 'selected' : ''}>${_exploreAxesLabel(axis, _useEvoErgo)}</option>`)
+            .join('');
+    }
+
+    // Rebuilding the <select>'s options (rather than patching their text) lets
+    // the custom-select wrapper's own MutationObserver (see setupCustomSelect in
+    // app.js, which only watches childList on the <select>) pick up the label
+    // change on its own instead of needing to poke its private rebuild() here.
+    function _refreshExploreAxisOptions() {
+        const sel = document.getElementById('optimizer-explore-axis');
+        if (sel) sel.innerHTML = _exploreAxisOptionsHtml();
+    }
+
     function _renderExploreControls() {
         const pane = document.querySelector('.optimizer-config-pane');
         if (!pane) return;
@@ -1749,7 +1777,7 @@ window.EFTForge.optimizer = (function () {
             <p class="optimizer-explore-hint">${_t('optimizer.exploreHint')}</p>
             <label class="stat-label" for="optimizer-explore-axis">${_t('optimizer.exploreAxes')}</label>
             <select id="optimizer-explore-axis" class="optimizer-explore-native">
-                ${['price', 'recoil', 'ergo'].map(axis => `<option value="${axis}" ${axis === _exploreTradeoff ? 'selected' : ''}>${_t('optimizer.exploreAxes.' + axis)}</option>`).join('')}
+                ${_exploreAxisOptionsHtml()}
             </select>
             <label class="stat-label" for="optimizer-explore-steps" data-tooltip="${_escape(_t('optimizer.exploreResolutionTip'))}">${_t('optimizer.exploreResolution')}</label>
             <div class="optimizer-constraint-slider-row">
@@ -1758,6 +1786,12 @@ window.EFTForge.optimizer = (function () {
                     <div class="optimizer-slider-ticks"><span>10</span><span>81</span></div>
                 </div>
                 <input id="optimizer-explore-steps-number" class="optimizer-input" type="number" min="10" max="81" step="1" required value="${_exploreSteps}" aria-label="${_escape(_t('optimizer.exploreResolution'))}">
+            </div>
+            <div class="optimizer-toggle-row">
+                <span class="stat-label" data-tooltip="${_escape(_t('optimizer.evoErgoBetaTip'))}">${_t('optimizer.useEvoErgo')}<span class="beta-badge">${_t('optimizer.evoErgoBetaBadge')}</span></span>
+                <button type="button" class="compare-toggle${_useEvoErgo ? ' active' : ''}" id="optimizer-explore-evo-ergo-toggle" data-evo-ergo-toggle>
+                    <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
+                </button>
             </div>
         `;
         pane.prepend(controls);
@@ -1779,6 +1813,7 @@ window.EFTForge.optimizer = (function () {
         };
         range.addEventListener('input', syncSteps);
         number.addEventListener('input', syncSteps);
+        document.getElementById('optimizer-explore-evo-ergo-toggle').addEventListener('click', () => _setUseEvoErgo(!_useEvoErgo));
     }
 
     // Coalesces bursts of progress events (a trivial weapon can solve a step in
@@ -1794,14 +1829,18 @@ window.EFTForge.optimizer = (function () {
     }
 
     async function _solveExplore(body) {
-        delete body.use_evo_ergo;
+        // use_evo_ergo stays - see explore.py's solve(), it only ever changes how
+        // the "max ergo" boundary point is picked. The weight sliders themselves
+        // don't apply to Explore's per-axis sweep, so those stay stripped.
         delete body.ergo_weight;
         delete body.recoil_weight;
         delete body.price_weight;
         Object.assign(body, { tradeoff: _exploreTradeoff, steps: _exploreSteps });
         _explore = null;
         _exploreSelected = 0;
-        _solveProgress = { phase: null, done: 0, total: _exploreSteps + 1, points: [], previewBuild: null };
+        _solveProgress = {
+            phase: null, done: 0, total: _exploreSteps + 1, points: [], previewBuild: null, use_evo_ergo: body.use_evo_ergo,
+        };
         const controller = new AbortController();
         _abortController = controller;
         const signal = controller.signal;
@@ -1832,6 +1871,7 @@ window.EFTForge.optimizer = (function () {
                             total: ev.total,
                             points: forChart ? [..._solveProgress.points, ev.point] : _solveProgress.points,
                             previewBuild: ev.point ? ev.point.build : _solveProgress.previewBuild,
+                            use_evo_ergo: body.use_evo_ergo,
                         };
                         _scheduleSolveRender();
                     }, () => {
@@ -1877,8 +1917,10 @@ window.EFTForge.optimizer = (function () {
         }
     }
 
-    function _explorePointLabel(p, i) {
-        return `${i + 1} · ${_t('optimizer.ergonomics')} ${p.ergo} · ${_t('optimizer.recoil')} ${p.recoil_v} · ${_formatPrice(p.price)}`;
+    function _explorePointLabel(p, i, useEvoErgo) {
+        const ergoLabel = useEvoErgo ? _t('optimizer.evoErgoShort') : _t('optimizer.ergonomics');
+        const ergoValue = useEvoErgo ? p.eed : p.ergo;
+        return `${i + 1} · ${ergoLabel} ${ergoValue} · ${_t('optimizer.recoil')} ${p.recoil_v} · ${_formatPrice(p.price)}`;
     }
 
     // Builds just the <svg> markup for the solved-builds chart, driven by
@@ -1888,9 +1930,10 @@ window.EFTForge.optimizer = (function () {
     // tick/lerp frame would be wasteful and would tear down an open dropdown.
     function _buildExploreSvgMarkup() {
         const { points, tradeoff } = _explore;
-        const xKey = tradeoff === 'ergo' ? 'recoil_v' : 'ergo';
+        const useEvoErgo = !!_explore.request?.use_evo_ergo && tradeoff !== 'ergo';
+        const xKey = tradeoff === 'ergo' ? 'recoil_v' : (useEvoErgo ? 'eed' : 'ergo');
         const yKey = tradeoff === 'price' ? 'recoil_v' : 'price';
-        const xLabel = _t(xKey === 'ergo' ? 'optimizer.ergonomics' : 'optimizer.recoil');
+        const xLabel = xKey === 'recoil_v' ? _t('optimizer.recoil') : _t(useEvoErgo ? 'optimizer.evoErgoShort' : 'optimizer.ergonomics');
         const yLabel = _t(yKey === 'price' ? 'optimizer.price' : 'optimizer.recoil');
         const xs = points.map(p => p[xKey]), ys = points.map(p => p[yKey]);
         const minX = Math.min(...xs), minY = Math.min(...ys);
@@ -1907,7 +1950,7 @@ window.EFTForge.optimizer = (function () {
         const px = p => mapX(p[xKey]);
         const py = p => mapY(p[yKey]);
         const fmt = (v, key) => key === 'price' ? _formatPrice(v) : String(Math.round(v));
-        const pointLabel = _explorePointLabel;
+        const pointLabel = (p, i) => _explorePointLabel(p, i, useEvoErgo);
         const pointTooltipHtml = p => {
             const s = p.build?.final_stats;
             if (!s) return null;
@@ -1996,7 +2039,7 @@ window.EFTForge.optimizer = (function () {
                         </g>`;
                     }).join('')}`;
         const svg = `
-            <svg viewBox="0 0 610 300" role="group" aria-label="${_escape(_t('optimizer.exploreAxes.' + tradeoff))}">
+            <svg viewBox="0 0 610 300" role="group" aria-label="${_escape(_exploreAxesLabel(tradeoff, useEvoErgo))}">
                 <defs><clipPath id="optimizer-explore-clip"><rect x="${ML}" y="${MT}" width="${PW}" height="${PH}"/></clipPath></defs>
                 ${easterEgg ? '' : `${ticks}<text x="78" y="18">${_escape(yLabel)}</text><text x="323" y="293" text-anchor="middle">${_escape(xLabel)}</text>`}
                 <g${clipAttr}>
@@ -2054,13 +2097,14 @@ window.EFTForge.optimizer = (function () {
         _exploreViewTarget = null;
         if (_exploreZoomLerpRaf) { cancelAnimationFrame(_exploreZoomLerpRaf); _exploreZoomLerpRaf = null; }
 
-        const { points, complete } = _explore;
+        const { points, complete, tradeoff } = _explore;
+        const useEvoErgo = !!_explore.request?.use_evo_ergo && tradeoff !== 'ergo';
         const ctx = _buildExploreSvgMarkup();
         const chart = document.createElement('div');
         chart.className = 'optimizer-explore-chart';
         chart.innerHTML = `
             <div class="optimizer-section-title">${_t('optimizer.exploreChartTitle')}</div>
-            <p class="optimizer-explore-hint">${_t('optimizer.exploreSelectHint')}</p>
+            <p class="optimizer-explore-hint">${_t(useEvoErgo ? 'optimizer.exploreSelectHintEvo' : 'optimizer.exploreSelectHint')}</p>
             <p class="optimizer-explore-hint optimizer-explore-zoom-hint">${_t('graph.hintScroll')} · ${_t('graph.hintPan')} · ${_t('graph.hintBoxZoom')} · ${_t('graph.hintReset')}</p>
             ${!complete ? `<p class="optimizer-explore-partial">${_t('optimizer.explorePartial')}</p>` : ''}
             <div class="optimizer-explore-svg-wrap">${ctx.svg}</div>
@@ -2410,12 +2454,12 @@ window.EFTForge.optimizer = (function () {
         return ticks;
     }
 
-    function _buildLiveChartSkeleton(tradeoff, xLabel, yLabel) {
+    function _buildLiveChartSkeleton(ariaLabel, xLabel, yLabel) {
         const chart = document.createElement('div');
         chart.className = 'optimizer-explore-chart';
         chart.innerHTML = `
             <div class="optimizer-section-title">${_t('optimizer.exploreChartTitle')}</div>
-            <svg viewBox="0 0 610 300" role="img" aria-label="${_escape(_t('optimizer.exploreAxes.' + tradeoff))}">
+            <svg viewBox="0 0 610 300" role="img" aria-label="${_escape(ariaLabel)}">
                 <g class="optimizer-explore-live-ticks"></g>
                 <text x="78" y="18">${_escape(yLabel)}</text><text x="323" y="293" text-anchor="middle">${_escape(xLabel)}</text>
                 <polyline class="optimizer-explore-line" points=""/>
@@ -2490,15 +2534,16 @@ window.EFTForge.optimizer = (function () {
         const mergedBody = container.querySelector('#optimizer-explore-merged-body');
         if (!mergedBody) return;
 
-        const xKey = tradeoff === 'ergo' ? 'recoil_v' : 'ergo';
+        const useEvoErgo = !!_solveProgress?.use_evo_ergo && tradeoff !== 'ergo';
+        const xKey = tradeoff === 'ergo' ? 'recoil_v' : (useEvoErgo ? 'eed' : 'ergo');
         const yKey = tradeoff === 'price' ? 'recoil_v' : 'price';
         const targetDomain = _computeChartDomain(points, xKey, yKey);
 
         let chart = mergedBody.querySelector('.optimizer-explore-chart');
         if (!chart) {
-            const xLabel = _t(xKey === 'ergo' ? 'optimizer.ergonomics' : 'optimizer.recoil');
+            const xLabel = xKey === 'recoil_v' ? _t('optimizer.recoil') : _t(useEvoErgo ? 'optimizer.evoErgoShort' : 'optimizer.ergonomics');
             const yLabel = _t(yKey === 'price' ? 'optimizer.price' : 'optimizer.recoil');
-            chart = _buildLiveChartSkeleton(tradeoff, xLabel, yLabel);
+            chart = _buildLiveChartSkeleton(_exploreAxesLabel(tradeoff, useEvoErgo), xLabel, yLabel);
             mergedBody.prepend(chart);
             // Snap straight to the first cluster - only domain changes *after*
             // this first paint animate.

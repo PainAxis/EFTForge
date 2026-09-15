@@ -41,6 +41,13 @@ from optimizer.milp import build_and_solve, compute_stat_ranges as _milp_stat_ra
 class OptimizeParams:
     max_price: Optional[float] = None
     min_ergonomics: Optional[float] = None
+    # Explore-internal only (see explore.py's solve()) - not part of any public
+    # request model. Hard-floors true (weight-adjusted, quadratic) EED via
+    # milp.py's _solve_with_min_eed, the same lazy tangent-cut technique
+    # prevent_overswing uses, instead of min_ergonomics's plain linear sum.
+    # Lets Explore's EvoErgo toggle pick the right build for every point on the
+    # curve, not just its "max ergo" boundary.
+    min_eed: Optional[float] = None
     max_recoil_v: Optional[float] = None
     max_recoil_sum: Optional[float] = None  # vertical + horizontal combined - used by Gunsmith tasks
     max_weight: Optional[float] = None

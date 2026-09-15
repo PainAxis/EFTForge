@@ -268,7 +268,7 @@ def _lp_stat_range(cb, n, coeffs):
 
 
 def _add_overswing_cut_at(
-    cb, idx, mods, item_ids, base_ergo, base_weight, equip_ergo_modifier, anchor_ergo, solve_stats=None
+    cb, idx, mods, item_ids, base_ergo, base_weight, equip_ergo_modifier, anchor_ergo, solve_stats=None, shift=0.0
 ):
     """Adds one linear tangent-line cut - total_weight <= KG(effective_ergo)'s
     tangent at anchor_ergo - hard-constraining out exactly the build that sits
@@ -279,6 +279,12 @@ def _add_overswing_cut_at(
     through) local bound. See _solve_avoiding_overswing for why this is
     called with one fresh anchor per rejected solve rather than a fixed grid
     of anchors ANDed together up front.
+
+    shift raises the bar above plain "never overswing": weight <= KG(ergo) -
+    shift is what stats.py's EED formula (eed = 15*(KG(ergo) - weight)) calls
+    "eed >= 15*shift", so _solve_with_min_eed reuses this exact tangent with
+    shift = min_eed/15 to hard-floor true EED instead of just forbidding
+    overswing (shift=0, the default, reproduces the plain overswing cut).
     """
     b = equip_ergo_modifier
     e0 = anchor_ergo * (1 + b)
@@ -289,7 +295,7 @@ def _add_overswing_cut_at(
         - slope * (mods[i].ergonomics_modifier or 0)
         for i in item_ids
     }
-    rhs = kg0 + slope * (base_ergo - anchor_ergo) - base_weight
+    rhs = kg0 + slope * (base_ergo - anchor_ergo) - base_weight - shift
     cb.le(coeffs, rhs)
 
 
@@ -908,6 +914,96 @@ def _solve_avoiding_overswing(
     )
 
 
+def _solve_with_min_eed(
+    c,
+    cb,
+    n,
+    item_ids,
+    idx,
+    weapon,
+    mods,
+    item_to_valid_slots,
+    prices,
+    base_ergo,
+    base_weight,
+    equip_ergo_modifier,
+    strength_level,
+    min_eed,
+    deadline=None,
+    extra_bounds=(100.0,),
+    solve_stats=None,
+):
+    """Same contract and same lazy-cutting-plane technique as
+    _solve_avoiding_overswing (min_eed=0 there is exactly "never overswing"),
+    generalized to hard-floor true (quadratic) EED - stats.py's
+    evo_ergo_delta - at min_eed instead. Explore's per-point sweep uses this
+    when its EvoErgo toggle is on, so the build picked for each point on the
+    curve is the one that actually clears that point's EED tier, not just its
+    raw ergonomics sum - a heavy high-ergo part can't stand in for a light
+    one anymore.
+
+    Solves once, checks the result's true EED, and - only if it falls short -
+    adds one new tangent cut anchored exactly at that build's own total_ergo
+    (see _add_overswing_cut_at's shift parameter) and retries. Each cut only
+    ever excludes builds already proven to fall short, so this can't reject a
+    build that genuinely clears the floor - same soundness argument as the
+    overswing case, just shifted.
+    """
+    attempts = []
+    for _ in range(MAX_OVERSWING_CUT_ITERS):
+        result = _solve_once(
+            c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices, deadline=deadline, extra_bounds=extra_bounds
+        )
+        attempts.append(result)
+        if result["status"] not in ("optimal", "feasible"):
+            result["metrics"] = _aggregate_attempt_metrics(attempts)
+            return result
+        stats = (
+            solve_stats.compute(result["selected_items"])
+            if solve_stats
+            else _compute_stats(weapon, result["selected_items"], mods, strength_level, equip_ergo_modifier)
+        )
+        if stats["evo_ergo_delta"] >= min_eed:
+            incomplete = any(attempt["status"] != "optimal" for attempt in attempts)
+            if incomplete:
+                result = {**result}
+                result["status"] = "feasible"
+                result["reason"] = (
+                    "At least one EED-floor solve reached a limit; showing the best feasible build found."
+                )
+                result["termination"] = {
+                    "solver_status_code": 1,
+                    "solver_message": "EED-floor solve incomplete.",
+                    "attempts": [attempt.get("termination", {}) for attempt in attempts],
+                }
+            result["metrics"] = _aggregate_attempt_metrics(attempts)
+            return result
+        selected_ergo = base_ergo + sum((mods[i].ergonomics_modifier or 0) for i in result["selected_items"])
+        _add_overswing_cut_at(
+            cb,
+            idx,
+            mods,
+            item_ids,
+            base_ergo,
+            base_weight,
+            equip_ergo_modifier,
+            selected_ergo,
+            solve_stats,
+            shift=min_eed / 15.0,
+        )
+    reason = "EED-floor constraint cut iteration limit reached before finding a feasible build."
+    return _empty_result(
+        "error",
+        reason,
+        {
+            "solver_status_code": 4,
+            "solver_message": reason,
+            "attempts": [attempt.get("termination", {}) for attempt in attempts],
+        },
+        _aggregate_attempt_metrics(attempts),
+    )
+
+
 # --- Tchebycheff ("Sweet Spot") scalarization ---
 # See OptimizeParams.use_tchebycheff's docstring (solver.py) for why this
 # exists: a fixed per-unit exchange rate lets one item's outsized single-axis
@@ -1235,7 +1331,31 @@ def build_and_solve(
             if objective_axis
             else _weighted_objective(item_ids, idx, mods, prices, params)
         )
-        if params.prevent_overswing:
+        if params.min_eed is not None:
+            # min_eed (Explore-internal, see explore.py) and prevent_overswing both
+            # ultimately floor the same true-EED curve, just at different levels
+            # (prevent_overswing is exactly "eed >= 0") - take whichever floor is
+            # higher rather than running two separate cutting-plane loops.
+            floor = max(params.min_eed, 0.0) if params.prevent_overswing else params.min_eed
+            result = _solve_with_min_eed(
+                c,
+                cb,
+                n,
+                item_ids,
+                idx,
+                weapon,
+                mods,
+                item_to_valid_slots,
+                prices,
+                base_ergo,
+                base_weight,
+                params.equip_ergo_modifier,
+                params.strength_level,
+                floor,
+                deadline=deadline,
+                solve_stats=solve_stats,
+            )
+        elif params.prevent_overswing:
             result = _solve_avoiding_overswing(
                 c,
                 cb,
