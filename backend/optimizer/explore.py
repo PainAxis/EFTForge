@@ -7,6 +7,51 @@ from optimizer.solver import OptimizeParams, optimize_weapon
 
 EXPLORE_TIME_LIMIT_SECONDS = 30
 
+
+def _diagnose_empty_explore(db, weapon_id, params, failures, deadline):
+    # Preserve proven pre-check failures before spending time on extra solves.
+    for failure in failures:
+        if failure.get("reason_details") or failure.get("reason_key") not in (None, "optimizer.infeasible"):
+            return {k: failure[k] for k in ("reason", "reason_details", "reason_key", "reason_params") if k in failure}
+
+    limits = {
+        name: None
+        for name in (
+            "max_price",
+            "min_ergonomics",
+            "max_ergonomics",
+            "max_recoil_v",
+            "max_recoil_sum",
+            "max_weight",
+            "min_mag_capacity",
+            "min_sighting_range",
+            "max_moa",
+        )
+        if getattr(params, name) is not None
+    }
+    if params.prevent_overswing:
+        limits["prevent_overswing"] = False
+    probes = [({name: value}, name) for name, value in limits.items()]
+    if len(limits) > 1:
+        probes.append((limits, "combinedStats"))
+    diagnostic_solve_count = 0
+    for overrides, label in probes:
+        if time.perf_counter() >= deadline:
+            break
+        # Share the curve's deadline and only report a relaxation backed by a build.
+        result = optimize_weapon(db, weapon_id, replace(params, **overrides), deadline=deadline, objective_axis="price")
+        diagnostic_solve_count += 1
+        if result["status"] in ("optimal", "feasible") and result.get("final_stats"):
+            return {
+                "reason_key": f"optimizer.reason.relax.{label}",
+                "diagnostic_solve_count": diagnostic_solve_count,
+            }
+    return {
+        "reason_key": "optimizer.reason.constraintsConflict",
+        "diagnostic_solve_count": diagnostic_solve_count,
+    }
+
+
 # How many ergo points below the true achievable max to search for a
 # materially better recoil/price trade at the sweep's ergo-max boundary.
 # Tarkov mod stats are chunky, not continuous, so the single item combo that
@@ -78,7 +123,7 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
     # use_evo_ergo branch below, which is the only call that ever pays for it.
     use_evo_ergo = params.use_evo_ergo
     params = replace(params, use_evo_ergo=False, use_tchebycheff=False)
-    points, attempts = [], []
+    points, attempts, failures = [], [], []
     completed = True
     done_calls = 0
     total_calls = steps + 1  # 2 boundary solves + (steps - 1) sweep solves
@@ -102,6 +147,8 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
                 db, weapon_id, replace(params, **overrides), deadline=deadline, objective_axis=axis
             )
         attempts.append(result["status"])
+        if result["status"] == "infeasible" and not overrides:
+            failures.append(result)
         if result["status"] not in ("optimal", "infeasible"):
             completed = False
         if result["status"] not in ("optimal", "feasible") or not result.get("final_stats"):
@@ -229,6 +276,9 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
     if not low or not high:
         completed = completed and bool(attempts) and all(s == "infeasible" for s in attempts)
     frontier = frontier_points(points, tradeoff, use_evo_ergo)
+    diagnosis = {}
+    if not frontier and failures:
+        diagnosis = _diagnose_empty_explore(db, weapon_id, params, failures, deadline)
     yield {
         "type": "result",
         "data": {
@@ -240,6 +290,7 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
             "status": "complete" if completed and frontier else "infeasible" if completed else "partial",
             "solve_count": len(attempts),
             "processing_ms": round((time.perf_counter() - started) * 1000, 3),
+            **diagnosis,
         },
     }
 

@@ -2377,7 +2377,9 @@ window.EFTForge.optimizer = (function () {
                 _explore = { ...data, request: body };
                 _exploreJustSolved = true;
                 _result = data.points[0]?.build || null;
-                if (!_result) _error = _t(data.complete ? 'optimizer.infeasible' : 'optimizer.exploreNoPoints');
+                if (!_result) _error = data.reason_details || data.reason_key || data.reason
+                    ? _formatReason(data)
+                    : _t(data.complete ? 'optimizer.infeasible' : 'optimizer.exploreNoPoints');
                 break;
             }
         } catch (err) {

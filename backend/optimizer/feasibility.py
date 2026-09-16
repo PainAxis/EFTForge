@@ -16,7 +16,25 @@ def check_feasibility(weapon, mods: dict, candidate_ids: list, params) -> list |
 
     if params.include_items:
         for req_id in params.include_items:
-            if req_id not in available:
+            item = mods.get(req_id)
+            name = getattr(item, "name", None) or req_id
+            if req_id in (params.exclude_items or []):
+                reasons.append(
+                    {
+                        "text": f"Locked attachment {name} is also banned. Remove its lock or ban.",
+                        "key": "optimizer.reason.lockedItemBanned",
+                        "params": {"item": name},
+                    }
+                )
+            elif item and set((item.category_ids or "").split(",")) & set(params.exclude_categories or []):
+                reasons.append(
+                    {
+                        "text": f"Locked attachment {name} belongs to a banned category. Remove its lock or category ban.",
+                        "key": "optimizer.reason.lockedCategoryBanned",
+                        "params": {"item": name},
+                    }
+                )
+            elif req_id not in available:
                 reasons.append(
                     {
                         "text": f"Required item {req_id} is not available under the current filters",

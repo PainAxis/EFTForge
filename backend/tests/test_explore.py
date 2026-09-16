@@ -100,6 +100,60 @@ def test_constraints_and_filters_apply_to_every_sample(db):
     assert [p["build"]["selected_items"] for p in locked["points"]] == [["c"]]
 
 
+def test_empty_explore_explains_locked_and_banned_item(db):
+    result = explore_weapon(db, "gun", OptimizeParams(include_items=["a"], exclude_items=["a"]), steps=10)
+    assert result["status"] == "infeasible"
+    assert result["reason_details"] == [{"key": "optimizer.reason.lockedItemBanned", "params": {"item": "a"}}]
+
+
+def test_empty_explore_explains_locked_and_banned_category(db):
+    db.get(Item, "a").category_ids = "stocks"
+    db.commit()
+    result = explore_weapon(db, "gun", OptimizeParams(include_items=["a"], exclude_categories=["stocks"]), steps=10)
+    assert result["reason_details"][0]["key"] == "optimizer.reason.lockedCategoryBanned"
+
+
+@pytest.mark.parametrize(
+    "limits,reason",
+    [
+        ({"min_ergonomics": 60}, "min_ergonomics"),
+        ({"max_price": 50}, "max_price"),
+        ({"min_ergonomics": 45, "max_recoil_v": 60}, "min_ergonomics"),
+        ({"min_ergonomics": 60, "max_recoil_v": 10}, "combinedStats"),
+    ],
+)
+def test_empty_explore_diagnoses_stat_relaxations_without_returning_invalid_builds(db, limits, reason):
+    params = OptimizeParams(**limits)
+    result = explore_weapon(db, "gun", params, steps=10)
+    assert result["status"] == "infeasible"
+    assert result["points"] == []
+    assert result["reason_key"] == f"optimizer.reason.relax.{reason}"
+    assert result["diagnostic_solve_count"] > 0
+    for name, value in limits.items():
+        assert getattr(params, name) == value
+
+
+def test_empty_explore_preserves_precheck_reason(db):
+    result = explore_weapon(db, "gun", OptimizeParams(max_weight=1), steps=10)
+    assert result["reason_details"][0]["key"] == "optimizer.reason.baseWeightExceedsLimit"
+
+
+def test_diagnosis_does_not_treat_timeout_as_proof(db):
+    from optimizer.explore import _diagnose_empty_explore
+
+    with patch("optimizer.explore.time.perf_counter", return_value=0), patch(
+        "optimizer.explore.optimize_weapon", return_value={"status": "timeout"}
+    ) as solve:
+        result = _diagnose_empty_explore(db, "gun", OptimizeParams(min_ergonomics=60), [], 30)
+    assert result["reason_key"] == "optimizer.reason.constraintsConflict"
+    assert solve.call_args.kwargs["deadline"] == 30
+    with patch("optimizer.explore.time.perf_counter", return_value=30), patch(
+        "optimizer.explore.optimize_weapon"
+    ) as solve:
+        _diagnose_empty_explore(db, "gun", OptimizeParams(min_ergonomics=60), [], 30)
+    solve.assert_not_called()
+
+
 def test_min_ergonomics_still_enforced_with_evo_ergo_on(db):
     result = explore_weapon(db, "gun", OptimizeParams(min_ergonomics=35, use_evo_ergo=True), "price", 10)
     assert result["points"]
