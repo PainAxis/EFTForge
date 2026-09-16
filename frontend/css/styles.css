@@ -9502,6 +9502,22 @@ body[data-mobile="true"].mobile-publish-mode #left-build-area {
 .dev-out-error { color: #e05252; }
 .dev-out-dim   { color: #555; }
 
+.dev-ls-search {
+  display: block;
+  margin: 0 18px 8px;
+  width: calc(100% - 36px);
+  background: #141414;
+  border: 1px solid #222;
+  border-radius: 4px;
+  color: #ccc;
+  font-family: monospace;
+  font-size: 11px;
+  padding: 6px 10px;
+}
+.dev-ls-search:focus {
+  outline: none;
+  border-color: #f5c542;
+}
 .dev-ls-list {
   margin: 0 18px 14px;
   border: 1px solid #222;

@@ -123,38 +123,56 @@ window.EFTForge.optimizer = (function () {
     // (milp.py's _weighted_objective) only compares their ratio after scaling
     // each axis by its own price/recoil range, so this is purely a display
     // convention borrowed from the reference optimizer's ternary plot.
-    function _loadWeight(key, fallback) {
-        const stored = localStorage.getItem(key);
-        return stored === null ? fallback : Number(stored);
-    }
-    let _ergoWeight = _loadWeight('eftforge-optimizer-ergo-weight', 33);
-    let _recoilWeight = _loadWeight('eftforge-optimizer-recoil-weight', 34);
-    let _priceWeight = _loadWeight('eftforge-optimizer-price-weight', 33);
-    let _useEvoErgo = localStorage.getItem('eftforge-optimizer-use-evo-ergo') === 'true';
-    let _weightUiMode = localStorage.getItem('eftforge-optimizer-weight-ui') || 'triangle'; // 'triangle' | 'sliders'
-    let _fleaAvailable = localStorage.getItem('eftforge-optimizer-flea-available') !== 'false';
-    let _preventOverswing = localStorage.getItem('eftforge-optimizer-prevent-overswing') === 'true';
-    let _requireSuppressor = localStorage.getItem('eftforge-optimizer-require-suppressor') === 'true';
+    //
+    // Treat these (and every other knob below) as just the hardcoded fallback
+    // for a gun with nothing saved yet - overwrite them per-weapon on every
+    // panel render via _loadGunSettings() below. See the per-gun settings
+    // persistence block after _resetConstraintValues().
+    let _ergoWeight = 33;
+    let _recoilWeight = 34;
+    let _priceWeight = 33;
+    let _useEvoErgo = false;
+    let _weightUiMode = 'triangle'; // 'triangle' | 'sliders'
+    let _fleaAvailable = true;
+    let _preventOverswing = false;
+    let _requireSuppressor = false;
+
+    // One-time migration off the old hyphenated key names, which predate the
+    // eftforge_* convention the dev tools modal's localStorage list filters
+    // on (see _renderLsItems in app.js) - carry existing saved presets over
+    // instead of just dropping them on this rename.
+    (function _migrateHyphenatedOptimizerKeys() {
+        const renames = {
+            'eftforge-optimizer-custom-presets': 'eftforge_optimizer_custom_presets',
+            'eftforge-optimizer-filter-presets': 'eftforge_optimizer_filter_presets',
+        };
+        for (const [oldKey, newKey] of Object.entries(renames)) {
+            const old = localStorage.getItem(oldKey);
+            if (old === null) continue;
+            if (localStorage.getItem(newKey) === null) localStorage.setItem(newKey, old);
+            localStorage.removeItem(oldKey);
+        }
+    })();
 
     // User-defined weight presets, stored alongside (not merged into) the 7
     // built-in ones below. Each entry is {id, name, ergo, recoil, price}.
     function _loadCustomPresets() {
         try {
-            const parsed = JSON.parse(localStorage.getItem('eftforge-optimizer-custom-presets') || '[]');
+            const parsed = JSON.parse(localStorage.getItem('eftforge_optimizer_custom_presets') || '[]');
             return Array.isArray(parsed) ? parsed : [];
         } catch {
             return [];
         }
     }
     function _saveCustomPresets() {
-        localStorage.setItem('eftforge-optimizer-custom-presets', JSON.stringify(_customPresets));
+        localStorage.setItem('eftforge_optimizer_custom_presets', JSON.stringify(_customPresets));
     }
     let _customPresets = _loadCustomPresets();
     let _presetAddOpen = false;
 
     function _loadFilterPresets() {
         try {
-            const presets = JSON.parse(localStorage.getItem('eftforge-optimizer-filter-presets') || '[]');
+            const presets = JSON.parse(localStorage.getItem('eftforge_optimizer_filter_presets') || '[]');
             return Array.isArray(presets) ? presets.filter(p => p && typeof p.id === 'string'
                 && typeof p.name === 'string' && Array.isArray(p.locked) && Array.isArray(p.banned)
                 && [...p.locked, ...p.banned].every(item => item && typeof item.id === 'string')) : [];
@@ -165,7 +183,7 @@ window.EFTForge.optimizer = (function () {
     let _filterPresets = _loadFilterPresets();
 
     function _saveFilterPresets() {
-        localStorage.setItem('eftforge-optimizer-filter-presets', JSON.stringify(_filterPresets));
+        localStorage.setItem('eftforge_optimizer_filter_presets', JSON.stringify(_filterPresets));
     }
 
     // Mod Filter (GET /build/mods) - cached per weapon+lang so switching tabs
@@ -243,6 +261,9 @@ window.EFTForge.optimizer = (function () {
             void btn.offsetWidth; // restart the animation on rapid repeat clicks
             btn.classList.add('reset-pulse');
             onReset();
+            // Persist explicitly - stopPropagation above keeps this click from
+            // reaching the delegated save listener on #optimizer-tab-content.
+            _saveGunSettings();
         });
     }
 
@@ -822,10 +843,11 @@ window.EFTForge.optimizer = (function () {
         _ergoWeight = ergo;
         _recoilWeight = recoil;
         _priceWeight = price;
-        localStorage.setItem('eftforge-optimizer-ergo-weight', String(ergo));
-        localStorage.setItem('eftforge-optimizer-recoil-weight', String(recoil));
-        localStorage.setItem('eftforge-optimizer-price-weight', String(price));
         _updateWeightVisuals();
+        // Persist directly here - the ternary widget drags via window-level
+        // mousemove (_tpHandleMouseDown), which never bubbles through
+        // #optimizer-tab-content for the delegated save listener to catch.
+        _saveGunSettings();
     }
 
     function _updateWeightVisuals() {
@@ -943,7 +965,6 @@ window.EFTForge.optimizer = (function () {
     function _setWeightUiMode(mode) {
         if (mode === _weightUiMode) return;
         _weightUiMode = mode;
-        localStorage.setItem('eftforge-optimizer-weight-ui', mode);
         document.getElementById('optimizer-weight-ui-sliders-btn')?.classList.toggle('active', mode === 'sliders');
         document.getElementById('optimizer-weight-ui-triangle-btn')?.classList.toggle('active', mode === 'triangle');
         _renderWeightWidget();
@@ -951,7 +972,6 @@ window.EFTForge.optimizer = (function () {
 
     function _setUseEvoErgo(value) {
         _useEvoErgo = value;
-        localStorage.setItem('eftforge-optimizer-use-evo-ergo', String(value));
         // Two toggles drive the same state: the weight section's (hidden while the
         // Explore tab is active) and the Explore controls' own copy - keep both in
         // sync regardless of which one is actually visible right now.
@@ -963,7 +983,6 @@ window.EFTForge.optimizer = (function () {
 
     function _setFleaAvailable(value) {
         _fleaAvailable = value;
-        localStorage.setItem('eftforge-optimizer-flea-available', String(value));
         document.getElementById('optimizer-flea-toggle')?.classList.toggle('active', value);
         _refreshStatRanges();
     }
@@ -985,13 +1004,11 @@ window.EFTForge.optimizer = (function () {
 
     function _setPreventOverswing(value) {
         _preventOverswing = value;
-        localStorage.setItem('eftforge-optimizer-prevent-overswing', String(value));
         document.getElementById('optimizer-overswing-toggle')?.classList.toggle('active', value);
     }
 
     function _setRequireSuppressor(value) {
         _requireSuppressor = value;
-        localStorage.setItem('eftforge-optimizer-require-suppressor', String(value));
         document.getElementById('optimizer-suppressor-toggle')?.classList.toggle('active', value);
     }
 
@@ -1301,7 +1318,7 @@ window.EFTForge.optimizer = (function () {
     let _moaRange = null;            // { min, max } - GET /build/stat-ranges' fast/approximate moa range
     let _exactMoaFloor = null;       // number | null - GET /build/moa-floor result, fetched on demand
     let _fetchingMoaFloor = false;
-    let _useExactMoaFloor = localStorage.getItem('eftforge-optimizer-exact-moa-floor') !== 'false';
+    let _useExactMoaFloor = true;
     let _statRanges = null;          // { weaponId, ranges } - GET /build/stat-ranges response, cached per weapon
     let _statRangesPromise = null;
 
@@ -1313,25 +1330,104 @@ window.EFTForge.optimizer = (function () {
         _constraintState.maxSpread = { on: false, value: 0 };
     }
 
-    // Only persist the budget constraint across panel reopens - ergoRange/minMag/
-    // maxSpread stay session-only.
-    function _persistBudgetConstraint() {
-        localStorage.setItem('eftforge-optimizer-budget-on', String(_constraintState.budget.on));
-        localStorage.setItem('eftforge-optimizer-budget-value', String(_constraintState.budget.value));
+    /* ---------------------------
+       Per-gun settings persistence - save every optimizer knob (weights,
+       toggles, hard constraints, mod filters, Explore tradeoff/resolution)
+       keyed by the weapon it belongs to, so e.g. an M4A1's Min Mag stays at
+       30 the next time we pick this gun while some other gun opened in
+       between keeps its own independent values. Give a gun with no saved
+       entry the same hardcoded defaults it always used to get.
+
+       Save via a single delegated input/click/change listener on
+       #optimizer-tab-content (see _renderOptimizeTab) instead of a call at
+       every mutation site, so we can't silently miss a control - the one
+       exception is the ternary weight widget's drag, driven by window-level
+       mousemove that never bubbles through content, so _setWeights() below
+       calls this directly too.
+    --------------------------- */
+    const GUN_SETTINGS_KEY = 'eftforge_optimizer_settings_by_gun';
+
+    function _loadGunSettingsMap() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(GUN_SETTINGS_KEY) || '{}');
+            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch {
+            return {};
+        }
     }
 
-    function _loadPersistedBudget() {
-        _constraintState.budget.on = localStorage.getItem('eftforge-optimizer-budget-on') === 'true';
-        const storedValue = Number(localStorage.getItem('eftforge-optimizer-budget-value'));
-        if (!Number.isNaN(storedValue) && storedValue > 0) _constraintState.budget.value = storedValue;
+    function _saveGunSettings() {
+        const weaponId = window.EFTForge.state?.currentGun?.id;
+        if (!weaponId) return;
+        const map = _loadGunSettingsMap();
+        map[weaponId] = {
+            ergoWeight: _ergoWeight,
+            recoilWeight: _recoilWeight,
+            priceWeight: _priceWeight,
+            useEvoErgo: _useEvoErgo,
+            weightUiMode: _weightUiMode,
+            fleaAvailable: _fleaAvailable,
+            preventOverswing: _preventOverswing,
+            requireSuppressor: _requireSuppressor,
+            useExactMoaFloor: _useExactMoaFloor,
+            constraintState: _constraintState,
+            includedModIds: _includedModIds,
+            excludedModIds: _excludedModIds,
+            exploreTradeoff: _exploreTradeoff,
+            exploreSteps: _exploreSteps,
+        };
+        localStorage.setItem(GUN_SETTINGS_KEY, JSON.stringify(map));
     }
 
-    // Full reset for opening the panel on a (possibly different) weapon -
-    // also drops the cached per-weapon ranges, unlike _resetConstraintValues()
-    // which the "reset section" button uses (same weapon, no need to refetch).
-    function _resetConstraintState() {
+    // Resets every optimizer setting to its default, then overlays whatever
+    // was previously saved for weaponId - a gun that's never been touched
+    // just keeps the defaults (clean slate).
+    function _loadGunSettings(weaponId) {
         _resetConstraintValues();
-        _loadPersistedBudget();
+        _ergoWeight = 33;
+        _recoilWeight = 34;
+        _priceWeight = 33;
+        _useEvoErgo = false;
+        _weightUiMode = 'triangle';
+        _fleaAvailable = true;
+        _preventOverswing = false;
+        _requireSuppressor = false;
+        _useExactMoaFloor = true;
+        _includedModIds = [];
+        _excludedModIds = [];
+        _defaultBanExceptions.clear();
+        _exploreTradeoff = 'price';
+        _exploreSteps = 20;
+
+        const saved = weaponId ? _loadGunSettingsMap()[weaponId] : null;
+        if (!saved) return;
+        if (typeof saved.ergoWeight === 'number') _ergoWeight = saved.ergoWeight;
+        if (typeof saved.recoilWeight === 'number') _recoilWeight = saved.recoilWeight;
+        if (typeof saved.priceWeight === 'number') _priceWeight = saved.priceWeight;
+        if (typeof saved.useEvoErgo === 'boolean') _useEvoErgo = saved.useEvoErgo;
+        if (saved.weightUiMode === 'sliders' || saved.weightUiMode === 'triangle') _weightUiMode = saved.weightUiMode;
+        if (typeof saved.fleaAvailable === 'boolean') _fleaAvailable = saved.fleaAvailable;
+        if (typeof saved.preventOverswing === 'boolean') _preventOverswing = saved.preventOverswing;
+        if (typeof saved.requireSuppressor === 'boolean') _requireSuppressor = saved.requireSuppressor;
+        if (typeof saved.useExactMoaFloor === 'boolean') _useExactMoaFloor = saved.useExactMoaFloor;
+        if (saved.constraintState && typeof saved.constraintState === 'object') {
+            for (const key of Object.keys(_constraintState)) {
+                const s = saved.constraintState[key];
+                if (s && typeof s === 'object') Object.assign(_constraintState[key], s);
+            }
+        }
+        if (Array.isArray(saved.includedModIds)) _includedModIds = saved.includedModIds.filter(id => typeof id === 'string');
+        if (Array.isArray(saved.excludedModIds)) _excludedModIds = saved.excludedModIds.filter(id => typeof id === 'string');
+        if (saved.exploreTradeoff === 'price' || saved.exploreTradeoff === 'recoil' || saved.exploreTradeoff === 'ergo') {
+            _exploreTradeoff = saved.exploreTradeoff;
+        }
+        if (typeof saved.exploreSteps === 'number') _exploreSteps = saved.exploreSteps;
+    }
+
+    // Drops the cached per-weapon ranges (mag capacities, MOA floor) so they
+    // get refetched for whatever gun the panel is now open on - unrelated to
+    // the saved settings values themselves, which _loadGunSettings() handles.
+    function _resetRangeCaches() {
         _magCapacityValues = null;
         _moaRange = null;
         _exactMoaFloor = null;
@@ -1696,7 +1792,6 @@ window.EFTForge.optimizer = (function () {
         exactFloorToggle?.addEventListener('click', () => {
             const value = !_useExactMoaFloor;
             _useExactMoaFloor = value;
-            localStorage.setItem('eftforge-optimizer-exact-moa-floor', String(value));
             exactFloorToggle.classList.toggle('active', value);
             if (value && _exactMoaFloor == null) _fetchExactMoaFloor();
             else _renderMoaSliderWrap(detail);
@@ -1708,7 +1803,6 @@ window.EFTForge.optimizer = (function () {
         const def = CONSTRAINT_DEFS.find(d => d.key === key);
         const state = _constraintState[key];
         state.value = Math.min(def.max, Math.max(def.min, value));
-        if (key === 'budget') _persistBudgetConstraint();
         const row = document.querySelector(`[data-constraint-slider="${key}"]`);
         if (!row) return;
         const [range, number] = row.querySelectorAll('input');
@@ -1753,7 +1847,6 @@ window.EFTForge.optimizer = (function () {
                 toggle.classList.toggle('active', on);
                 detail.innerHTML = _plainConstraintDetailHtml(def);
                 _wirePlainConstraintDetail(def, detail);
-                if (def.key === 'budget') _persistBudgetConstraint();
             });
             _wirePlainConstraintDetail(def, detail);
         }
@@ -1801,32 +1894,30 @@ window.EFTForge.optimizer = (function () {
         const content = document.getElementById('optimizer-tab-content');
         if (!content) return;
 
-        // Reload every persisted Weight Adjustment setting from localStorage on
-        // each panel open instead of resetting to a hardcoded default - weights,
-        // evo ergo, prevent overswing, require suppressor and flea availability
-        // (plus the budget constraint, via _resetConstraintState -> _loadPersistedBudget
-        // below) all survive a panel close/reopen this way.
-        _ergoWeight = _loadWeight('eftforge-optimizer-ergo-weight', 33);
-        _recoilWeight = _loadWeight('eftforge-optimizer-recoil-weight', 34);
-        _priceWeight = _loadWeight('eftforge-optimizer-price-weight', 33);
-        _useEvoErgo = localStorage.getItem('eftforge-optimizer-use-evo-ergo') === 'true';
-        _fleaAvailable = localStorage.getItem('eftforge-optimizer-flea-available') !== 'false';
-        _preventOverswing = localStorage.getItem('eftforge-optimizer-prevent-overswing') === 'true';
-        _requireSuppressor = localStorage.getItem('eftforge-optimizer-require-suppressor') === 'true';
         _customPresets = _loadCustomPresets();
         _filterPresets = _loadFilterPresets();
         _presetAddOpen = false;
         const settingsWeaponId = window.EFTForge.state?.currentGun?.id;
+        // Reload every setting saved for this specific weapon on each panel
+        // open instead of resetting to a hardcoded default - see the per-gun
+        // settings persistence block above _resetRangeCaches().
         if (!preserveSettings || _settingsWeaponId !== settingsWeaponId) {
-            _resetConstraintState();
-            _includedModIds = [];
-            _excludedModIds = [];
-            _defaultBanExceptions.clear();
+            _loadGunSettings(settingsWeaponId);
+            _resetRangeCaches();
         }
         _settingsWeaponId = settingsWeaponId;
         _modSearch = '';
         _modCategoryFilter = '';
         _modFilterBodyRendered = false;
+
+        // Delegate the save: catch essentially every setting mutation (slider
+        // drags, toggles, presets, mod filter tiles/tags, Explore's axis/steps
+        // controls) via bubbling, instead of a call at each individual site.
+        // #optimizer-tab-content gets rebuilt from scratch on every _render()
+        // (see body.innerHTML above), so we never double-attach here.
+        content.addEventListener('input', () => _saveGunSettings());
+        content.addEventListener('click', () => _saveGunSettings());
+        content.addEventListener('change', () => _saveGunSettings());
         _pickerExpanded = false;
 
         const currentGun = window.EFTForge.state && window.EFTForge.state.currentGun;
@@ -1981,7 +2072,6 @@ window.EFTForge.optimizer = (function () {
             _setPreventOverswing(false);
             _setRequireSuppressor(false);
             _resetConstraintValues();
-            _persistBudgetConstraint();
             _renderConstraints();
         });
 
