@@ -235,9 +235,16 @@ def _save_last_sync_time(sync_time: datetime) -> None:
 #   - item.conflictingItems[].id       -> plain id strings
 #   - item.buyFor[]                    -> item.buyFromTrader[] (trader id, not vendor object)
 #   - Item.accuracyModifier (percent)  -> properties.accuracyModifier (fraction; x100 here)
-#   - cameraRecoil / convergence       -> absent (backfilled from SPT game files)
+#   - cameraRecoil                     -> absent (backfilled from SPT game files as RecoilCamera)
+#   - convergence                      -> removed from the game data entirely, always null
 JSON_API_BASE = "https://json.tarkov.dev"
 GAME_MODE = "regular"
+
+# Extra game modes whose flea markets are synced in addition to GAME_MODE, keyed by
+# our own internal mode name -> tarkov.dev's URL path segment for that mode. Trader
+# buy/sell prices don't vary by mode (verified against tarkov.dev's own data), so
+# only flea listings need this - see _sync_item_offers().
+EXTRA_FLEA_GAME_MODES = {"pve": "pve", "pvpSeason": "pvp-season"}
 
 EXCLUDED_VENDOR_NAMES = {"ragman", "ref", "fence", "flea-market"}
 
@@ -308,13 +315,39 @@ def _leaf_category_id(cat_ids, item_categories):
     return max(candidates, key=_depth)
 
 
-def _sync_item_offers(db, items_map, trader_norm_map):
+def _fetch_extra_flea_prices(mode_path):
+    """{item_id: {avg24hPrice, lastLowPrice, minLevelForFlea}} for a non-default game
+    mode. This JSON API has no price-only endpoint, so this pulls that mode's full
+    items dump just for its market-stats fields (mirroring _sync_item_offers's flea
+    synthesis below). Returns {} if the mode's data can't be fetched, so a hiccup
+    here just leaves that mode's items without a flea row instead of failing sync.
+    """
+    payload = _fetch_json_optional(f"{JSON_API_BASE}/{mode_path}/items", 60, f"{mode_path} items")
+    if not payload:
+        return {}
+    items = payload.get("data", {}).get("items") or {}
+    return {
+        iid: {
+            "avg24hPrice": it.get("avg24hPrice"),
+            "lastLowPrice": it.get("lastLowPrice"),
+            "minLevelForFlea": it.get("minLevelForFlea"),
+        }
+        for iid, it in items.items()
+    }
+
+
+def _sync_item_offers(db, items_map, trader_norm_map, extra_flea_prices):
     """Populate item_offers with every trader offer (all loyalty levels, no
     vendor exclusions - the optimizer needs Ref/Fence/Ragman available and
     filters them per-request instead) plus one synthesized flea-market row per
-    item, mirroring how the original optimizer's jsonApiAdapter.ts synthesizes
-    flea pricing from the same fields since this JSON API has no flea entry
-    inside buyFromTrader itself.
+    item per game mode, mirroring how the original optimizer's jsonApiAdapter.ts
+    synthesizes flea pricing from the same fields since this JSON API has no
+    flea entry inside buyFromTrader itself.
+
+    extra_flea_prices: EXTRA_FLEA_GAME_MODES keys -> _fetch_extra_flea_prices()
+    result for that mode. Trader offers are tagged game_mode=None (buy/sell prices
+    don't vary by mode) and built once from items_map's own GAME_MODE ("pvp") data;
+    flea rows are tagged per mode since flea listings genuinely do vary.
 
     Barter offers are skipped entirely - json.tarkov.dev doesn't expose them
     (only the old, currently-down GraphQL endpoint did).
@@ -335,15 +368,25 @@ def _sync_item_offers(db, items_map, trader_norm_map):
                     currency=offer.get("currency"),
                     price_rub=offer.get("priceRUB"),
                     is_flea=False,
+                    game_mode=None,
                 )
             )
 
-        # Flea: no dedicated field on this API, so synthesize one row from the
-        # market-stats fields already on the item (same approach the optimizer's
-        # own adapter uses). Prefer avg24hPrice; fall back to lastLowPrice for
-        # items with too little recent flea activity to have a 24h average.
-        flea_price = item.get("avg24hPrice") or item.get("lastLowPrice")
-        if flea_price:
+        # Flea: no dedicated field on this API, so synthesize one row per mode from
+        # the market-stats fields already on that mode's item payload (same approach
+        # the optimizer's own adapter uses). Prefer avg24hPrice; fall back to
+        # lastLowPrice for items with too little recent flea activity to have a 24h
+        # average. "pvp" reuses items_map's own fields (this sync's base payload);
+        # the other modes come from their own dumps fetched into extra_flea_prices.
+        flea_data_by_mode = {"pvp": item}
+        for mode_name in EXTRA_FLEA_GAME_MODES:
+            data = extra_flea_prices.get(mode_name, {}).get(item_id)
+            if data:
+                flea_data_by_mode[mode_name] = data
+        for mode_name, data in flea_data_by_mode.items():
+            flea_price = data.get("avg24hPrice") or data.get("lastLowPrice")
+            if not flea_price:
+                continue
             offer_rows.append(
                 ItemOffer(
                     item_id=item_id,
@@ -353,7 +396,8 @@ def _sync_item_offers(db, items_map, trader_norm_map):
                     currency="RUB",
                     price_rub=flea_price,
                     is_flea=True,
-                    min_level_flea=item.get("minLevelForFlea"),
+                    min_level_flea=data.get("minLevelForFlea"),
+                    game_mode=mode_name,
                 )
             )
 
@@ -422,7 +466,6 @@ def _sync_spt_hidden_stats(db):
         # Map: (db_column, _props_field)
         # tarkov.dev fields take priority - only fill if still null
         spt_fields = [
-            ("aim_sensitivity", "AimSensitivity"),
             ("cam_angle_step", "CameraToWeaponAngleStep"),
             ("mount_cam_snap", "MountCameraSnapMultiplier"),
             ("mount_h_rec", "MountHorizontalRecoilMultiplier"),
@@ -432,18 +475,27 @@ def _sync_spt_hidden_stats(db):
             ("rec_force_back", "RecoilForceBack"),
             ("rec_force_up", "RecoilForceUp"),
             ("rec_return_speed", "RecoilReturnSpeedHandRotation"),
+            ("recoil_damping_hand_rot", "RecoilDampingHandRotation"),
+            ("recoil_return_path_damping", "RecoilReturnPathDampingHandRotation"),
+            ("recoil_return_path_offset", "RecoilReturnPathOffsetHandRotation"),
+            ("recoil_stable_index_shot", "RecoilStableIndexShot"),
+            ("recoil_stable_angle_step", "RecoilStableAngleIncreaseStep"),
+            ("recoil_stable_angle", "RecoilStableAngle"),
+            ("recoil_pos_z_mult", "RecoilPosZMult"),
+            ("recoil_center_y", "RecoilCenterY"),
+            ("recoil_center_z", "RecoilCenterZ"),
             # tarkov.dev API fields - use SPT as fallback if null
             ("center_of_impact", "CenterOfImpact"),
-            ("camera_recoil", "CameraRecoil"),
-            ("convergence", "Convergence"),
+            # BSG renamed this field from CameraRecoil to RecoilCamera at some point;
+            # Convergence was removed from the game data entirely (replaced by the
+            # WeaponAimSettings curve system) and has no scalar equivalent anymore.
+            ("camera_recoil", "RecoilCamera"),
+            ("fire_rate", "bFirerate"),
         ]
 
         for db_col, spt_key in spt_fields:
             if getattr(weapon, db_col) is None and spt_key in props:
                 val = props[spt_key]
-                # AimSensitivity can be a nested array - take scalar only
-                if isinstance(val, list):
-                    val = val[0][0] if val and isinstance(val[0], list) else None
                 if val is not None:
                     setattr(weapon, db_col, val)
                     changed = True
@@ -564,6 +616,7 @@ def sync_items(sync_source: str = "scheduled"):
         camera_recoil = None
         convergence = None
         recoil_dispersion = None
+        fire_rate = None
         ammo_damage = None
         penetration_power = None
         armor_damage = None
@@ -622,10 +675,12 @@ def sync_items(sync_source: str = "scheduled"):
                 deviation_curve = properties.get("deviationCurve")
                 deviation_max = properties.get("deviationMax")
                 recoil_angle = properties.get("recoilAngle")
-                # cameraRecoil / convergence are not exposed by the JSON API; they are
-                # left null here and backfilled from SPT game files by
-                # _sync_spt_hidden_stats() below.
+                # cameraRecoil is not exposed by the JSON API; it is left null here
+                # and backfilled from SPT game files (as RecoilCamera) by
+                # _sync_spt_hidden_stats() below. convergence no longer exists in the
+                # game data at all, so it stays null permanently.
                 recoil_dispersion = properties.get("recoilDispersion")
+                fire_rate = properties.get("fireRate")
 
                 # Override weapons that tarkov.dev mis-categorizes or where the
                 # API parent category wins over what the game actually calls them.
@@ -809,6 +864,7 @@ def sync_items(sync_source: str = "scheduled"):
             camera_recoil=camera_recoil,
             convergence=convergence,
             recoil_dispersion=recoil_dispersion,
+            fire_rate=fire_rate,
             heat_factor=heat_factor,
             cooling_factor=cooling_factor,
             durability_burn_factor=durability_burn_factor,
@@ -974,8 +1030,13 @@ def sync_items(sync_source: str = "scheduled"):
     # stay a separate, simpler "cheapest eligible offer" view for every other
     # page - this table is additive, not a replacement.
     # ------------------------------------------
+    logger.info("Fetching PvE and Seasonal flea prices...")
+    extra_flea_prices = {mode: _fetch_extra_flea_prices(path) for mode, path in EXTRA_FLEA_GAME_MODES.items()}
+    for mode, prices in extra_flea_prices.items():
+        logger.info("%s flea prices fetched: %d", mode, len(prices))
+
     logger.info("Syncing full item offer list...")
-    _sync_item_offers(db, items_map, trader_norm_map)
+    _sync_item_offers(db, items_map, trader_norm_map, extra_flea_prices)
 
     logger.info("Syncing weapon default-preset map...")
     _sync_weapon_default_presets(db, weapon_default_preset_ids)

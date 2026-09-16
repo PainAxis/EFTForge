@@ -31,8 +31,12 @@ from models_weapon_presets import WeaponDefaultPreset  # noqa: F401 - registers 
 from stats import _compute_stats, apply_full_mag_ammo
 from compatibility import CompatibilityIndex
 from combo_transport import ComboResponseFormat, combo_result_event, format_combo_result
-from optimizer.solver import optimize_weapon, get_stat_ranges, get_moa_floor, OptimizeParams
-from optimizer.gunsmith import get_gunsmith_tasks, solve_gunsmith_task
+from image_jobs import ImageJobs, ImageQueueFull, build_image_key
+from optimizer.solver import OptimizeParams
+from optimizer.gunsmith import get_gunsmith_tasks
+from optimizer.explore_request import ExploreRequest
+from optimizer.process_runner import run_gunsmith, run_job, stream_explore
+from optimizer.cancellation import SolveCancelled, SolveCancellationMiddleware, SolveStreamingResponse
 from optimizer.compat_map import build_compatibility_map
 from solver_cache_epoch import SolverCacheEpochTracker
 from database_changelog import changelog_engine, ChangelogSessionLocal, ChangelogBase
@@ -70,6 +74,7 @@ _redoc_url = "/redoc" if ENABLE_API_DOCS else None
 _openapi_url = "/openapi.json" if ENABLE_API_DOCS else None
 
 app = FastAPI(title="EFTForge API", docs_url=_docs_url, redoc_url=_redoc_url, openapi_url=_openapi_url)
+app.add_middleware(SolveCancellationMiddleware)
 
 # Recorded once at process start - clients use this to detect a backend restart
 # and bypass their local update-check TTL so a fresh deploy is noticed immediately.
@@ -80,6 +85,7 @@ STRENGTH_LEVEL_MIN = 0
 STRENGTH_LEVEL_MAX = 51  # 0 = no skill, 51 = elite
 EQUIP_ERGO_MIN = -1.0  # negative = armor/rig ergonomics penalty
 EQUIP_ERGO_MAX = 1.0  # positive = ergonomics bonus
+VALID_GAME_MODES = {"pvp", "pve", "pvpSeason"}
 
 # Request complexity caps - generous for real clients, block abuse of the
 # CPU-heavy calculation endpoints with arbitrarily large payloads.
@@ -250,6 +256,36 @@ def _migrate_items_db():
         if "attachment_category_zh" not in existing:
             conn.execute(text("ALTER TABLE items ADD COLUMN attachment_category_zh TEXT"))
             conn.commit()
+        if "fire_rate" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN fire_rate INTEGER"))
+            conn.commit()
+        if "recoil_damping_hand_rot" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN recoil_damping_hand_rot REAL"))
+            conn.commit()
+        if "recoil_return_path_damping" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN recoil_return_path_damping REAL"))
+            conn.commit()
+        if "recoil_return_path_offset" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN recoil_return_path_offset REAL"))
+            conn.commit()
+        if "recoil_stable_index_shot" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN recoil_stable_index_shot INTEGER"))
+            conn.commit()
+        if "recoil_stable_angle_step" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN recoil_stable_angle_step REAL"))
+            conn.commit()
+        if "recoil_stable_angle" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN recoil_stable_angle REAL"))
+            conn.commit()
+        if "recoil_pos_z_mult" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN recoil_pos_z_mult REAL"))
+            conn.commit()
+        if "recoil_center_y" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN recoil_center_y REAL"))
+            conn.commit()
+        if "recoil_center_z" not in existing:
+            conn.execute(text("ALTER TABLE items ADD COLUMN recoil_center_z REAL"))
+            conn.commit()
 
 
 def _migrate_slots_db():
@@ -263,12 +299,21 @@ def _migrate_slots_db():
             conn.commit()
 
 
+def _migrate_item_offers_db():
+    with engine.connect() as conn:
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(item_offers)"))}
+        if "game_mode" not in existing:
+            conn.execute(text("ALTER TABLE item_offers ADD COLUMN game_mode TEXT"))
+            conn.commit()
+
+
 if DESKTOP_MODE:
     print("EFTFORGE_STATUS=applying_updates", flush=True)
 
 _migrate_builds_db()
 _migrate_items_db()
 _migrate_slots_db()
+_migrate_item_offers_db()
 
 
 # ---------------------------------------------------
@@ -865,7 +910,7 @@ def get_guns(lang: str = "en", db: Session = Depends(get_db)):
                 "camera_recoil": gun.camera_recoil,
                 "convergence": gun.convergence,
                 "recoil_dispersion": gun.recoil_dispersion,
-                "aim_sensitivity": gun.aim_sensitivity,
+                "fire_rate": gun.fire_rate,
                 "cam_angle_step": gun.cam_angle_step,
                 "mount_cam_snap": gun.mount_cam_snap,
                 "mount_h_rec": gun.mount_h_rec,
@@ -875,6 +920,15 @@ def get_guns(lang: str = "en", db: Session = Depends(get_db)):
                 "rec_force_back": gun.rec_force_back,
                 "rec_force_up": gun.rec_force_up,
                 "rec_return_speed": gun.rec_return_speed,
+                "recoil_damping_hand_rot": gun.recoil_damping_hand_rot,
+                "recoil_return_path_damping": gun.recoil_return_path_damping,
+                "recoil_return_path_offset": gun.recoil_return_path_offset,
+                "recoil_stable_index_shot": gun.recoil_stable_index_shot,
+                "recoil_stable_angle_step": gun.recoil_stable_angle_step,
+                "recoil_stable_angle": gun.recoil_stable_angle,
+                "recoil_pos_z_mult": gun.recoil_pos_z_mult,
+                "recoil_center_y": gun.recoil_center_y,
+                "recoil_center_z": gun.recoil_center_z,
                 "trader_price": gun.trader_price,
                 "trader_price_rub": gun.trader_price_rub,
                 "trader_currency": gun.trader_currency,
@@ -2103,7 +2157,7 @@ def _solver_cache_generation() -> str:
 
 
 # Solve concurrency guard: an optimizer call can legitimately use up to the shared
-# SOLVE_TIME_LIMIT_SECONDS (30s, see optimizer/milp.py) wall-clock budget. Without
+# solver's normal 30s budget plus process startup and cleanup. Without
 # this, a spammed re-optimize button (or a script hitting these endpoints directly,
 # bypassing the frontend's re-click guard) can pile up many overlapping solves on one
 # worker's threadpool and starve every other request that worker is handling. Cap it
@@ -2119,8 +2173,10 @@ def _solver_cache_generation() -> str:
 # behavior, since it should track that one process's own CPU/threadpool budget.
 _SOLVE_LOCK_DIR = os.path.join(RUNTIME_DIR, "solve_locks")
 os.makedirs(_SOLVE_LOCK_DIR, exist_ok=True)
-_SOLVE_LOCK_STALE_SECONDS = 60  # 30s solver cap + a buffer for queueing/overhead
-_MAX_CONCURRENT_SOLVES = max(2, os.cpu_count() or 2)
+_SOLVE_LOCK_STALE_SECONDS = 60
+# Gunicorn already starts one worker per CPU. Keep a small fixed per-worker cap
+# so the fleet cannot grow quadratically with the machine's core count.
+_MAX_CONCURRENT_SOLVES = 2
 _SOLVE_CONCURRENCY_SEM = threading.BoundedSemaphore(_MAX_CONCURRENT_SOLVES)
 
 
@@ -2221,12 +2277,56 @@ def _solve_slot(ip: str):
         _release_ip_solve_lock(ip)
 
 
+@app.post("/build/explore")
+def build_explore(request: Request, payload: ExploreRequest, db: Session = Depends(get_db)):
+    ip = _get_client_ip(request)
+    _check_solve_rate_limit(ip)
+    if payload.trader_levels and any(level < 0 or level > 4 for level in payload.trader_levels.values()):
+        raise HTTPException(status_code=422, detail="trader_levels values must be between 0 and 4")
+    weapon = db.query(Item).filter(Item.id == payload.weapon_id, Item.is_weapon == True).first()  # noqa: E712
+    if weapon is None:
+        raise HTTPException(status_code=404, detail="Weapon not found")
+
+    # Entered here (not inside _stream) so a busy/already-solving 429 is raised
+    # synchronously with a real status code, before the streaming response - whose
+    # status is committed to 200 the moment it starts - has begun sending anything.
+    slot = _solve_slot(ip)
+    slot.__enter__()
+    released = False
+
+    def release_slot():
+        nonlocal released
+        if not released:
+            released = True
+            slot.__exit__(None, None, None)
+
+    def _stream():
+        try:
+            with contextlib.closing(
+                stream_explore(payload.weapon_id, payload.optimize_params(), payload.tradeoff, payload.steps)
+            ) as events:
+                for event in events:
+                    yield f"data: {json.dumps(event)}\n\n"
+        except SolveCancelled:
+            return
+        finally:
+            release_slot()
+
+    return SolveStreamingResponse(
+        _stream(),
+        cleanup=release_slot,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/build/optimize")
 def build_optimize(
     request: Request,
     weapon_id: str = Body(...),
     max_price: float | None = Body(default=None),
     min_ergonomics: float | None = Body(default=None),
+    max_ergonomics: float | None = Body(default=None),
     max_recoil_v: float | None = Body(default=None),
     max_weight: float | None = Body(default=None),
     min_mag_capacity: int | None = Body(default=None),
@@ -2252,9 +2352,12 @@ def build_optimize(
     assume_full_mag: bool = Body(default=True),
     selected_ammo_id: str | None = Body(default=None),
     selected_ubgl_ammo_id: str | None = Body(default=None),
+    game_mode: str = Body(default="pvp"),
     db: Session = Depends(get_db),
 ):
     _check_solve_rate_limit(_get_client_ip(request))
+    if game_mode not in VALID_GAME_MODES:
+        raise HTTPException(status_code=422, detail=f"game_mode must be one of {sorted(VALID_GAME_MODES)}")
     if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
         raise HTTPException(
             status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}"
@@ -2289,6 +2392,7 @@ def build_optimize(
         weapon_id,
         max_price,
         min_ergonomics,
+        max_ergonomics,
         max_recoil_v,
         max_weight,
         min_mag_capacity,
@@ -2314,6 +2418,7 @@ def build_optimize(
         assume_full_mag,
         selected_ammo_id,
         selected_ubgl_ammo_id,
+        game_mode,
     )
     _solve_start = time.perf_counter()
 
@@ -2330,6 +2435,7 @@ def build_optimize(
     params = OptimizeParams(
         max_price=max_price,
         min_ergonomics=min_ergonomics,
+        max_ergonomics=max_ergonomics,
         max_recoil_v=max_recoil_v,
         max_weight=max_weight,
         min_mag_capacity=min_mag_capacity,
@@ -2347,6 +2453,7 @@ def build_optimize(
         trader_levels=trader_levels,
         flea_available=flea_available,
         player_level=player_level,
+        game_mode=game_mode,
         strength_level=strength_level,
         equip_ergo_modifier=equip_ergo_modifier,
         use_evo_ergo=use_evo_ergo,
@@ -2357,25 +2464,28 @@ def build_optimize(
         selected_ubgl_ammo_id=selected_ubgl_ammo_id,
     )
     with _solve_slot(_get_client_ip(request)):
-        result = optimize_weapon(db, weapon_id, params)
+        result = run_job("optimize", weapon_id, params)
     result = {**result, "metrics": {**result.get("metrics", {}), "cache_hit": False}}
 
-    with _OPTIMIZE_CACHE_LOCK:
-        if len(_OPTIMIZE_CACHE) >= _OPTIMIZE_CACHE_MAX:
-            keys = list(_OPTIMIZE_CACHE.keys())
-            for k in keys[: len(keys) // 2]:
-                del _OPTIMIZE_CACHE[k]
-        _OPTIMIZE_CACHE[_cache_key] = result
+    if result.get("status") != "timeout":
+        with _OPTIMIZE_CACHE_LOCK:
+            if len(_OPTIMIZE_CACHE) >= _OPTIMIZE_CACHE_MAX:
+                keys = list(_OPTIMIZE_CACHE.keys())
+                for k in keys[: len(keys) // 2]:
+                    del _OPTIMIZE_CACHE[k]
+            _OPTIMIZE_CACHE[_cache_key] = result
 
     return {**result, "solve_ms": round((time.perf_counter() - _solve_start) * 1000)}
 
 
 @app.post("/build/stat-ranges")
 def build_stat_ranges(
+    request: Request,
     weapon_id: str = Body(...),
     trader_levels: dict | None = Body(default=None),
     flea_available: bool = Body(default=True),
     player_level: int | None = Body(default=None),
+    game_mode: str = Body(default="pvp"),
     db: Session = Depends(get_db),
 ):
     """Theoretical [min, max] each hard-constraint stat can reach for this
@@ -2385,13 +2495,18 @@ def build_stat_ranges(
         for level in trader_levels.values():
             if not (0 <= level <= 4):
                 raise HTTPException(status_code=422, detail="trader_levels values must be between 0 and 4")
+    if game_mode not in VALID_GAME_MODES:
+        raise HTTPException(status_code=422, detail=f"game_mode must be one of {sorted(VALID_GAME_MODES)}")
 
     weapon = db.query(Item).filter(Item.id == weapon_id, Item.is_weapon == True).first()  # noqa: E712
     if not weapon:
         raise HTTPException(status_code=404, detail="Weapon not found")
 
-    params = OptimizeParams(trader_levels=trader_levels, flea_available=flea_available, player_level=player_level)
-    result = get_stat_ranges(db, weapon_id, params)
+    params = OptimizeParams(
+        trader_levels=trader_levels, flea_available=flea_available, player_level=player_level, game_mode=game_mode
+    )
+    with _solve_slot(_get_client_ip(request)):
+        result = run_job("stat_ranges", weapon_id, params)
     if result["status"] == "error":
         raise HTTPException(status_code=404, detail=result["reason"])
     return result
@@ -2404,6 +2519,7 @@ def build_moa_floor(
     trader_levels: dict | None = Body(default=None),
     flea_available: bool = Body(default=True),
     player_level: int | None = Body(default=None),
+    game_mode: str = Body(default="pvp"),
     db: Session = Depends(get_db),
 ):
     """Exact minimum achievable accuracy_moa for this weapon, via a binary
@@ -2414,14 +2530,18 @@ def build_moa_floor(
         for level in trader_levels.values():
             if not (0 <= level <= 4):
                 raise HTTPException(status_code=422, detail="trader_levels values must be between 0 and 4")
+    if game_mode not in VALID_GAME_MODES:
+        raise HTTPException(status_code=422, detail=f"game_mode must be one of {sorted(VALID_GAME_MODES)}")
 
     weapon = db.query(Item).filter(Item.id == weapon_id, Item.is_weapon == True).first()  # noqa: E712
     if not weapon:
         raise HTTPException(status_code=404, detail="Weapon not found")
 
-    params = OptimizeParams(trader_levels=trader_levels, flea_available=flea_available, player_level=player_level)
+    params = OptimizeParams(
+        trader_levels=trader_levels, flea_available=flea_available, player_level=player_level, game_mode=game_mode
+    )
     with _solve_slot(_get_client_ip(request)):
-        result = get_moa_floor(db, weapon_id, params)
+        result = run_job("moa_floor", weapon_id, params)
     if result["status"] == "error":
         raise HTTPException(status_code=404, detail=result["reason"])
     return result
@@ -2498,6 +2618,7 @@ def build_gunsmith_solve(
     player_level: int | None = Body(default=None),
     strength_level: int = Body(default=10),
     equip_ergo_modifier: float = Body(default=0.0),
+    game_mode: str = Body(default="pvp"),
     db: Session = Depends(get_db),
 ):
     _check_solve_rate_limit(_get_client_ip(request))
@@ -2513,16 +2634,18 @@ def build_gunsmith_solve(
         for level in trader_levels.values():
             if not (0 <= level <= 4):
                 raise HTTPException(status_code=422, detail="trader_levels values must be between 0 and 4")
+    if game_mode not in VALID_GAME_MODES:
+        raise HTTPException(status_code=422, detail=f"game_mode must be one of {sorted(VALID_GAME_MODES)}")
 
     with _solve_slot(_get_client_ip(request)):
-        result = solve_gunsmith_task(
-            db,
+        result = run_gunsmith(
             task_name,
             trader_levels=trader_levels,
             flea_available=flea_available,
             player_level=player_level,
             strength_level=strength_level,
             equip_ergo_modifier=equip_ergo_modifier,
+            game_mode=game_mode,
         )
     if result["status"] == "error":
         raise HTTPException(status_code=404, detail=result["reason"])
@@ -3464,9 +3587,39 @@ async def _do_pw_request(id: str, items: list, weapon_name: str) -> dict:
         _pw_in_flight -= 1
 
 
+async def _generate_image_job(id: str, items: list, weapon_name: str) -> dict:
+    # Finish or recover each browser operation before dispatching another job.
+    try:
+        return await asyncio.wait_for(_do_pw_request(id, items, weapon_name), timeout=120)
+    except Exception:
+        await _reset_pw_page()
+        raise
+
+
+_image_jobs = ImageJobs(_generate_image_job)
+
+
+async def _await_image_job(future, request: Request | None = None):
+    # Withdraw disconnected subscribers without interrupting an active browser operation.
+    wrapped = asyncio.wrap_future(future)
+    deadline = time.monotonic() + 120
+    try:
+        while not wrapped.done():
+            if request is not None and await request.is_disconnected():
+                raise HTTPException(status_code=499, detail="Image request disconnected")
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Timed out waiting for image generation")
+            await asyncio.wait({wrapped}, timeout=0.1)
+        return wrapped.result()
+    finally:
+        if not wrapped.done():
+            wrapped.cancel()
+        future.cancel()
+
+
 @app.get("/build-image/busy")
 async def build_image_busy():
-    return {"busy": _pw_in_flight > 0, "disabled": _imggen_disabled}
+    return {"busy": _image_jobs.busy, "disabled": _imggen_disabled}
 
 
 @app.api_route("/health/imggen", methods=["GET", "HEAD"])
@@ -3487,17 +3640,17 @@ async def health_imggen():
         raise HTTPException(status_code=503, detail="No builds available for probe")
 
     pairs = json.loads(build.pairs_json)
-    items = _build_spt_items(build.gun_id, pairs)
-    _pw_loop_ready.wait(timeout=10)
-    future = asyncio.run_coroutine_threadsafe(_do_pw_request(build.gun_id, items, build.gun_name), _pw_loop)
     try:
-        uvloop = asyncio.get_event_loop()
-        await uvloop.run_in_executor(None, lambda: future.result(timeout=120))
+        items = _build_spt_items(build.gun_id, pairs)
+        if not _pw_loop_ready.is_set():
+            raise RuntimeError("Image generator is still starting")
+        future = asyncio.run_coroutine_threadsafe(
+            _image_jobs.request(build.gun_id, items, build.gun_name, priority=2, source="health"), _pw_loop
+        )
+        await _await_image_job(future)
         _IMGGEN_HEALTH_CACHE["result"] = {"status": "ok", "ts": now, "error": None}
         return {"status": "ok"}
     except Exception as exc:
-        future.cancel()
-        asyncio.run_coroutine_threadsafe(_reset_pw_page(), _pw_loop)
         err = str(exc)
         _IMGGEN_HEALTH_CACHE["result"] = {"status": "down", "ts": now, "error": err}
         raise HTTPException(status_code=503, detail=err)
@@ -3505,8 +3658,10 @@ async def health_imggen():
 
 @app.post("/build-image")
 async def proxy_build_image(
+    request: Request,
     id: str = Body(...),
     items: List[dict] = Body(...),
+    source: Literal["preview", "hover", "optimizer", "export"] = Body("preview"),
     db: Session = Depends(get_db),
 ):
     if _imggen_disabled:
@@ -3514,32 +3669,31 @@ async def proxy_build_image(
 
     _cap_list("items", items, MAX_IMAGE_ITEMS)
 
-    # Stable cache key: hash of sorted item tpl+slot pairs
-    cache_key_src = json.dumps(sorted((i.get("_tpl", "") + i.get("slotId", "")) for i in items))
-    cache_key = hashlib.sha256(cache_key_src.encode()).hexdigest()[:16]
-
-    if cache_key in _IMAGE_GEN_CACHE:
-        return {"image_url": _IMAGE_GEN_CACHE[cache_key]}
-
     weapon = db.get(Item, id)
     if not weapon:
         raise HTTPException(status_code=404, detail=f"Unknown weapon id: {id}")
+    if not weapon.is_weapon:
+        raise HTTPException(status_code=422, detail="Build image root must be a weapon")
+    try:
+        cache_key = build_image_key(id, items)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if cache_key in _IMAGE_GEN_CACHE:
+        return {"image_url": _IMAGE_GEN_CACHE[cache_key]}
     weapon_name = weapon.name
 
-    _pw_loop_ready.wait(timeout=10)
-
-    future = asyncio.run_coroutine_threadsafe(_do_pw_request(id, items, weapon_name), _pw_loop)
+    if not _pw_loop_ready.is_set():
+        raise HTTPException(status_code=503, detail="Image generator is still starting")
+    future = asyncio.run_coroutine_threadsafe(
+        _image_jobs.request(id, items, weapon_name, priority=1 if source == "hover" else 0, source=source), _pw_loop
+    )
     try:
-        uvloop = asyncio.get_event_loop()
-        data = await uvloop.run_in_executor(None, lambda: future.result(timeout=120))
+        data = await _await_image_job(future, request)
+    except HTTPException:
+        raise
+    except ImageQueueFull as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
-        # Cancel the coroutine in the pw loop so it releases _pw_req_lock and
-        # decrements _pw_in_flight - without this the lock is held forever and
-        # all subsequent /build-image requests queue up as zombies.
-        future.cancel()
-        # Reset _pw_page so the next request gets a fresh page rather than
-        # trying to interact with a Chromium that may be in a broken UI state.
-        asyncio.run_coroutine_threadsafe(_reset_pw_page(), _pw_loop)
         _logger.error("build-image failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=502, detail=f"Image generator request failed: {exc}")
 
@@ -3612,11 +3766,11 @@ def _build_spt_items(gun_id: str, pairs: list) -> list:
     for slot_id, item_id in pairs:
         slot = slot_map.get(slot_id)
         if not slot:
-            continue
+            raise ValueError(f"Unknown build image slot: {slot_id}")
         game_slot_name = slot.slot_game_name or slot.slot_name
         parent_instance = instance_map.get(slot.parent_item_id)
         if not parent_instance:
-            continue
+            raise ValueError(f"Unresolved build image parent for slot: {slot_id}")
         instance_id = _bp_hex24(parent_instance + ":" + game_slot_name)
         items.append(
             {
@@ -3857,13 +4011,18 @@ def _generate_and_save_build_image(build_id: int, gun_id: str, gun_name: str, pa
 
     # build the full SPT-format items array the image-gen API expects,
     # matching the frontend _bpBuildSptItems() exactly
-    items = _build_spt_items(gun_id, pairs)
-
-    # generate via patchright - blocks until the lock is acquired and generation completes
-    future = asyncio.run_coroutine_threadsafe(_do_pw_request(gun_id, items, gun_name), _pw_loop)
+    future = None
     try:
+        items = _build_spt_items(gun_id, pairs)
+        if not _pw_loop_ready.wait(timeout=10):
+            raise RuntimeError("Image generator is still starting")
+        future = asyncio.run_coroutine_threadsafe(
+            _image_jobs.request(gun_id, items, gun_name, priority=2, source="publication"), _pw_loop
+        )
         data = future.result(timeout=120)
     except Exception as exc:
+        if future is not None:
+            future.cancel()
         _logger.error("build-image gen failed for build %s: %s", build_id, exc)
         return False
 
@@ -3953,7 +4112,7 @@ async def _bg_migrate_build_images(force: bool = False):
     while True:
         try:
             # yield to real user requests
-            if _pw_in_flight > 0:
+            if _image_jobs.busy:
                 await asyncio.sleep(5)
                 continue
 

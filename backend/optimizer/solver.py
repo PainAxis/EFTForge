@@ -10,10 +10,9 @@ What's deliberately not handled, and why:
     that it's not viable without real solver-performance work first. Reverted;
     see milp.py's dependency-constraint comment for the narrow correctness
     gap this leaves.
-  - Tchebycheff scalarization ("Sweet Spot" mode) - skipped as low value
-    without a paired Explore/visualization feature
 Found-in-Raid fallback pricing (below) and category include filters and
-EvoErgo mode (optimizer/milp.py) are implemented.
+EvoErgo mode (optimizer/milp.py) are implemented. Use Tchebycheff scalarization
+for balanced builds and explore.py for sampled two-objective tradeoffs.
 
 Every stat number this module reports comes from stats._compute_stats() -
 EFTForge's own, already-tested EED/overswing/arm-stamina/MOA formulas -
@@ -42,6 +41,14 @@ from optimizer.milp import build_and_solve, compute_stat_ranges as _milp_stat_ra
 class OptimizeParams:
     max_price: Optional[float] = None
     min_ergonomics: Optional[float] = None
+    max_ergonomics: Optional[float] = None
+    # Explore-internal only (see explore.py's solve()) - not part of any public
+    # request model. Hard-floors true (weight-adjusted, quadratic) EED via
+    # milp.py's _solve_with_min_eed, the same lazy tangent-cut technique
+    # prevent_overswing uses, instead of min_ergonomics's plain linear sum.
+    # Lets Explore's EvoErgo toggle pick the right build for every point on the
+    # curve, not just its "max ergo" boundary.
+    min_eed: Optional[float] = None
     max_recoil_v: Optional[float] = None
     max_recoil_sum: Optional[float] = None  # vertical + horizontal combined - used by Gunsmith tasks
     max_weight: Optional[float] = None
@@ -97,6 +104,9 @@ class OptimizeParams:
     trader_levels: Optional[Dict[str, int]] = None
     flea_available: bool = True
     player_level: Optional[int] = None
+    # "pvp" | "pve" | "pvpSeason" - which game mode's flea prices to solve against.
+    # Trader offers don't vary by mode, so this only ever filters ItemOffer's flea rows.
+    game_mode: str = "pvp"
     strength_level: int = 10
     equip_ergo_modifier: float = 0.0
     # Mirrors /build/calculate's "assume full mag" toggle (see stats.apply_full_mag_ammo):
@@ -148,6 +158,7 @@ def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
                 ItemOffer.price_rub,
                 ItemOffer.is_flea,
                 ItemOffer.min_level_flea,
+                ItemOffer.game_mode,
             )
         )
         offer_rows = offer_query.filter(ItemOffer.item_id.in_(all_mod_ids)).all()
@@ -168,7 +179,9 @@ def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
         if exclude_categories and exclude_categories & set((mods[item_id].category_ids or "").split(",")):
             continue
         raw_offers = offers_map.get(item_id, [])
-        best = get_best_price(raw_offers, params.trader_levels, params.flea_available, params.player_level)
+        best = get_best_price(
+            raw_offers, params.trader_levels, params.flea_available, params.player_level, params.game_mode
+        )
         if best is None:
             # No accessible price - either nothing sells it under the current trader/flea
             # access, or no trader/flea ever sells it at all. Either way it's inaccessible
@@ -226,7 +239,7 @@ def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
     return weapon, compat_map, mods, (candidate_ids, prices)
 
 
-def optimize_weapon(db, weapon_id: str, params: OptimizeParams) -> dict:
+def optimize_weapon(db, weapon_id: str, params: OptimizeParams, *, deadline=None, objective_axis=None) -> dict:
     started = time.perf_counter()
     weapon, compat_map, mods, loaded = _load_candidates_and_prices(db, weapon_id, params)
     candidate_load_ms = (time.perf_counter() - started) * 1000
@@ -261,8 +274,13 @@ def optimize_weapon(db, weapon_id: str, params: OptimizeParams) -> dict:
         if (params.assume_full_mag and params.selected_ubgl_ammo_id)
         else None
     )
+    solve_options = {}
+    if deadline is not None:
+        solve_options["deadline"] = deadline
+    if objective_axis is not None:
+        solve_options["objective_axis"] = objective_axis
     result = build_and_solve(
-        weapon, mods, compat_map, candidate_ids, prices, params, ammo=ammo, ubgl_grenade=ubgl_grenade
+        weapon, mods, compat_map, candidate_ids, prices, params, ammo=ammo, ubgl_grenade=ubgl_grenade, **solve_options
     )
     result["metrics"] = {**input_metrics, **result.get("metrics", {})}
 
@@ -337,7 +355,7 @@ def optimize_weapon(db, weapon_id: str, params: OptimizeParams) -> dict:
 
 def _load_best_offer_price(db, item_id, params):
     offers = offers_by_item(db.query(ItemOffer).filter(ItemOffer.item_id == item_id).all()).get(item_id, [])
-    return get_best_price(offers, params.trader_levels, params.flea_available, params.player_level)
+    return get_best_price(offers, params.trader_levels, params.flea_available, params.player_level, params.game_mode)
 
 
 def _choose_base(db, weapon, params, selected_items, prices, mods_total_rub):
@@ -447,6 +465,7 @@ def get_moa_floor(db, weapon_id: str, params: OptimizeParams) -> dict:
         trader_levels=params.trader_levels,
         flea_available=params.flea_available,
         player_level=params.player_level,
+        game_mode=params.game_mode,
         ergo_weight=0.0,
         recoil_weight=0.0,
         price_weight=1.0,
@@ -469,6 +488,7 @@ def get_moa_floor(db, weapon_id: str, params: OptimizeParams) -> dict:
             trader_levels=params.trader_levels,
             flea_available=params.flea_available,
             player_level=params.player_level,
+            game_mode=params.game_mode,
             ergo_weight=0.0,
             recoil_weight=0.0,
             price_weight=1.0,

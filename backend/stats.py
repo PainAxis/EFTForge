@@ -8,6 +8,37 @@ optimizer's own build results and the Combo Calculator's must always agree on
 what a given attachment set's stats are.
 """
 
+# KG(E) overswing-threshold curve coefficients: KG = KG_A*E^2 + KG_B*E + KG_C, fit by
+# SpaceMonkey37 against in-game data. optimizer/milp.py imports these directly rather than
+# re-typing the literals, since its MILP tangent-cut approximation must stay derived from
+# the exact same curve.
+KG_A = 0.0007556
+KG_B = 0.02736
+KG_C = 2.9159
+
+# accuracy_moa formula: MOA = MOA_K * COI * (1 - total_accuracy_mod / 100).
+MOA_K = 34.36
+
+
+def _calc_evo_ergo_delta(total_ergo: float, total_weight: float, strength_level: int, equip_ergo_modifier: float):
+    """EED/overswing/arm-stamina formula, reverse-engineered by SpaceMonkey37 from in-game
+    data. This is the canonical Python copy - frontend/modules/calculations.js keeps a
+    hand-synced copy for instant client-side feedback (see AGENTS.md), and
+    backend/tests/test_calculations.py checks both against the same golden vectors so a
+    drift between the two shows up as a test failure instead of a silent stat mismatch.
+    """
+    b = equip_ergo_modifier
+    E = total_ergo * (1 + b)
+    KG = KG_A * (E**2) + KG_B * E + KG_C
+    evo_weight = total_weight - KG
+    eed = -15 * evo_weight
+    arm_stamina = (
+        ((85.5 / (total_weight + 0.65)) + 9.15 + 0.06477 * total_ergo * (1 + b / 2))
+        / 1.04
+        * (1 + strength_level * 0.004)
+    )
+    return eed, evo_weight > 0, arm_stamina
+
 
 def _compute_stats(
     base_item, current_ids: list, items_map: dict, strength_level: int = 10, equip_ergo_modifier: float = 0.0
@@ -81,17 +112,7 @@ def _compute_stats(
         if total_recoil_h is not None:
             total_recoil_h = round(total_recoil_h * (1 + total_recoil_modifier))
 
-    b = equip_ergo_modifier
-    E = total_ergo * (1 + b)
-    KG = 0.0007556 * (E**2) + 0.02736 * E + 2.9159
-    evo_weight = total_weight - KG
-    eed = -15 * evo_weight
-
-    arm_stamina = (
-        ((85.5 / (total_weight + 0.65)) + 9.15 + 0.06477 * total_ergo * (1 + b / 2))
-        / 1.04
-        * (1 + strength_level * 0.004)
-    )
+    eed, is_overswing, arm_stamina = _calc_evo_ergo_delta(total_ergo, total_weight, strength_level, equip_ergo_modifier)
 
     # Effective sighting range: max scope sighting range installed, else weapon base
     effective_sighting_range = base_item.sighting_range
@@ -105,15 +126,15 @@ def _compute_stats(
     # barrel_coi takes priority over weapon's center_of_impact when a barrel is installed
     base_coi = barrel_coi if barrel_coi is not None else base_item.center_of_impact
     if base_coi is not None:
-        # MOA = 34.36 * COI; accuracy_modifier is a percent accuracy increase, so positive = smaller MOA
-        final_moa = round(34.36 * base_coi * (1 - total_accuracy_mod / 100), 2)
+        # accuracy_modifier is a percent accuracy increase, so positive = smaller MOA
+        final_moa = round(MOA_K * base_coi * (1 - total_accuracy_mod / 100), 2)
     else:
         final_moa = None
 
     return {
         "total_ergo": round(total_ergo, 2),
         "total_weight": round(total_weight, 3),
-        "overswing": evo_weight > 0,
+        "overswing": is_overswing,
         "evo_ergo_delta": round(eed, 2),
         "recoil_vertical": total_recoil_v,
         "recoil_horizontal": total_recoil_h,
@@ -183,17 +204,11 @@ def apply_full_mag_ammo(
 
     if ammo_weight_added:
         # Recompute EED, overswing, and arm stamina with the ammo-adjusted weight
-        b = equip_ergo_modifier
-        E = stats["total_ergo"] * (1 + b)
-        KG = 0.0007556 * (E**2) + 0.02736 * E + 2.9159
-        evo_weight = stats["total_weight"] - KG
-        stats["evo_ergo_delta"] = round(-15 * evo_weight, 2)
-        stats["overswing"] = evo_weight > 0
-        stats["arm_stamina"] = round(
-            ((85.5 / (stats["total_weight"] + 0.65)) + 9.15 + 0.06477 * stats["total_ergo"] * (1 + b / 2))
-            / 1.04
-            * (1 + strength_level * 0.004),
-            1,
+        eed, is_overswing, arm_stamina = _calc_evo_ergo_delta(
+            stats["total_ergo"], stats["total_weight"], strength_level, equip_ergo_modifier
         )
+        stats["evo_ergo_delta"] = round(eed, 2)
+        stats["overswing"] = is_overswing
+        stats["arm_stamina"] = round(arm_stamina, 1)
 
     return stats

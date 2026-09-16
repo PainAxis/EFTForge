@@ -1393,8 +1393,9 @@ async function _renderPublicBuilds(gunId) {
         }
     }
     const _pickCheaper = (a, b) => a == null ? b : b == null ? a : Math.min(a, b);
-    const pve       = EFTForge.state.pveMode;
-    const fleaCache = pve ? EFTForge.state.fleaCachePve : EFTForge.state.fleaCachePvp;
+    const fleaCache = EFTForge.state.priceMode === "pve" ? EFTForge.state.fleaCachePve
+        : EFTForge.state.priceMode === "pvpSeason" ? EFTForge.state.fleaCacheSeasonal
+        : EFTForge.state.fleaCachePvp;
 
     for (const b of builds) {
         const allItemIds = [b.gun_id, ...(b.pairs || []).map(p => p[1])];
@@ -1534,9 +1535,7 @@ function _applyPublicBuildsFilter() {
 
         const gunObj    = (EFTForge.state.allGuns || []).find(g => g.id === b.gun_id);
         const gunImgSrc = gunObj ? (gunObj.image_512_link || gunObj.icon_link || "") : "";
-        // card_image_url is gitee-hosted like avatars - proxy it the same way so it
-        // doesn't hotlink gitee directly (slow/unreliable) while the avatar loads fast.
-        const cardImgSrc = proxyAvatarUrl(b.card_image_url) || gunImgSrc;
+        const cardImgSrc = b.card_image_url || gunImgSrc;
 
         const s        = b.stats || {};
         const hasStats = b.stats !== null && b.stats !== undefined;
@@ -1954,9 +1953,7 @@ function _applyMyCommunityFilter() {
         const gunObj     = gunById(b.gun_id);
         const gunName    = (gunObj && (gunObj.short_name || gunObj.name)) || b.gun_name || "";
         const gunImgSrc  = gunObj ? (gunObj.image_512_link || gunObj.icon_link || "") : "";
-        // card_image_url is gitee-hosted like avatars - proxy it the same way so it
-        // doesn't hotlink gitee directly (slow/unreliable) while the avatar loads fast.
-        const cardImgSrc = proxyAvatarUrl(b.card_image_url) || gunImgSrc;
+        const cardImgSrc = b.card_image_url || gunImgSrc;
 
         const s        = b.stats || {};
         const hasStats = b.stats !== null && b.stats !== undefined;

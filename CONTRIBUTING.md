@@ -71,6 +71,12 @@ calculation formulas, since those are duplicated between the backend and
 
 Focus on *why* a change was made, not just what changed.
 
+## Build date
+
+Don't bump `APP_BUILD_DATE` in `frontend/modules/config.js` yourself, it should be 
+stamped automatically by `frontend/release_prep.py`, which should be ran right
+before a prod release.
+
 ## Release notes / news posts
 
 Contributors should never add or edit anything under `frontend/news/` (posts,

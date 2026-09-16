@@ -13,7 +13,7 @@ import numpy as np
 from scipy.optimize import milp, LinearConstraint, Bounds
 from scipy.sparse import csc_array
 
-from stats import _compute_stats, apply_full_mag_ammo, full_mag_ammo_weight
+from stats import KG_A, KG_B, KG_C, MOA_K, _compute_stats, apply_full_mag_ammo, full_mag_ammo_weight
 
 TIEBREAK = 0.01
 
@@ -44,6 +44,7 @@ SUPPRESSOR_CATEGORY_ID = "550aa4cd4bdc2dd8348b456c"
 _NO_CONSTRAINTS_PARAMS = SimpleNamespace(
     max_price=None,
     min_ergonomics=None,
+    max_ergonomics=None,
     max_recoil_v=None,
     max_recoil_sum=None,
     include_categories=None,
@@ -108,13 +109,10 @@ EVO_ERGO_ERGO_ANCHORS = [30, 55, 80, 105, 130, 155]
 # stops moving), repeats a k I've already tried, or the shared deadline hits.
 MAX_EVO_ERGO_REFINE_ITERS = 3
 
-# stats.py's KG(E) overswing-threshold curve: KG = KG_A*E^2 + KG_B*E + KG_C.
-# Must stay in sync with _compute_stats() there - this is a re-derivation for
-# the MILP's linear tangent-cut approximation, not an independent formula.
-KG_A, KG_B, KG_C = 0.0007556, 0.02736, 2.9159
+# KG_A/KG_B/KG_C (stats.py's KG(E) overswing-threshold curve) and MOA_K (its
+# accuracy_moa formula) are imported from stats.py above, not re-typed here - this
+# module's tangent-cut approximation must stay derived from the exact same curve.
 
-# stats.py's accuracy_moa formula: MOA = MOA_K * COI * (1 - total_accuracy_mod/100).
-MOA_K = 34.36
 # Safe upper bound on the per-candidate-barrel MOA gate terms below - real
 # values (COI a few units, accuracy mods a few hundred percent at most) stay
 # well under this, mirroring the reference optimizer's own big-M choice.
@@ -271,7 +269,7 @@ def _lp_stat_range(cb, n, coeffs):
 
 
 def _add_overswing_cut_at(
-    cb, idx, mods, item_ids, base_ergo, base_weight, equip_ergo_modifier, anchor_ergo, solve_stats=None
+    cb, idx, mods, item_ids, base_ergo, base_weight, equip_ergo_modifier, anchor_ergo, solve_stats=None, shift=0.0
 ):
     """Adds one linear tangent-line cut - total_weight <= KG(effective_ergo)'s
     tangent at anchor_ergo - hard-constraining out exactly the build that sits
@@ -282,6 +280,12 @@ def _add_overswing_cut_at(
     through) local bound. See _solve_avoiding_overswing for why this is
     called with one fresh anchor per rejected solve rather than a fixed grid
     of anchors ANDed together up front.
+
+    shift raises the bar above plain "never overswing": weight <= KG(ergo) -
+    shift is what stats.py's EED formula (eed = 15*(KG(ergo) - weight)) calls
+    "eed >= 15*shift", so _solve_with_min_eed reuses this exact tangent with
+    shift = min_eed/15 to hard-floor true EED instead of just forbidding
+    overswing (shift=0, the default, reproduces the plain overswing cut).
     """
     b = equip_ergo_modifier
     e0 = anchor_ergo * (1 + b)
@@ -292,7 +296,7 @@ def _add_overswing_cut_at(
         - slope * (mods[i].ergonomics_modifier or 0)
         for i in item_ids
     }
-    rhs = kg0 + slope * (base_ergo - anchor_ergo) - base_weight
+    rhs = kg0 + slope * (base_ergo - anchor_ergo) - base_weight - shift
     cb.le(coeffs, rhs)
 
 
@@ -481,6 +485,9 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
     if params.min_ergonomics is not None:
         cb.ge({idx[i]: (mods[i].ergonomics_modifier or 0) for i in item_ids}, params.min_ergonomics - base_ergo)
 
+    if params.max_ergonomics is not None:
+        cb.le({idx[i]: (mods[i].ergonomics_modifier or 0) for i in item_ids}, params.max_ergonomics - base_ergo)
+
     if params.max_recoil_v is not None and base_recoil_v is not None:
         cb.le(
             {idx[i]: base_recoil_v * (mods[i].recoil_modifier or 0) for i in item_ids},
@@ -618,7 +625,7 @@ def _evo_ergo_objective(k, item_ids, idx, mods, prices, params, solve_stats=None
 def _evo_ergo_k_for_anchor(ergo_anchor, equip_ergo_modifier):
     b = equip_ergo_modifier
     E0 = ergo_anchor * (1 + b)
-    kg_prime = 0.0015112 * E0 + 0.02736  # d/dE of stats.py's KG(E) = 0.0007556*E^2 + 0.02736*E + 2.9159
+    kg_prime = 2 * KG_A * E0 + KG_B  # d/dE of stats.py's KG(E) = KG_A*E^2 + KG_B*E + KG_C
     return 15 * kg_prime * (1 + b)  # chain rule through E = ergo*(1+b)
 
 
@@ -911,6 +918,96 @@ def _solve_avoiding_overswing(
     )
 
 
+def _solve_with_min_eed(
+    c,
+    cb,
+    n,
+    item_ids,
+    idx,
+    weapon,
+    mods,
+    item_to_valid_slots,
+    prices,
+    base_ergo,
+    base_weight,
+    equip_ergo_modifier,
+    strength_level,
+    min_eed,
+    deadline=None,
+    extra_bounds=(100.0,),
+    solve_stats=None,
+):
+    """Same contract and same lazy-cutting-plane technique as
+    _solve_avoiding_overswing (min_eed=0 there is exactly "never overswing"),
+    generalized to hard-floor true (quadratic) EED - stats.py's
+    evo_ergo_delta - at min_eed instead. Explore's per-point sweep uses this
+    when its EvoErgo toggle is on, so the build picked for each point on the
+    curve is the one that actually clears that point's EED tier, not just its
+    raw ergonomics sum - a heavy high-ergo part can't stand in for a light
+    one anymore.
+
+    Solves once, checks the result's true EED, and - only if it falls short -
+    adds one new tangent cut anchored exactly at that build's own total_ergo
+    (see _add_overswing_cut_at's shift parameter) and retries. Each cut only
+    ever excludes builds already proven to fall short, so this can't reject a
+    build that genuinely clears the floor - same soundness argument as the
+    overswing case, just shifted.
+    """
+    attempts = []
+    for _ in range(MAX_OVERSWING_CUT_ITERS):
+        result = _solve_once(
+            c, cb, n, item_ids, weapon.id, item_to_valid_slots, prices, deadline=deadline, extra_bounds=extra_bounds
+        )
+        attempts.append(result)
+        if result["status"] not in ("optimal", "feasible"):
+            result["metrics"] = _aggregate_attempt_metrics(attempts)
+            return result
+        stats = (
+            solve_stats.compute(result["selected_items"])
+            if solve_stats
+            else _compute_stats(weapon, result["selected_items"], mods, strength_level, equip_ergo_modifier)
+        )
+        if stats["evo_ergo_delta"] >= min_eed:
+            incomplete = any(attempt["status"] != "optimal" for attempt in attempts)
+            if incomplete:
+                result = {**result}
+                result["status"] = "feasible"
+                result["reason"] = (
+                    "At least one EED-floor solve reached a limit; showing the best feasible build found."
+                )
+                result["termination"] = {
+                    "solver_status_code": 1,
+                    "solver_message": "EED-floor solve incomplete.",
+                    "attempts": [attempt.get("termination", {}) for attempt in attempts],
+                }
+            result["metrics"] = _aggregate_attempt_metrics(attempts)
+            return result
+        selected_ergo = base_ergo + sum((mods[i].ergonomics_modifier or 0) for i in result["selected_items"])
+        _add_overswing_cut_at(
+            cb,
+            idx,
+            mods,
+            item_ids,
+            base_ergo,
+            base_weight,
+            equip_ergo_modifier,
+            selected_ergo,
+            solve_stats,
+            shift=min_eed / 15.0,
+        )
+    reason = "EED-floor constraint cut iteration limit reached before finding a feasible build."
+    return _empty_result(
+        "error",
+        reason,
+        {
+            "solver_status_code": 4,
+            "solver_message": reason,
+            "attempts": [attempt.get("termination", {}) for attempt in attempts],
+        },
+        _aggregate_attempt_metrics(attempts),
+    )
+
+
 # --- Tchebycheff ("Sweet Spot") scalarization ---
 # See OptimizeParams.use_tchebycheff's docstring (solver.py) for why this
 # exists: a fixed per-unit exchange rate lets one item's outsized single-axis
@@ -936,7 +1033,18 @@ TCHEBYCHEFF_Z_BOUND = 1e6
 
 def _pure_axis_objective(kind, item_ids, idx, mods, prices, n):
     """A single-axis-only objective (no blending, no TIEBREAK) used purely to
-    find that axis's own best-achievable value - the Tchebycheff ideal point."""
+    find that axis's own best-achievable value - the Tchebycheff ideal point.
+    Deliberately has zero price/other-axis pressure: _compute_ideal_and_nadir
+    needs this axis's *true* best-achievable value, and even a tiny tiebreak
+    term can shift which tied build gets returned, which shifts the other two
+    axes' values on that build - the payoff-table nadir estimate - enough to
+    move the Tchebycheff-normalized result (confirmed via
+    test_literal_zero_weight_does_not_cliff_against_the_next_ui_tick).
+    Callers that return this build straight to the user instead (Explore's
+    objective_axis path) should use _axis_objective_for_explore below, which
+    adds back a price tiebreak since there's no Tchebycheff normalization to
+    disturb there.
+    """
     c = np.zeros(n + 1)
     if kind == "ergo":
         c[n] = -1.0  # maximize capped_ergo
@@ -946,6 +1054,33 @@ def _pure_axis_objective(kind, item_ids, idx, mods, prices, n):
     else:
         for item_id in item_ids:
             c[idx[item_id]] = prices[item_id]["price_rub"]
+    return c
+
+
+def _axis_objective_for_explore(kind, item_ids, idx, mods, prices, n):
+    """_pure_axis_objective, plus a price tiebreak for the ergo/recoil axes.
+
+    Explore's objective_axis solves (see explore.py's solve()) return this
+    build straight to the user as a real point on the tradeoff curve, so -
+    unlike the Tchebycheff ideal-point use of _pure_axis_objective - there's
+    no normalization step downstream to get thrown off by it. Without this,
+    two items with identical ergo/recoil/weight/conflicts but very different
+    price (e.g. the AR-15 Strike Industries ARE tube's two colorways) are a
+    literal tie in the ergo/recoil objective, and HiGHS's tie-break has
+    nothing to do with price - it can land on the far pricier twin.
+
+    price_eps is scaled to this solve's own max price so the tiebreak sum
+    across a whole build can never approach the smallest real recoil_modifier
+    step (~0.003 in the item data) or a single ergo point - it only decides
+    between exact ties, never competes with a genuine difference.
+    """
+    c = _pure_axis_objective(kind, item_ids, idx, mods, prices, n)
+    if kind not in ("ergo", "recoil"):
+        return c
+    max_price = max((prices[item_id]["price_rub"] for item_id in item_ids), default=0) or 1
+    price_eps = 1e-6 / max_price
+    for item_id in item_ids:
+        c[idx[item_id]] += price_eps * prices[item_id]["price_rub"]
     return c
 
 
@@ -1166,10 +1301,24 @@ def _solve_tchebycheff(
 
 
 def build_and_solve(
-    weapon, mods: dict, compat_map, candidate_ids: list, prices: dict, params, *, ammo=None, ubgl_grenade=None
+    weapon,
+    mods: dict,
+    compat_map,
+    candidate_ids: list,
+    prices: dict,
+    params,
+    *,
+    ammo=None,
+    ubgl_grenade=None,
+    deadline=None,
+    objective_axis=None,
 ):
     model_start = time.perf_counter()
-    deadline = model_start + SOLVE_TIME_LIMIT_SECONDS
+    deadline = (
+        min(deadline, model_start + SOLVE_TIME_LIMIT_SECONDS)
+        if deadline is not None
+        else model_start + SOLVE_TIME_LIMIT_SECONDS
+    )
     solve_stats = _SolveStats(weapon, mods, params, ammo, ubgl_grenade)
     try:
         item_ids, idx, cb, item_to_valid_slots, base_ergo, base_weight, base_recoil_v, _ergo_idx = _build_constraints(
@@ -1195,7 +1344,7 @@ def build_and_solve(
     }
 
     if not params.use_evo_ergo:
-        if params.use_tchebycheff:
+        if params.use_tchebycheff and objective_axis is None:
             tcheby_result, ideal_attempts = _solve_tchebycheff(
                 cb,
                 n,
@@ -1219,8 +1368,36 @@ def build_and_solve(
                 return tcheby_result
             # No usable ideal point (an axis solve timed out/failed) - fall back
             # to weighted-sum rather than fail the request outright.
-        c = _weighted_objective(item_ids, idx, mods, prices, params)
-        if params.prevent_overswing:
+        c = (
+            _axis_objective_for_explore(objective_axis, item_ids, idx, mods, prices, n)
+            if objective_axis
+            else _weighted_objective(item_ids, idx, mods, prices, params)
+        )
+        if params.min_eed is not None:
+            # min_eed (Explore-internal, see explore.py) and prevent_overswing both
+            # ultimately floor the same true-EED curve, just at different levels
+            # (prevent_overswing is exactly "eed >= 0") - take whichever floor is
+            # higher rather than running two separate cutting-plane loops.
+            floor = max(params.min_eed, 0.0) if params.prevent_overswing else params.min_eed
+            result = _solve_with_min_eed(
+                c,
+                cb,
+                n,
+                item_ids,
+                idx,
+                weapon,
+                mods,
+                item_to_valid_slots,
+                prices,
+                base_ergo,
+                base_weight,
+                params.equip_ergo_modifier,
+                params.strength_level,
+                floor,
+                deadline=deadline,
+                solve_stats=solve_stats,
+            )
+        elif params.prevent_overswing:
             result = _solve_avoiding_overswing(
                 c,
                 cb,

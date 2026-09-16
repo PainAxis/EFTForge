@@ -226,7 +226,7 @@ test("formats preserve repeated placements, stats, conflicts and current-setting
     assert.ok(Math.abs(entry.comboRublePerRecoil - 10) < 1e-10);
     assert.equal(entry.sortName, "parent 子件 子件");
     assert.deepEqual(plain(entry.conflict), legacy.combos[0].conflict);
-    state.pveMode = true;
+    state.priceMode = "pve";
     state.fleaCachePve = { p: 40, c: 20 };
     assert.equal(ctx._prepareComboItems(wire)[0].totalPrice, 80);
     state.fleaCachePve = {};

@@ -1831,6 +1831,14 @@ async function switchLang(lang) {
                 <div style="overflow-y:auto; flex:1;">
                     <div class="modal-body" style="gap:0; padding:0;">
 
+                        <div class="dev-modal-section-label">Screenshot Mode</div>
+                        <div class="dev-modal-row">
+                            <span class="dev-modal-row-label" id="dev-capture-status"></span>
+                            <div class="capture-modal-actions">
+                                <button id="dev-capture-start" class="dev-debugger-run-btn">START</button>
+                                <button id="dev-capture-restore" class="dev-debugger-run-btn">RESTORE ALL</button>
+                            </div>
+                        </div>
                         <div class="dev-modal-section-label">Grid</div>
                         <div class="dev-modal-row">
                             <span class="dev-modal-row-label">Grid position editor</span>
@@ -1900,6 +1908,7 @@ async function switchLang(lang) {
                                 <button id="dev-ls-toggle-btn" class="dev-debugger-run-btn">EXPAND</button>
                             </div>
                         </div>
+                        <input id="dev-ls-search" class="dev-ls-search" type="text" placeholder="Filter keys…" style="display:none;">
                         <div id="dev-ls-list" class="dev-ls-list" style="display:none;"></div>
 
                     </div>
@@ -1910,6 +1919,23 @@ async function switchLang(lang) {
         document.body.appendChild(overlay);
 
         document.getElementById("dev-modal-close").addEventListener("click", () => overlay.remove());
+
+        const capture = EFTForge._dev?.screenshotMode;
+        function updateCaptureStatus() {
+            const status = capture?.getStatus();
+            document.getElementById('dev-capture-status').textContent = status
+                ? `${status.mode} · ${status.changes} active edit(s)` : 'Unavailable';
+            const start = document.getElementById('dev-capture-start');
+            start.textContent = status?.mode === 'idle' ? 'START' : 'RESUME';
+            start.disabled = !capture;
+            document.getElementById('dev-capture-restore').disabled = !status?.changes;
+        }
+        updateCaptureStatus();
+        document.getElementById('dev-capture-start').addEventListener('click', () => capture?.start());
+        document.getElementById('dev-capture-restore').addEventListener('click', () => {
+            capture?.restoreAll();
+            updateCaptureStatus();
+        });
 
         const _toastExamples = [
             { id: "dev-toast-info",     color: "#4a90d9", title: "Info",     msg: "This is an example info announcement." },
@@ -1975,14 +2001,18 @@ async function switchLang(lang) {
             out.style.display = "block";
         });
 
+        let _lsFilterQuery = "";
+
         function _renderLsItems() {
             const container = document.getElementById("dev-ls-list");
             if (!container) return;
+            const q = _lsFilterQuery.trim().toLowerCase();
             const keys = Object.keys(localStorage)
                 .filter(k => k.startsWith("eftforge_"))
+                .filter(k => !q || k.toLowerCase().includes(q))
                 .sort();
             if (keys.length === 0) {
-                container.innerHTML = `<div class="dev-ls-empty">No eftforge_* keys found.</div>`;
+                container.innerHTML = `<div class="dev-ls-empty">${q ? "No keys match your filter." : "No eftforge_* keys found."}</div>`;
                 return;
             }
             container.innerHTML = keys.map(k => {
@@ -1999,17 +2029,24 @@ async function switchLang(lang) {
         const _lsList = document.getElementById("dev-ls-list");
         const _lsRefreshBtn = document.getElementById("dev-ls-refresh-btn");
         const _lsToggleBtn = document.getElementById("dev-ls-toggle-btn");
+        const _lsSearch = document.getElementById("dev-ls-search");
         let _lsExpanded = false;
 
         _lsToggleBtn.addEventListener("click", () => {
             _lsExpanded = !_lsExpanded;
             _lsList.style.display = _lsExpanded ? "" : "none";
             _lsRefreshBtn.style.display = _lsExpanded ? "" : "none";
+            _lsSearch.style.display = _lsExpanded ? "" : "none";
             _lsToggleBtn.textContent = _lsExpanded ? "COLLAPSE" : "EXPAND";
             if (_lsExpanded) _renderLsItems();
         });
 
         _lsRefreshBtn.addEventListener("click", _renderLsItems);
+
+        _lsSearch.addEventListener("input", () => {
+            _lsFilterQuery = _lsSearch.value;
+            _renderLsItems();
+        });
 
         _lsList.addEventListener("click", e => {
             const btn = e.target.closest(".dev-ls-clear-btn");
@@ -2020,7 +2057,7 @@ async function switchLang(lang) {
             localStorage.removeItem(key);
             row.remove();
             if (_lsList.children.length === 0) {
-                _lsList.innerHTML = `<div class="dev-ls-empty">No eftforge_* keys found.</div>`;
+                _lsList.innerHTML = `<div class="dev-ls-empty">${_lsFilterQuery.trim() ? "No keys match your filter." : "No eftforge_* keys found."}</div>`;
             }
         });
     }

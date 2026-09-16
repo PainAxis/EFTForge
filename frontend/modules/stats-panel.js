@@ -20,8 +20,9 @@ function _collectInstalledItemsFlat(node, result = []) {
 function _saveFleaCache() {
     try {
         const ts = new Date().toISOString();
-        localStorage.setItem("eftforge_flea_pvp", JSON.stringify(EFTForge.state.fleaCachePvp));
-        localStorage.setItem("eftforge_flea_pve", JSON.stringify(EFTForge.state.fleaCachePve));
+        localStorage.setItem("eftforge_flea_pvp",       JSON.stringify(EFTForge.state.fleaCachePvp));
+        localStorage.setItem("eftforge_flea_pve",       JSON.stringify(EFTForge.state.fleaCachePve));
+        localStorage.setItem("eftforge_flea_pvpseason", JSON.stringify(EFTForge.state.fleaCacheSeasonal));
         localStorage.setItem("eftforge_flea_ts",  ts);
         EFTForge.state.fleaLastFetched = ts;
     } catch (_) {}
@@ -29,13 +30,16 @@ function _saveFleaCache() {
 
 function restoreFleaCache() {
     try {
-        const pvp = localStorage.getItem("eftforge_flea_pvp");
-        const pve = localStorage.getItem("eftforge_flea_pve");
-        const ts  = localStorage.getItem("eftforge_flea_ts");
-        if (pvp) EFTForge.state.fleaCachePvp  = JSON.parse(pvp);
-        if (pve) EFTForge.state.fleaCachePve  = JSON.parse(pve);
-        if (ts)  EFTForge.state.fleaLastFetched = ts;
-        EFTForge.state.pveMode = localStorage.getItem("eftforge_pve_mode") === "1";
+        const pvp       = localStorage.getItem("eftforge_flea_pvp");
+        const pve       = localStorage.getItem("eftforge_flea_pve");
+        const pvpSeason = localStorage.getItem("eftforge_flea_pvpseason");
+        const ts        = localStorage.getItem("eftforge_flea_ts");
+        if (pvp)       EFTForge.state.fleaCachePvp      = JSON.parse(pvp);
+        if (pve)       EFTForge.state.fleaCachePve      = JSON.parse(pve);
+        if (pvpSeason) EFTForge.state.fleaCacheSeasonal = JSON.parse(pvpSeason);
+        if (ts)        EFTForge.state.fleaLastFetched = ts;
+        const savedMode = localStorage.getItem("eftforge_price_mode");
+        EFTForge.state.priceMode = (savedMode === "pve" || savedMode === "pvpSeason") ? savedMode : "pvp";
         const tl = localStorage.getItem("eftforge_trader_levels");
         if (tl) EFTForge.state.traderLevels = JSON.parse(tl);
     } catch (_) {}
@@ -173,13 +177,15 @@ async function refetchFleaPrices() {
     _fleaFetching = true;
     _startRefetchAnimation();
 
-    EFTForge.state.fleaCachePvp  = {};
-    EFTForge.state.fleaCachePve  = {};
+    EFTForge.state.fleaCachePvp      = {};
+    EFTForge.state.fleaCachePve      = {};
+    EFTForge.state.fleaCacheSeasonal = {};
     EFTForge.state.fleaLastFetched = null;
     // Drop the memoized JSON-API price maps so this refetch pulls fresh data.
     EFTForge.api.clearFleaPriceCache();
     localStorage.removeItem("eftforge_flea_pvp");
     localStorage.removeItem("eftforge_flea_pve");
+    localStorage.removeItem("eftforge_flea_pvpseason");
     localStorage.removeItem("eftforge_flea_ts");
 
     try {
@@ -204,12 +210,14 @@ async function ensureFleaPrices(itemIds) {
     const missing = itemIds.filter(id => !(id in EFTForge.state.fleaCachePvp));
     if (missing.length === 0) return;
     try {
-        const [pvp, pve] = await Promise.all([
+        const [pvp, pve, pvpSeason] = await Promise.all([
             fetchFleaPrices(missing, "regular"),
             fetchFleaPrices(missing, "pve"),
+            fetchFleaPrices(missing, "pvp-season"),
         ]);
         Object.assign(EFTForge.state.fleaCachePvp, pvp);
         Object.assign(EFTForge.state.fleaCachePve, pve);
+        Object.assign(EFTForge.state.fleaCacheSeasonal, pvpSeason);
         _saveFleaCache();
     } catch (err) {
         console.warn("Could not fetch flea prices:", err);
@@ -282,8 +290,10 @@ async function renderPriceOverview() {
     await ensureFleaPrices(allIds);
     if (_fetchDotsInterval) { clearInterval(_fetchDotsInterval); _fetchDotsInterval = null; }
 
-    const pve = EFTForge.state.pveMode;
-    const fleaCache = pve ? EFTForge.state.fleaCachePve : EFTForge.state.fleaCachePvp;
+    const priceMode = EFTForge.state.priceMode;
+    const fleaCache = priceMode === "pve" ? EFTForge.state.fleaCachePve
+        : priceMode === "pvpSeason" ? EFTForge.state.fleaCacheSeasonal
+        : EFTForge.state.fleaCachePvp;
 
     function _priceInfoForItem(item) {
         let traderPrice = null;
@@ -447,7 +457,6 @@ async function renderPriceOverview() {
         }
     }
 
-    const pveBtnActive = pve ? "active" : "";
     const ts = EFTForge.state.fleaLastFetched;
     const tsLabel = ts
         ? new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -460,10 +469,11 @@ async function renderPriceOverview() {
         <div class="stats-section">
             <div class="cost-section-header">
                 <div class="section-title">${t("stats.buildCost")}</div>
-                <button class="compare-toggle ${pveBtnActive}" id="pve-mode-toggle">
-                    ${t("stats.pveModeLabel")}
-                    <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
-                </button>
+                <div class="price-mode-btns" id="price-mode-btns">
+                    <button id="price-mode-pvp" class="toggle-btn${priceMode === "pvp" ? " active" : ""}">${t("stats.pvpModeLabel")}</button>
+                    <button id="price-mode-pvpseason" class="toggle-btn price-mode-pvpseason${priceMode === "pvpSeason" ? " active" : ""}">${t("stats.pvpSeasonModeLabel")}</button>
+                    <button id="price-mode-pve" class="toggle-btn price-mode-pve${priceMode === "pve" ? " active" : ""}">${t("stats.pveModeLabel")}</button>
+                </div>
             </div>
             <div class="cost-meta-row">
                 <div class="cost-flea-ts">${t("stats.fleaTs")} ${escapeHtml(tsLabel)} &middot; <button id="flea-refetch-btn" class="cost-flea-refetch-btn">${t("stats.refetchFlea")}</button></div>
@@ -483,12 +493,15 @@ async function renderPriceOverview() {
         </div>
     `;
 
-    document.getElementById("pve-mode-toggle")?.addEventListener("click", (e) => {
-        EFTForge.state.pveMode = !EFTForge.state.pveMode;
-        localStorage.setItem("eftforge_pve_mode", EFTForge.state.pveMode ? "1" : "0");
-        e.currentTarget.classList.toggle("active", EFTForge.state.pveMode);
+    document.getElementById("price-mode-btns")?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".toggle-btn");
+        if (!btn) return;
+        const mode = btn.id === "price-mode-pve" ? "pve" : btn.id === "price-mode-pvpseason" ? "pvpSeason" : "pvp";
+        if (mode === EFTForge.state.priceMode) return;
+        EFTForge.state.priceMode = mode;
+        localStorage.setItem("eftforge_price_mode", mode);
         EFTForge.utils.updateBlobColor();
-        setTimeout(() => renderPriceOverview(), 220);
+        setTimeout(() => renderPriceOverview(), 160);
     });
 
     document.getElementById("trader-levels-toggle")?.addEventListener("click", () => {
@@ -542,60 +555,123 @@ function _insertHiddenStatsPanel(animate = true) {
   const fmt = (v, decimals = 2, spt = false) => v != null ? parseFloat(v).toFixed(decimals) : (spt ? "?" : "-");
   const fmtInt = (v) => v != null ? v : "-";
   const fmtFactor = (v) => v != null ? "×" + parseFloat(v).toFixed(2) : "-";
-  const rows = [
-    [t("hidden.heatFactor"),    fmtFactor(EFTForge.state.lastHeatFactor),                                        t("hidden.tip.heatFactor")],
-    [t("hidden.coolingFactor"), fmtFactor(EFTForge.state.lastCoolingFactor),                                     t("hidden.tip.coolingFactor")],
-    [t("hidden.durabilityBurn"), fmtFactor(EFTForge.state.lastDurabilityBurnFactor),                             t("hidden.tip.durabilityBurn")],
-    [t("hidden.aimSens"),       fmt(gun.aim_sensitivity, 2, true),                                                t("hidden.tip.aimSens")],
-    [t("hidden.camAngleStep"),  fmt(gun.cam_angle_step, 2, true),                                                 t("hidden.tip.camAngleStep")],
-    [t("hidden.camSnap"),       fmt(gun.camera_snap, 1),                                                          t("hidden.tip.camSnap")],
-    [t("hidden.devCurve"),      fmt(gun.deviation_curve),                                                         t("hidden.tip.devCurve")],
-    [t("hidden.devMax"),        fmt(gun.deviation_max, 1),                                                        t("hidden.tip.devMax")],
-    [t("hidden.mountCamSnap"),  gun.mount_cam_snap != null ? "\u00d7" + parseFloat(gun.mount_cam_snap).toFixed(0) : "?", t("hidden.tip.mountCamSnap")],
-    [t("hidden.mountHRec"),     gun.mount_h_rec    != null ? "\u00d7" + parseFloat(gun.mount_h_rec).toFixed(2)   : "?", t("hidden.tip.mountHRec")],
-    [t("hidden.mountVRec"),     gun.mount_v_rec    != null ? "\u00d7" + parseFloat(gun.mount_v_rec).toFixed(2)   : "?", t("hidden.tip.mountVRec")],
-    [t("hidden.mountBreath"),   gun.mount_breath   != null ? "\u00d7" + parseFloat(gun.mount_breath).toFixed(1)  : "?", t("hidden.tip.mountBreath")],
-    [t("hidden.recAngle"),      fmtInt(gun.recoil_angle) + (gun.recoil_angle != null ? "\u00b0" : ""),           t("hidden.tip.recAngle")],
-    [t("hidden.recHandRot"),    gun.rec_hand_rot   != null ? "\u00d7" + parseFloat(gun.rec_hand_rot).toFixed(2)  : "?", t("hidden.tip.recHandRot")],
-    [t("hidden.recDispersion"), fmtInt(gun.recoil_dispersion),                                                    t("hidden.tip.recDispersion")],
-[t("hidden.recReturnSpeed"), fmt(gun.rec_return_speed, 1, true),                                              t("hidden.tip.recReturnSpeed")],
+  const sections = [
+    {
+      title: t("hidden.sectionGeneral"),
+      rows: [
+        [t("hidden.fireRate"),      gun.fire_rate != null ? gun.fire_rate + " RPM" : "-",                        t("hidden.tip.fireRate")],
+        [t("hidden.heatFactor"),    fmtFactor(EFTForge.state.lastHeatFactor),                                    t("hidden.tip.heatFactor")],
+        [t("hidden.coolingFactor"), fmtFactor(EFTForge.state.lastCoolingFactor),                                 t("hidden.tip.coolingFactor")],
+        [t("hidden.durabilityBurn"), fmtFactor(EFTForge.state.lastDurabilityBurnFactor),                         t("hidden.tip.durabilityBurn")],
+      ],
+    },
+    {
+      title: t("hidden.sectionCameraAim"),
+      rows: [
+        [t("hidden.camSnap"),   fmt(gun.camera_snap, 1),                                                         t("hidden.tip.camSnap")],
+        [t("hidden.camRecoil"), fmt(gun.camera_recoil, 2, true),                                                 t("hidden.tip.camRecoil")],
+        [t("hidden.camAngleStep"), fmt(gun.cam_angle_step, 2, true),                                             t("hidden.tip.camAngleStep")],
+        [t("hidden.devCurve"),  fmt(gun.deviation_curve),                                                        t("hidden.tip.devCurve")],
+        [t("hidden.devMax"),    fmt(gun.deviation_max, 1),                                                       t("hidden.tip.devMax")],
+      ],
+    },
+    {
+      title: t("hidden.sectionRecoilPattern"),
+      rows: [
+        [t("hidden.recAngle"),      fmtInt(gun.recoil_angle) + (gun.recoil_angle != null ? "°" : ""),       t("hidden.tip.recAngle")],
+        [t("hidden.recDispersion"), fmtInt(gun.recoil_dispersion),                                               t("hidden.tip.recDispersion")],
+        [t("hidden.recHandRot"),    gun.rec_hand_rot != null ? "×" + parseFloat(gun.rec_hand_rot).toFixed(2) : "?", t("hidden.tip.recHandRot")],
+        [t("hidden.recReturnSpeed"), fmt(gun.rec_return_speed, 1, true),                                         t("hidden.tip.recReturnSpeed")],
+      ],
+    },
+    {
+      title: t("hidden.sectionMounted"),
+      rows: [
+        [t("hidden.mountCamSnap"), gun.mount_cam_snap != null ? "×" + parseFloat(gun.mount_cam_snap).toFixed(0) : "?", t("hidden.tip.mountCamSnap")],
+        [t("hidden.mountHRec"),    gun.mount_h_rec    != null ? "×" + parseFloat(gun.mount_h_rec).toFixed(2)   : "?", t("hidden.tip.mountHRec")],
+        [t("hidden.mountVRec"),    gun.mount_v_rec    != null ? "×" + parseFloat(gun.mount_v_rec).toFixed(2)   : "?", t("hidden.tip.mountVRec")],
+        [t("hidden.mountBreath"),  gun.mount_breath   != null ? "×" + parseFloat(gun.mount_breath).toFixed(1)  : "?", t("hidden.tip.mountBreath")],
+      ],
+    },
+    {
+      title: t("hidden.sectionStabilization"),
+      rows: [
+        [t("hidden.recStableShot"),  fmtInt(gun.recoil_stable_index_shot),                                       t("hidden.tip.recStableShot")],
+        [t("hidden.recStableStep"),  gun.recoil_stable_angle_step != null ? parseFloat(gun.recoil_stable_angle_step).toFixed(2) + "°" : "?", t("hidden.tip.recStableStep")],
+        [t("hidden.recStableAngle"), gun.recoil_stable_angle != null ? parseFloat(gun.recoil_stable_angle).toFixed(0) + "°" : "?", t("hidden.tip.recStableAngle")],
+      ],
+    },
+    {
+      title: t("hidden.sectionAdvancedRecovery"),
+      rows: [
+        [t("hidden.recDamping"),     gun.recoil_damping_hand_rot != null ? "×" + parseFloat(gun.recoil_damping_hand_rot).toFixed(2) : "?", t("hidden.tip.recDamping")],
+        [t("hidden.recPathDamping"), gun.recoil_return_path_damping != null ? "×" + parseFloat(gun.recoil_return_path_damping).toFixed(2) : "?", t("hidden.tip.recPathDamping")],
+        [t("hidden.recPathOffset"),  fmt(gun.recoil_return_path_offset, 3, true),                                t("hidden.tip.recPathOffset")],
+        [t("hidden.recPosZMult"),    gun.recoil_pos_z_mult != null ? "×" + parseFloat(gun.recoil_pos_z_mult).toFixed(2) : "?", t("hidden.tip.recPosZMult")],
+        [t("hidden.recCenter"),      (gun.recoil_center_y != null && gun.recoil_center_z != null) ? parseFloat(gun.recoil_center_y).toFixed(2) + " / " + parseFloat(gun.recoil_center_z).toFixed(2) : "?", t("hidden.tip.recCenter")],
+      ],
+    },
   ];
-  const rowsHtml = rows.map(([label, val, tip]) =>
-    `<div class="hidden-stat-row" data-tooltip="${escapeHtml(tip)}"><span class="hidden-stat-label">${label}</span><span class="hidden-stat-value">${val}</span></div>`
-  ).join("");
-  const panel = document.createElement("div");
-  panel.className = "stamina-panel";
-  panel.id = "hidden-stats-panel";
-  panel.innerHTML = `<div class="hidden-stats-grid">${rowsHtml}</div>`;
-  document.getElementById("hidden-stats-anchor").after(panel);
-  if (animate) {
-    panel.style.height = "0px";
-    panel.style.opacity = "0";
-    void panel.offsetHeight;
-    panel.style.height = panel.scrollHeight + "px";
-    panel.style.opacity = "1";
-    panel.addEventListener("transitionend", () => {
-      panel.style.height = "";
-      panel.style.opacity = "";
-    }, { once: true });
-  }
-  EFTForge.state.hiddenStatsOpen = true;
+  const sectionsHtml = sections.map(({ title, rows }) => {
+    const rowsHtml = rows.map(([label, val, tip]) =>
+      `<div class="hidden-stat-row" data-tooltip="${escapeHtml(tip)}"><span class="hidden-stat-label">${label}</span><span class="hidden-stat-value">${val}</span></div>`
+    ).join("");
+    return `<div class="hidden-stats-section"><div class="hidden-stats-section-title">${escapeHtml(title)}</div><div class="hidden-stats-grid">${rowsHtml}</div></div>`;
+  }).join("");
+  const hintHtml = `<div class="hidden-stats-hint"><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M10 2L18 17H2L10 2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><line x1="10" y1="7.5" x2="10" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="14.5" r="1.2" fill="currentColor"/></svg><span>${escapeHtml(t("hidden.speculationHint"))}</span></div>`;
+
   const btn = document.getElementById("hidden-stats-btn");
-  if (btn) btn.classList.add("open");
+  if (!btn) return;
+
+  let panel = document.getElementById("hidden-stats-panel");
+  const isNew = !panel;
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.className = "hidden-stats-popover";
+    panel.id = "hidden-stats-panel";
+    document.body.appendChild(panel);
+  }
+  panel.innerHTML = `${sectionsHtml}${hintHtml}`;
+  _positionHiddenStatsPanel(panel, btn);
+
+  if (isNew && animate) {
+    void panel.offsetHeight;
+    requestAnimationFrame(() => panel.classList.add("show"));
+  } else {
+    panel.classList.add("show");
+  }
+
+  EFTForge.state.hiddenStatsOpen = true;
+  btn.classList.add("open");
+}
+
+// Anchors the popover to the toggle button, popping out to the right; falls
+// back to the left if there isn't enough room (narrow window), and always
+// clamps its height to whatever vertical space is left below the button so
+// it scrolls internally instead of running off the bottom of the screen.
+function _positionHiddenStatsPanel(panel, btn) {
+  const margin = 10;
+  const width = panel.offsetWidth || 380;
+  const rect = btn.getBoundingClientRect();
+
+  let left = rect.right + margin;
+  if (left + width + margin > window.innerWidth) {
+    left = Math.max(margin, rect.left - width - margin);
+  }
+  const top = Math.max(margin, Math.min(rect.top, window.innerHeight - margin - 100));
+
+  panel.style.left = left + "px";
+  panel.style.top = top + "px";
+  panel.style.maxHeight = (window.innerHeight - top - margin) + "px";
 }
 
 function _removeHiddenStatsPanel() {
   const existing = document.getElementById("hidden-stats-panel");
-  if (!existing) return;
-  existing.style.height = existing.scrollHeight + "px";
-  existing.style.opacity = "1";
-  void existing.offsetHeight;
-  existing.style.height = "0px";
-  existing.style.opacity = "0";
-  existing.style.marginTop = "0px";
-  existing.style.padding = "0px";
-  existing.style.borderWidth = "0px";
-  setTimeout(() => existing.remove(), 200);
+  if (existing) {
+    existing.classList.remove("show");
+    existing.addEventListener("transitionend", () => existing.remove(), { once: true });
+    setTimeout(() => existing.remove(), 250);
+  }
   EFTForge.state.hiddenStatsOpen = false;
   const btn = document.getElementById("hidden-stats-btn");
   if (btn) btn.classList.remove("open");
@@ -744,6 +820,7 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
   const statsBox = document.getElementById("stats");
 
   if (!EFTForge.state.currentGun) {
+    if (EFTForge.state.hiddenStatsOpen) _removeHiddenStatsPanel();
     statsBox.innerHTML = `
       <div style="opacity:0.5; padding:40px; text-align:center;">
         ${t("stats.selectWeapon")}
@@ -883,7 +960,7 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
     <div class="stats-section">
       <div class="section-title stats-title-row">
         <span>${t("stats.title")}</span>
-        <button class="hidden-stats-btn${EFTForge.state.hiddenStatsOpen ? " open" : ""}" id="hidden-stats-btn" data-tooltip="${t("hidden.tooltip")}"><span class="hidden-stats-label">${t("hidden.title")}</span><span class="hidden-stats-arrow">&#9660;</span></button>
+        <button class="hidden-stats-btn${EFTForge.state.hiddenStatsOpen ? " open" : ""}" id="hidden-stats-btn" data-tooltip="${t("hidden.tooltip")}"><span class="hidden-stats-label">${t("hidden.title")}</span><span class="hidden-stats-arrow">&#9656;</span></button>
       </div>
 
       <div class="stat-bar-row">
@@ -943,13 +1020,12 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
       </div>
       </div>
       </div>
-      <div id="hidden-stats-anchor"></div>
     </div>
   `;
 
-  // Recreate hidden stats panel fresh (with current language) if it was open.
-  // Skip the opening animation here - the panel was already open, this is just
-  // re-parenting it after stats-content's innerHTML got rebuilt.
+  // Refresh the popover's content (heat/cooling/durability factors change with
+  // attachments) if it was left open across this stats recalculation. Skip the
+  // opening animation - it was already visible, this is just a data refresh.
   if (EFTForge.state.hiddenStatsOpen && EFTForge.state.currentGun) {
     _insertHiddenStatsPanel(false);
   }
@@ -1248,3 +1324,24 @@ document.addEventListener("click", (e) => {
         _removeHiddenStatsPanel();
     }
 }, true);
+
+// The advanced stats popover floats above the whole page, so it needs its own
+// outside-click / Escape / resize handling rather than relying on the #slots
+// listener above (which only covers clicks inside the workbench).
+document.addEventListener("click", (e) => {
+    if (!document.getElementById("hidden-stats-panel")) return;
+    if (e.target.closest("#hidden-stats-panel") || e.target.closest("#hidden-stats-btn")) return;
+    _removeHiddenStatsPanel();
+}, true);
+
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.getElementById("hidden-stats-panel")) {
+        _removeHiddenStatsPanel();
+    }
+});
+
+window.addEventListener("resize", () => {
+    const panel = document.getElementById("hidden-stats-panel");
+    const btn = document.getElementById("hidden-stats-btn");
+    if (panel && btn) _positionHiddenStatsPanel(panel, btn);
+});

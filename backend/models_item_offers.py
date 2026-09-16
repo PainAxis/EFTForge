@@ -31,5 +31,12 @@ class ItemOffer(Base):
     is_flea = Column(Boolean, default=False)
     min_level_flea = Column(Integer, nullable=True)  # player account level required; flea rows only
 
+    # "pvp" | "pve" | "pvpSeason" for flea rows - tarkov.dev's flea markets genuinely
+    # diverge per game mode. Null for trader rows: buy/sell prices don't vary by mode
+    # (confirmed against tarkov.dev's own data), so one trader row already covers all
+    # three. get_best_price() treats a null game_mode on a flea row (pre-migration data)
+    # as "pvp" so existing rows keep working until the next sync repopulates them.
+    game_mode = Column(String, nullable=True, index=True)
+
     is_barter = Column(Boolean, default=False)
     barter_requirements = Column(Text, nullable=True)  # JSON [{"item_id": ..., "count": ...}] - unpopulated for now

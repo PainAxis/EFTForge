@@ -615,16 +615,11 @@ let _tpLastY       = 0;
    key outlives any particular tab, and stats keys multiply by ammo/strength
    settings, so neither has a natural per-tab owner to prune against.
 
-   The in-flight maps matter more than the caches. renderTabBar() re-renders the
-   chip strip underneath a stationary cursor, and the replacement chip fires a
-   fresh mouseenter while renderTabBar separately re-connects the tooltip - so
-   _tpShow can run twice for one hover. The generation counter discards the
-   loser's DOM update, but without these both calls would still have hit the
-   network, and for the image path that means two server-side generations. */
+   Share in-flight stats locally. Let the backend share image jobs so leaving
+   a hover can withdraw its request without cancelling another consumer. */
 const TP_CACHE_MAX = 60;
 
 const _tpImageCache    = new Map(); // `${gunId}:${pairsKey}` -> generated image URL
-const _tpImageInflight = new Map(); // same key -> Promise<url|null> currently generating
 const _tpStatsCache    = new Map(); // stats key (see _tpStatsKey) -> calculateBuild() response
 const _tpStatsInflight = new Map(); // same key -> Promise<data|null> currently calculating
 
@@ -657,7 +652,7 @@ function _tpStatsKey(tab) {
     ].join("|");
 }
 
-// Shared by the stats and image paths: return the cached value, join an
+// Return cached stats, join an
 // identical request already in flight, or start one and register it.
 function _tpDedupe(cache, inflight, key, run) {
     const cached = _tpCacheGet(cache, key);
@@ -997,27 +992,71 @@ function _tpSetQueued(wrap, isQueued) {
 // when hovering several tab chips in a row on a slow connection: without this,
 // the previous tab's gun image stays crisp on screen until the new one decodes,
 // which reads as "the tooltip is showing the wrong gun."
+const _tpImageLoadCleanup = new WeakMap();
+
 function _tpSetImg(imgEl, url) {
     if (!imgEl || !url) return;
+    _tpImageLoadCleanup.get(imgEl)?.();
     imgEl.dataset.tpPendingSrc = url;
     imgEl.style.opacity = "0.35";
     imgEl.style.filter  = "brightness(0.85)";
+    const cleanup = () => {
+        clearTimeout(timer);
+        imgEl.removeEventListener("load", onDone);
+        imgEl.removeEventListener("error", onDone);
+        _tpImageLoadCleanup.delete(imgEl);
+    };
     const onDone = () => {
-        if (imgEl.dataset.tpPendingSrc === url) {
+        cleanup();
+        if (imgEl.dataset.tpPendingSrc === url && imgEl.dataset.tpGenerating !== "1") {
             imgEl.style.opacity = "";
             imgEl.style.filter  = "";
         }
     };
+    const timer = setTimeout(onDone, 5000);
+    _tpImageLoadCleanup.set(imgEl, cleanup);
     imgEl.addEventListener("load", onDone, { once: true });
     imgEl.addEventListener("error", onDone, { once: true });
-    imgEl.src = url;
+    if (imgEl.getAttribute("src") !== url) imgEl.src = url;
+    if (imgEl.complete) onDone();
 }
+
+function _tpSyncActiveImage() {
+    if (!_tpTooltipEl?.classList.contains("visible") || _tpActiveTabId !== EFTForge.state.activeTabId) return;
+    const tab = _tabById(_tpActiveTabId);
+    const gun = EFTForge.state.currentGun;
+    if (!tab || !gun || tab.gunId !== gun.id) return;
+    const imgEl = _tpTooltipEl.querySelector(".tab-preview-img");
+    const imgWrap = _tpTooltipEl.querySelector(".tab-preview-img-wrap");
+    if (!imgEl || !imgWrap) return;
+
+    // Read the live build so tab-record synchronization cannot delay the image update.
+    const key = _pairsKey(collectSlotPairs(EFTForge.state.buildTree || { children: {} }));
+    const enabled = window._bpIsEnabled?.();
+    const liveUrl = enabled && window._bpGetLastKey?.() === key ? window._bpGetLastImageUrl?.() : null;
+    const generating = enabled && !window._bpIsGloballyDisabled?.() && window._bpIsInflight?.() && !liveUrl;
+    imgEl.dataset.tpGenerating = generating ? "1" : "0";
+    imgEl.referrerPolicy = liveUrl && EFTForge.state.communityBuild?.cardImageUrl === liveUrl ? "no-referrer" : "";
+    const fallback = (enabled && key === "" ? gun.bare_image_512_link : null) || gun.image_512_link || gun.icon_link || "";
+    _tpSetImg(imgEl, liveUrl || fallback);
+    if (generating) {
+        imgEl.style.opacity = "0.35";
+        imgEl.style.filter = "brightness(0.85)";
+    }
+    _tpSetQueued(imgWrap, !!(generating && window._bpIsQueued?.()));
+}
+
+window.addEventListener("eftforge:build-preview-change", _tpSyncActiveImage);
 
 // Resolve (and, for background tabs, lazily generate) the preview image for a
 // tab's chip tooltip. Mirrors build-preview.js's _bpGenerate state machine
 // (dimming + queue overlay) but scoped to the tooltip's own <img>, and never
 // touches the shared _bp* state that drives the main gun image elsewhere.
 async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
+    if (tab.id === EFTForge.state.activeTabId) {
+        _tpSyncActiveImage();
+        return;
+    }
     if (!window._bpIsEnabled?.()) return; // static asset already showing
 
     // Community build with a pre-rendered card image (hosted on Gitee) - use it directly
@@ -1030,26 +1069,8 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
         return;
     }
 
-    const key = _tabPairsKey(tab);
-
-    if (tab.id === EFTForge.state.activeTabId) {
-        // Active tab's image is already being managed by build-preview.js - just mirror it.
-        // Its cached URL lags a tab switch: the generation for the newly activated build
-        // is still in flight for a moment, during which _bpLastKey/_bpLastImageUrl still
-        // describe the build we just switched AWAY from. Only trust them when the key
-        // actually matches this tab's current build, otherwise the tooltip would show the
-        // previous tab's gun right after activating this one.
-        if (window._bpGetLastKey?.() === key) {
-            const liveUrl = window._bpGetLastImageUrl?.();
-            if (liveUrl) _tpSetImg(imgEl, liveUrl);
-        }
-        if (window._bpIsInflight?.()) {
-            imgEl.style.opacity = "0.35";
-            imgEl.style.filter  = "brightness(0.85)";
-        }
-        if (window._bpIsQueued?.()) _tpSetQueued(imgWrap, true);
-        return;
-    }
+    const pairs = (tab.pairs || []).map(pair => pair.slice());
+    const key = _pairsKey(pairs);
 
     // Keyed on gun+build, not tab id: two tabs holding the same build (a
     // Duplicate, or the same community build opened twice) share one generation.
@@ -1087,57 +1108,49 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
     imgEl.style.opacity = "0.35";
     imgEl.style.filter  = "brightness(0.85)";
 
+    _tpImgAbort?.abort();
+    const abort = new AbortController();
+    _tpImgAbort = abort;
+    const current = () => _tpGen === gen && !abort.signal.aborted
+        && window._bpIsEnabled?.() && !_bpGlobalDisabled;
     try {
-        const url = await _tpDedupe(_tpImageCache, _tpImageInflight, cacheKey, async () => {
-            // Warm slotCache for any pairs items the gun's own factory data didn't cover.
-            const uncachedItemIds = [...new Set(
-                (tab.pairs || []).map(([, iid]) => iid).filter(iid => !EFTForge.state.slotCache[iid])
-            )];
-            if (uncachedItemIds.length) {
-                try {
-                    const batch = await fetchItemSlotsBatch(uncachedItemIds);
-                    for (const [iid, slots] of Object.entries(batch)) cacheSet(EFTForge.state.slotCache, iid, slots);
-                } catch (_) { /* image gen below will just skip unresolved slots */ }
+        const uncachedItemIds = [...new Set(
+            pairs.map(([, iid]) => iid).filter(iid => !EFTForge.state.slotCache[iid])
+        )];
+        if (uncachedItemIds.length) {
+            const batch = await fetchItemSlotsBatch(uncachedItemIds);
+            for (const [iid, slots] of Object.entries(batch)) cacheSet(EFTForge.state.slotCache, iid, slots);
+        }
+        if (!current()) return;
+        const sptData = _bpBuildSptItemsForPairs(gun, pairs);
+        if (!sptData) return;
+        try {
+            const busyResp = await fetch(`${EFTForge.config.API_BASE}/build-image/busy`, { signal: abort.signal });
+            if (busyResp.ok) {
+                const busyData = await busyResp.json();
+                if (current() && busyData.busy) _tpSetQueued(imgWrap, true);
             }
-
-            const sptData = _bpBuildSptItemsForPairs(gun, tab.pairs || []);
-            if (!sptData) return null;
-
-            // The abort controller is deliberately NOT shared with the dedupe
-            // entry: hovering away aborts this hover's view of the request, but a
-            // second hover that joined the same in-flight generation still wants
-            // the result. Only the /build-image POST itself is left to finish.
-            const abort = new AbortController();
-            _tpImgAbort = abort;
-            try {
-                try {
-                    const busyResp = await fetch(`${EFTForge.config.API_BASE}/build-image/busy`, { signal: abort.signal });
-                    if (busyResp.ok) {
-                        const busyData = await busyResp.json();
-                        if (_tpGen === gen && busyData.busy) _tpSetQueued(imgWrap, true);
-                    }
-                } catch (_) { /* best-effort queue indicator only */ }
-
-                const resp = await fetch(`${EFTForge.config.API_BASE}/build-image`, {
-                    method:  "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body:    JSON.stringify(sptData),
-                });
-                if (!resp.ok) return null;
-                const data = await resp.json();
-                return data.image_url || null;
-            } finally {
-                if (_tpImgAbort === abort) _tpImgAbort = null;
-            }
+        } catch (_) { /* Keep the queue indicator best-effort. */ }
+        if (!current()) return;
+        const resp = await fetch(`${EFTForge.config.API_BASE}/build-image`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...sptData, source: "hover" }),
+            signal: abort.signal,
         });
-
-        if (url && _tpGen === gen) imgEl.src = url;
+        if (!resp.ok || !current()) return;
+        const data = await resp.json();
+        if (data.image_url && current()) {
+            _tpCachePut(_tpImageCache, cacheKey, data.image_url);
+            imgEl.src = data.image_url;
+        }
     } catch (_) {
-        // Network failure - leave the static fallback showing.
+        // Leave the static fallback showing when generation or slot resolution fails.
     } finally {
+        if (_tpImgAbort === abort) _tpImgAbort = null;
         if (_tpGen === gen) {
             imgEl.style.opacity = "";
-            imgEl.style.filter  = "";
+            imgEl.style.filter = "";
             _tpSetQueued(imgWrap, false);
         }
     }
@@ -1147,11 +1160,22 @@ async function _tpShow(tab, cx, cy, connected = false) {
     const gun = gunById(tab.gunId);
     if (!gun) return;
 
+    _tpImgAbort?.abort();
+    _tpImgAbort = null;
     const gen = ++_tpGen;
     const isSameTab = tab.id === _tpActiveTabId;
     _tpActiveTabId = tab.id;
 
     const el = _tpEnsureTooltipEl();
+    const previousImg = el.querySelector(".tab-preview-img");
+    if (previousImg) {
+        _tpImageLoadCleanup.get(previousImg)?.();
+        delete previousImg.dataset.tpGenerating;
+        previousImg.style.opacity = "";
+        previousImg.style.filter = "";
+    }
+    const previousWrap = el.querySelector(".tab-preview-img-wrap");
+    if (previousWrap) _tpSetQueued(previousWrap, false);
     const staticImg = gun.image_512_link || gun.icon_link || "";
 
     // "Connected" = swapping straight from another chip's still-visible

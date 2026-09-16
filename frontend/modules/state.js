@@ -79,9 +79,10 @@ window.EFTForge.state = {
 
     // Price view
     priceView:      false,
-    pveMode:        false,
-    fleaCachePvp:   {},
-    fleaCachePve:   {},
+    priceMode:      "pvp", // "pvp" | "pve" | "pvpSeason"
+    fleaCachePvp:      {},
+    fleaCachePve:      {},
+    fleaCacheSeasonal: {},
     fleaLastFetched: null, // ISO string timestamp of last full flea fetch
 
     // Trader loyalty levels (normalizedName -> 1-4, default 4 = max)

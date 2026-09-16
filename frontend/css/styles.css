@@ -957,6 +957,9 @@ header:not(.header-expanded) .header-nav-btn-icon {
 
 #stats {
   flex-shrink: 0;
+  /* #slots reserves a scrollbar gutter even when it isn't scrolling (10px
+     padding + 10px gutter); #stats has no scrollbar, so its padding alone
+     has to make up the difference to keep both boxes the same width. */
   padding-right: 20px;
 }
 
@@ -1216,17 +1219,81 @@ header:not(.header-expanded) .header-nav-btn-icon {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 0;
-  background: none;
-  border: none;
+  padding: 4px 9px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 4px;
   cursor: pointer;
   user-select: none;
   font-family: "Bender", Arial, sans-serif;
   flex-shrink: 0;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.hidden-stats-btn:hover {
+  background: #252525;
+  border-color: #444;
+}
+
+.hidden-stats-btn.open {
+  background: #262210;
+  border-color: #f5c542;
+}
+
+/* Advanced stats popover: floats above the whole page (appended to <body>,
+   not #stats) so it can pop out past the sidebar instead of pushing the
+   workbench out of view. Position/max-height are set inline by JS, anchored
+   to the toggle button. */
+.hidden-stats-popover {
+  position: fixed;
+  /* Below #eft-tooltip's z-index (9999) - both are appended to <body>, and
+     since this panel is inserted later in DOM order it would otherwise win
+     the stacking tie and cover row tooltips hovered inside it. */
+  z-index: 500;
+  width: 380px;
+  max-width: calc(100vw - 20px);
+  padding: 12px 14px;
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #444 #111;
+  opacity: 0;
+  transform: translateX(-8px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.hidden-stats-popover.show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.hidden-stats-popover::-webkit-scrollbar {
+  width: 10px;
+}
+
+.hidden-stats-popover::-webkit-scrollbar-track {
+  background: #111;
+}
+
+.hidden-stats-popover::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 6px;
+  border: 2px solid #111;
+}
+
+.hidden-stats-popover::-webkit-scrollbar-thumb:hover {
+  background: #555;
 }
 
 .hidden-stats-btn:hover .hidden-stats-label {
   color: #aaa;
+}
+
+.hidden-stats-btn.open .hidden-stats-label {
+  color: #f5c542;
 }
 
 .hidden-stats-label {
@@ -1239,14 +1306,30 @@ header:not(.header-expanded) .header-nav-btn-icon {
 }
 
 .hidden-stats-arrow {
-  font-size: 8px;
+  font-size: 14px;
   color: #666;
-  transition: transform 0.2s;
+  transition: transform 0.2s, color 0.15s;
   display: inline-block;
 }
 
 .hidden-stats-btn.open .hidden-stats-arrow {
+  color: #f5c542;
   transform: rotate(180deg);
+}
+
+.hidden-stats-section + .hidden-stats-section {
+  margin-top: 12px;
+}
+
+.hidden-stats-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #666;
+  margin-bottom: 5px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .hidden-stats-grid {
@@ -1273,6 +1356,23 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .hidden-stat-value {
   color: #ccc;
   font-weight: 700;
+}
+
+.hidden-stats-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: #f5a623;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.hidden-stats-hint svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
 }
 
 /* =========================
@@ -2039,6 +2139,40 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .combo-view-btns .toggle-btn:last-of-type,
 .combo-view-btns:not(.has-combo) #graph-view-btn {
   border-right: none;
+}
+
+/* Price panel game-mode toggle (PvP / PvE / PvP Season) */
+
+.price-mode-btns {
+  display: flex;
+  gap: 0;
+  flex-shrink: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #333;
+}
+
+.price-mode-btns .toggle-btn {
+  flex: none;
+  padding: 5px 10px;
+  font-size: 11px;
+  border-radius: 0;
+  border: none;
+  border-right: 1px solid #333;
+}
+
+.price-mode-btns .toggle-btn:last-of-type {
+  border-right: none;
+}
+
+.price-mode-btns .price-mode-pve.active {
+  background-color: rgba(56, 117, 159, 0.25);
+  color: #38759F;
+}
+
+.price-mode-btns .price-mode-pvpseason.active {
+  background-color: rgba(40, 134, 98, 0.25);
+  color: #288662;
 }
 
 /* ===========================
@@ -2958,6 +3092,20 @@ header:not(.header-expanded) .header-nav-btn[data-badge]:not([data-badge=""])::a
     pointer-events: none;
 }
 
+/* Optimizer Explore chart point tooltip - same stat bars/rows as the tab
+   hover preview (#tab-preview-tooltip), minus the gun image, sized to fit
+   the generic tooltip's shrink-to-fit box. */
+.optimizer-point-tooltip { width: 240px; }
+.optimizer-point-tooltip .stat-bar-row { margin-bottom: 5px; min-height: 17px; }
+.optimizer-point-tooltip .stat-bar-label { font-size: 11px; width: 72px; }
+.optimizer-point-tooltip .stat-bar-track { left: 72px; height: 5px; }
+.optimizer-point-tooltip .stat-bar-value { font-size: 11px; }
+.optimizer-point-tooltip .stats-divider { margin: 6px 0; }
+.optimizer-point-tooltip .stat-subsection { font-size: 11px; }
+.optimizer-point-tooltip .stat-subsection-cols { gap: 10px; }
+.optimizer-point-tooltip .stat-row { margin-bottom: 3px; }
+.optimizer-point-tooltip .stat-row .stat-label { width: auto; margin-right: 4px; }
+
 /* =========================
    TOAST NOTIFICATIONS
 ========================= */
@@ -3680,19 +3828,24 @@ body[data-mobile="true"] .gun-card.mid-build {
     height: 48px;
 }
 
-/* Slot name label beneath the icon */
+/* Slot name label beneath the icon. Flex + auto margins rather than
+   text-align: center so the marquee-text span (which assumes it starts
+   flush at the left edge) still centers when it fits, but the flexbox
+   auto-margin-collapses-to-0-on-overflow rule left-aligns it the moment
+   it's too long to fit - matching the scroll's translateX(0) baseline. */
 .ag-label {
+    display: flex;
     font-size: 10px;
     color: #aaa;
-    text-align: center;
     line-height: 1;
     max-width: 54px;
-    white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
     pointer-events: none;
     flex-shrink: 0;
     padding-bottom: 1px;
+}
+.ag-label .marquee-text {
+    margin: 0 auto;
 }
 
 /* Grid wrapper and grid */
@@ -3798,8 +3951,6 @@ body[data-mobile="true"] .gun-card.mid-build {
     max-width: none;
     white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
-    text-align: center;
 }
 
 /* Extras row - slots without a defined grid position */
@@ -4729,8 +4880,6 @@ body[data-mobile="true"] .gun-card.mid-build {
   font-weight: 700;
   width: 88px;
   flex-shrink: 0;
-  transform: scaleY(1.05);
-  transform-origin: center left;
   z-index: 1;
   position: relative;
 }
@@ -4938,6 +5087,94 @@ body[data-mobile="true"] .gun-card.mid-build {
   flex-direction: column;
 }
 
+.modal-section a {
+  color: #5b9bd5;
+  text-decoration: none;
+}
+
+.modal-section a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.modal-section strong {
+  color: #eee;
+  font-weight: 700;
+}
+
+/* =========================
+   CUSTOM CHECKBOX
+   Same track colors as .compare-toggle / .bp-imggen-toggle.active (gold
+   accent), tick icon reused from the attachment/build rating like buttons.
+========================= */
+
+.imggen-check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  cursor: pointer;
+  margin: 0 0 12px 0;
+  user-select: none;
+}
+
+.imggen-check-box-wrap {
+  position: relative;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+}
+
+.imggen-check-input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.imggen-check-box {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.imggen-check:hover .imggen-check-box {
+  border-color: #555;
+}
+
+.imggen-check-tick {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.imggen-check-input:checked + .imggen-check-box {
+  background: #1e1800;
+  border-color: #f5c542;
+}
+
+.imggen-check-input:checked + .imggen-check-box .imggen-check-tick {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.imggen-check-label {
+  color: #ccc;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .modal-row {
   display: flex;
   gap: 8px;
@@ -4968,6 +5205,12 @@ body[data-mobile="true"] .gun-card.mid-build {
 .modal-btn:hover {
   background: #2a2a2a;
   color: #eee;
+}
+
+.modal-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
 }
 
 .modal-btn.primary {
@@ -7064,6 +7307,146 @@ button.build-tag-chip.active {
   overflow: hidden;
 }
 
+/* Reuse the drawer's controls and stat typography for sampled builds. */
+.optimizer-explore-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.optimizer-explore-native { display: none; }
+.optimizer-explore-hint {
+  margin: 0;
+  color: #888;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.optimizer-explore-chart {
+  flex: 1 1 380px;
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Axis/tick labels and the title/hint text sit close to the plotted points -
+     without this, a slightly-off click on a point drags a text selection across
+     the chart instead of registering as a point click. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.optimizer-explore-chart svg {
+  display: block;
+  width: 100%;
+  min-width: 360px;
+  max-height: 380px;
+  overflow: visible;
+}
+.optimizer-explore-svg-wrap {
+  position: relative;
+}
+.optimizer-explore-zoom-hint {
+  font-size: 10px;
+  color: #5a5a5a;
+  margin-top: -4px;
+}
+.optimizer-explore-reset-btn rect {
+  transition: fill 0.1s ease;
+}
+.optimizer-explore-reset-btn:hover rect {
+  fill: #2a2a2a;
+}
+.optimizer-explore-reset-btn:hover text {
+  fill: #f5c542;
+}
+.optimizer-explore-chart svg text {
+  fill: #999;
+  font-family: "Bender", Arial, sans-serif;
+  /* Larger than it looks: font-size on SVG text is in the viewBox's own user
+     units, which get scaled down to fit the chart's actual rendered width -
+     15 units here lands around 12-13 real px, not 15. */
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.optimizer-explore-grid { stroke: #303030; stroke-width: 1; }
+.optimizer-explore-line { fill: none; stroke: #9a8866; stroke-width: 1.5; }
+.optimizer-explore-point {
+  fill: #1a1a1a;
+  stroke: #f5c542;
+  stroke-width: 2;
+  pointer-events: none;
+  transition: fill 0.15s, stroke 0.28s ease, opacity 0.4s ease;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+/* Post-solve "selection" pass over the live chart (see _playDiscardAnimation):
+   sampled points that didn't make the final frontier turn red in place, hold
+   briefly, then fade out - reads as the solver pruning them rather than the
+   dots just disappearing when the chart swaps to the finished curve. */
+.optimizer-explore-point.discarding {
+  fill: #d64545;
+  stroke: #d64545;
+}
+.optimizer-explore-point.discarded {
+  opacity: 0;
+}
+/* Press feedback, matching the instant (untransitioned) scale-down other optimizer
+   buttons use on :active - see .optimizer-preset-btn:active. */
+.optimizer-explore-point-hit:active .optimizer-explore-point { transform: scale(0.8); }
+/* Enlarged, invisible hover/click/focus target - the visible dot above is too small
+   to comfortably aim at, so this transparent circle (see the <g> wrapper markup in
+   _renderExploreChart) carries the actual interaction instead. */
+.optimizer-explore-point-hit { cursor: pointer; }
+.optimizer-explore-point-hitarea { fill: transparent; }
+/* The global :focus-visible ring (see :where(...) rule near the top of this file)
+   still matches on a plain click here since this is a <g> with an explicit tabindex/
+   role, not a native control the focus-visible heuristic knows to treat as pointer-
+   only - same issue .tab-chip:focus has. A rectangular outline around a small round
+   dot also just looks like a rendering glitch, so rely on the dot's own fill-color
+   change (above) for focus feedback instead, for both mouse and keyboard focus. */
+.optimizer-explore-point-hit:focus,
+.optimizer-explore-point-hit:focus-visible { outline: none; }
+.optimizer-explore-point-hit:hover .optimizer-explore-point,
+.optimizer-explore-point.selected,
+.optimizer-explore-point-hit:focus-visible .optimizer-explore-point { fill: #f5c542; }
+/* Selected-point ring, same expanding/fading pulse language as the desktop Settings
+   button's update-downloading badge (btn-badge-pulse) - a ring growing outward from
+   the dot's own circumference while fading out, looped. */
+.optimizer-explore-point-pulse {
+  fill: none;
+  stroke: #f5c542;
+  stroke-width: 2;
+  opacity: 0;
+  pointer-events: none;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.optimizer-explore-point-pulse.selected {
+  animation: optimizer-explore-point-pulse 2.2s ease-in-out infinite;
+}
+@keyframes optimizer-explore-point-pulse {
+  0%, 100% { transform: scale(1);   opacity: 0.55; }
+  55%      { transform: scale(1.4); opacity: 0; }
+}
+/* One-shot "locking on" ring for the point the system auto-selects right after
+   a solve finishes (see _exploreJustSolved) - starts well outside the dot and
+   contracts onto it, unlike the pulse ring above (which loops outward from the
+   dot forever). Plays once on mount, then stays put at its end state. */
+.optimizer-explore-point-lockon {
+  fill: none;
+  stroke: #f5c542;
+  stroke-width: 1.5;
+  pointer-events: none;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: optimizer-explore-point-lockon 2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes optimizer-explore-point-lockon {
+  0%   { transform: scale(5); opacity: 0.9; }
+  100% { transform: scale(1); opacity: 0; }
+}
+.optimizer-explore-partial { color: #f5a623; margin: 0; line-height: 1.5; }
+.optimizer-config-pane [hidden] { display: none; }
+
 .optimizer-field {
   display: flex;
   flex-direction: column;
@@ -7282,11 +7665,79 @@ button.build-tag-chip.active {
   flex-shrink: 0;
 }
 
+#optimizer-filter-presets-expanded #optimizer-filter-presets {
+  padding-bottom: 12px;
+}
+#optimizer-filter-presets .optimizer-preset-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background-color: #1a1a1a;
+  border-color: #333;
+  color: #ccc;
+  transform: none;
+}
+#optimizer-filter-presets-expanded #optimizer-filter-preset-add-row {
+  margin-top: 12px;
+}
+
+.optimizer-preset-btn[data-filter-clear] {
+  color: #e74c3c;
+  border-color: rgba(231,76,60,0.45);
+  background-color: rgba(231,76,60,0.10);
+}
+.optimizer-preset-btn[data-filter-clear]:hover {
+  color: #e74c3c;
+  border-color: #e74c3c;
+  background-color: rgba(231,76,60,0.20);
+}
+
+.optimizer-filter-preset-tooltip {
+  display: grid;
+  gap: 1px;
+  width: max-content;
+  max-width: calc(100vw - 40px);
+  max-height: min(480px, calc(100vh - 40px));
+  overflow-y: auto;
+  white-space: normal;
+}
+.optimizer-filter-preset-tooltip .optimizer-filter-preset-locked { color: #4CAF50; border-color: #4CAF50; }
+.optimizer-filter-preset-tooltip .optimizer-filter-preset-banned { color: #e74c3c; border-color: #e74c3c; }
+.optimizer-filter-preset-status {
+  position: absolute;
+  bottom: 1px;
+  left: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: #171717;
+}
+.optimizer-filter-preset-tooltip .incompatible { color: #888; border-color: #888; }
+.optimizer-filter-preset-tooltip .incompatible .attachment-icon { filter: grayscale(1); opacity: 0.5; }
+.optimizer-filter-preset-tooltip .incompatible .slot-shortname { color: #888; }
+
 .optimizer-toggle-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.beta-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: #f5c542;
+  border: 1px solid #f5c542;
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  letter-spacing: 1px;
+  vertical-align: middle;
+  opacity: 0.85;
+  display: inline-block;
 }
 
 /* Each constraint is a label row plus a detail slot that only fills in once the
@@ -7308,6 +7759,74 @@ button.build-tag-chip.active {
 }
 .optimizer-slider-track { flex: 1; min-width: 0; }
 .optimizer-slider-track input[type="range"] { display: block; width: 100%; accent-color: #f5c542; cursor: pointer; }
+
+/* Ergonomics Range's dual-handle slider: two <input type="range"> stacked on
+   the same track with their native painting hidden (pointer-events disabled
+   on everything but the thumb itself, via the ::-webkit/::-moz-range-thumb
+   rules below), plus a separate fill div drawing the highlighted min-max
+   span. See _prioritizeErgoRangeThumb in optimizer.js for how overlapping
+   thumbs still resolve clicks to the right one. */
+.optimizer-dual-slider {
+  position: relative;
+  height: 20px;
+}
+.optimizer-dual-slider-rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 4px;
+  transform: translateY(-50%);
+  background: #444;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.optimizer-dual-slider-fill {
+  position: absolute;
+  top: 50%;
+  height: 4px;
+  transform: translateY(-50%);
+  background: #f5c542;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.optimizer-dual-slider input[type="range"] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  pointer-events: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.optimizer-dual-slider input[type="range"]::-webkit-slider-runnable-track {
+  background: transparent;
+  -webkit-appearance: none;
+}
+.optimizer-dual-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f5c542;
+  cursor: pointer;
+}
+.optimizer-dual-slider input[type="range"]::-moz-range-track {
+  background: transparent;
+}
+.optimizer-dual-slider input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f5c542;
+  border: none;
+  cursor: pointer;
+}
 .optimizer-constraint-slider-row input[type="number"] {
   width: 72px;
   flex-shrink: 0;
@@ -7325,7 +7844,7 @@ button.build-tag-chip.active {
 }
 .optimizer-constraint-slider-row .input-suffix { font-size: 11px; }
 /* Budget's value can run to 7 digits (2,000,000); every other slider here
-   (Min Ergonomics, Max MOA) only ever shows a short 2-4 char number, so the
+   (Ergonomics Range, Max MOA) only ever shows a short 2-4 char number, so the
    box only needs to be wide enough for that instead of matching Budget's. */
 .optimizer-constraint-slider-row:not([data-constraint-slider="budget"]) input[type="number"] {
   width: 40px;
@@ -7350,6 +7869,18 @@ button.build-tag-chip.active {
   font-variant-numeric: tabular-nums;
 }
 .optimizer-slider-ticks span.active { color: #f5c542; font-weight: 700; }
+
+/* Ergonomics Range sits right under a toggle-row with a warning icon (taller
+   than the other constraints' plain label), so the shared -2px negative top
+   margin above reads as cramped here - give this one row extra breathing room
+   above the track and between the track and its endpoint labels, without
+   touching the shared rule every other constraint slider still relies on. */
+.optimizer-constraint-slider-row[data-constraint-slider="ergoRange"] {
+  margin-top: 10px;
+}
+.optimizer-constraint-slider-row[data-constraint-slider="ergoRange"] .optimizer-slider-ticks {
+  margin-top: 6px;
+}
 
 .optimizer-constraint-static {
   font-size: 12px;
@@ -7970,6 +8501,77 @@ button.build-tag-chip.active {
   margin-left: 0;
 }
 
+/* ---- Explore "solving" placeholder (results panel builds up live under an
+   overlay instead of a bare throbber) ---- */
+.optimizer-solve-shell {
+  position: relative;
+}
+.optimizer-solve-content {
+  filter: brightness(0.45) saturate(0.7);
+  pointer-events: none;
+}
+/* The card's own drop shadow reads oddly once it's dimmed and sitting under the
+   overlay's darkened backdrop - two overlapping dark shadows instead of one
+   panel lifted off the background. Removed for the duration of the solve, back
+   once the real result (undimmed, no overlay) replaces this placeholder. */
+.optimizer-solve-content .stats-section {
+  box-shadow: none;
+}
+/* Nothing's solved yet to apply, so hide the "Use this build" action while the
+   placeholder is still filling in behind the overlay. */
+.optimizer-solve-content .optimizer-use-build-inline {
+  display: none;
+}
+/* The status/solve-ms readout and Re-optimize button reflect the *previous*
+   solve (or nothing at all) while a new one is running - stale/meaningless
+   during that window, so hide the row (and the divider right under it) rather
+   than let it sit there showing an old result. */
+.optimizer-solve-content .optimizer-status-bar {
+  display: none;
+}
+.optimizer-solve-content .optimizer-status-bar + .stats-divider {
+  display: none;
+}
+.optimizer-solve-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+  padding: 20px;
+  border-radius: 6px;
+}
+.optimizer-solve-phase {
+  color: #f5c542;
+  font-size: 13px;
+  min-height: 16px;
+}
+.optimizer-solve-detail {
+  color: #bbb;
+  font-size: 11px;
+  margin-top: -6px;
+}
+.optimizer-solve-elapsed {
+  color: #999;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.optimizer-solve-progress-track {
+  width: 200px;
+  height: 6px;
+  border-radius: 3px;
+  background: #2a2a2a;
+  overflow: hidden;
+}
+.optimizer-solve-progress-fill {
+  height: 100%;
+  background: #f5c542;
+  transition: width 0.25s ease;
+}
+
 .optimizer-results {
   display: flex;
   flex-direction: column;
@@ -8063,6 +8665,38 @@ body[data-mobile="true"] .optimizer-results-statsblock {
   margin-top: 12px;
 }
 
+/* ---- Explore tab: sampled-curve chart + selected build's stat/gun preview,
+   merged into one card body instead of two stacked boxes. Wraps to a single
+   column on its own once the chart no longer fits next to the preview. ---- */
+/* The "Generated build" dropdown's option list is an absolutely-positioned
+   overlay - .stats-section's own overflow:hidden (there to keep other cards'
+   children from bleeding past its rounded corners) would otherwise clip it. */
+.optimizer-explore-stats {
+  overflow: visible;
+}
+.optimizer-explore-merged-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: center;
+}
+.optimizer-explore-preview-col {
+  flex: 1 1 240px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.optimizer-explore-preview-col .optimizer-results-bars,
+.optimizer-explore-preview-col .optimizer-results-substats,
+.optimizer-explore-preview-col .cost-total-row {
+  width: 100%;
+}
+body[data-mobile="true"] .optimizer-explore-merged-body {
+  flex-direction: column;
+}
+
 /* ---- Weapon card ---- */
 /* Sits inside .optimizer-manifest as its receiver/preset header; the bottom
    border is what keeps it visually distinct from the attachment table below
@@ -8131,12 +8765,12 @@ body[data-mobile="true"] .optimizer-results-statsblock {
   gap: 8px;
 }
 .optimizer-retained-grid .attachment-icon-wrapper {
-  width: 56px;
-  height: 56px;
+  width: 42px;
+  height: 42px;
 }
 .optimizer-retained-grid .attachment-icon {
-  width: 56px;
-  height: 56px;
+  width: 42px;
+  height: 42px;
 }
 
 /* ---- Build Manifest ---- */
@@ -8670,6 +9304,8 @@ body[data-mobile="true"] .att-table-header h3 { font-size: 14px; flex: 1; }
 body[data-mobile="true"] .att-table-header-toggles { flex-direction: row; flex-wrap: wrap; width: 100%; margin-left: 0; gap: 8px; }
 body[data-mobile="true"] .combo-view-btns { flex: 1; }
 body[data-mobile="true"] .combo-view-btns .toggle-btn { flex: 1; padding: 6px 4px; }
+body[data-mobile="true"] .price-mode-btns { flex: 1; }
+body[data-mobile="true"] .price-mode-btns .toggle-btn { flex: 1; padding: 6px 4px; }
 /* Mobile: hide short name badge on attachment icons in table */
 body[data-mobile="true"] .attachment-table .slot-shortname { display: none; }
 /* Mobile: combo name cell needs minimum width to show icons; table scrolls to cover stats */
@@ -8792,6 +9428,63 @@ body[data-mobile="true"].mobile-publish-mode #left-build-area {
   gap: 4px;
 }
 
+/* Keep capture controls above app drawers without affecting their layout. */
+.capture-toolbar {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 2147483647;
+  box-sizing: border-box;
+  width: 440px;
+  max-width: calc(100vw - 40px);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 12px;
+  background: #191919;
+  border: 1px solid #b99837;
+  border-radius: 6px;
+  box-shadow: 0 4px 20px #0009;
+  color: #ddd;
+  font: 13px "Bender", Arial, sans-serif;
+}
+.capture-toolbar[hidden], .capture-outline[hidden], .capture-text-editor[hidden] { display: none; }
+.capture-toolbar strong { color: #f5c542; }
+.capture-summary { margin: 8px 0; overflow-wrap: anywhere; color: #aaa; }
+.capture-controls, .capture-modal-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.capture-toolbar button {
+  background: #292929;
+  border: 1px solid #555;
+  border-radius: 3px;
+  padding: 5px 8px;
+  color: #ddd;
+  font: inherit;
+  cursor: pointer;
+}
+.capture-toolbar button:hover:not(:disabled) { border-color: #f5c542; color: #f5c542; }
+.capture-toolbar button:disabled, .capture-modal-actions button:disabled { opacity: 0.4; cursor: default; }
+.capture-toolbar small { display: block; margin-top: 9px; color: #aaa; line-height: 1.5; }
+.capture-text-editor { margin-top: 10px; }
+.capture-text-editor select, .capture-text-editor textarea {
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 6px;
+  background: #111;
+  color: #eee;
+  border: 1px solid #555;
+  padding: 6px;
+  font: inherit;
+}
+.capture-text-editor textarea { min-height: 70px; resize: vertical; }
+.capture-outline {
+  position: fixed;
+  z-index: 2147483646;
+  box-sizing: border-box;
+  border: 1px dashed #65baff;
+  background: #65baff12;
+  pointer-events: none;
+}
+.capture-outline-selected { border: 2px solid #f5c542; background: #f5c54212; }
+
 /* Dev modal debugger panels */
 .dev-debugger-row {
   display: flex;
@@ -8845,6 +9538,22 @@ body[data-mobile="true"].mobile-publish-mode #left-build-area {
 .dev-out-error { color: #e05252; }
 .dev-out-dim   { color: #555; }
 
+.dev-ls-search {
+  display: block;
+  margin: 0 18px 8px;
+  width: calc(100% - 36px);
+  background: #141414;
+  border: 1px solid #222;
+  border-radius: 4px;
+  color: #ccc;
+  font-family: monospace;
+  font-size: 11px;
+  padding: 6px 10px;
+}
+.dev-ls-search:focus {
+  outline: none;
+  border-color: #f5c542;
+}
 .dev-ls-list {
   margin: 0 18px 14px;
   border: 1px solid #222;

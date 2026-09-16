@@ -17,9 +17,12 @@ DEFAULT_TRADER_LEVELS = {
 TRADER_DISABLED = 0
 
 
-def get_best_price(offers: list, trader_levels: dict = None, flea_available: bool = True, player_level=None):
+def get_best_price(
+    offers: list, trader_levels: dict = None, flea_available: bool = True, player_level=None, game_mode: str = "pvp"
+):
     """offers: list of dicts with vendor_normalized, trader_level, price, currency,
-    price_rub, is_flea, min_level_flea (the shape produced by loading ItemOffer rows).
+    price_rub, is_flea, min_level_flea, game_mode (the shape produced by loading
+    ItemOffer rows).
 
     Returns a dict {price, currency, price_rub, vendor} for the cheapest offer the
     given player can actually access right now, or None if nothing is accessible.
@@ -31,6 +34,10 @@ def get_best_price(offers: list, trader_levels: dict = None, flea_available: boo
     for offer in offers:
         if offer["is_flea"]:
             if not flea_available:
+                continue
+            # A null game_mode is pre-migration data synced before per-mode flea rows
+            # existed - treat it as "pvp" rather than dropping it.
+            if (offer.get("game_mode") or "pvp") != game_mode:
                 continue
             min_level_flea = offer.get("min_level_flea")
             if player_level is not None and min_level_flea and min_level_flea > player_level:
@@ -71,6 +78,7 @@ def offers_by_item(item_offer_rows) -> dict:
                 "price_rub": row.price_rub,
                 "is_flea": row.is_flea,
                 "min_level_flea": row.min_level_flea,
+                "game_mode": row.game_mode,
             }
         )
     return grouped
