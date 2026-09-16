@@ -15,6 +15,7 @@ class ExploreRequest(BaseModel):
     steps: int = Field(default=20, ge=10, le=81)
     max_price: float | None = Field(default=None, ge=0)
     min_ergonomics: float | None = Field(default=None, ge=0)
+    max_ergonomics: float | None = Field(default=None, ge=0)
     max_recoil_v: float | None = Field(default=None, ge=0)
     max_weight: float | None = Field(default=None, ge=0)
     min_mag_capacity: int | None = Field(default=None, ge=0)

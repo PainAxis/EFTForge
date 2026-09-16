@@ -355,11 +355,30 @@ class TestBudgetConstraint:
         assert constrained["total_price_rub"] <= unconstrained["total_price_rub"]
 
 
+class TestMaxErgonomicsConstraint:
+    def test_lower_max_ergo_never_exceeds_it(self, db):
+        unconstrained = optimize_weapon(
+            db, M4A1_ID, OptimizeParams(ergo_weight=1.0, recoil_weight=0.0, price_weight=0.0)
+        )
+        assert unconstrained["status"] == "optimal"
+        cap = unconstrained["final_stats"]["total_ergo"] - 5
+
+        constrained = optimize_weapon(
+            db, M4A1_ID, OptimizeParams(max_ergonomics=cap, ergo_weight=1.0, recoil_weight=0.0, price_weight=0.0)
+        )
+        assert constrained["status"] == "optimal"
+        assert constrained["final_stats"]["total_ergo"] <= cap + 1e-6
+
+
 class TestInfeasibleConstraints:
     def test_impossible_min_ergonomics_is_infeasible(self, db):
         result = optimize_weapon(db, M4A1_ID, OptimizeParams(min_ergonomics=100_000))
         assert result["status"] == "infeasible"
         assert result["reason"]
+
+    def test_min_ergonomics_above_max_ergonomics_is_infeasible(self, db):
+        result = optimize_weapon(db, M4A1_ID, OptimizeParams(min_ergonomics=50, max_ergonomics=10))
+        assert result["status"] == "infeasible"
 
     def test_impossible_mag_capacity_is_infeasible(self, db):
         result = optimize_weapon(db, M4A1_ID, OptimizeParams(min_mag_capacity=100_000))

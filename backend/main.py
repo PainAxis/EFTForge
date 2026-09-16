@@ -2298,6 +2298,7 @@ def build_optimize(
     weapon_id: str = Body(...),
     max_price: float | None = Body(default=None),
     min_ergonomics: float | None = Body(default=None),
+    max_ergonomics: float | None = Body(default=None),
     max_recoil_v: float | None = Body(default=None),
     max_weight: float | None = Body(default=None),
     min_mag_capacity: int | None = Body(default=None),
@@ -2360,6 +2361,7 @@ def build_optimize(
         weapon_id,
         max_price,
         min_ergonomics,
+        max_ergonomics,
         max_recoil_v,
         max_weight,
         min_mag_capacity,
@@ -2401,6 +2403,7 @@ def build_optimize(
     params = OptimizeParams(
         max_price=max_price,
         min_ergonomics=min_ergonomics,
+        max_ergonomics=max_ergonomics,
         max_recoil_v=max_recoil_v,
         max_weight=max_weight,
         min_mag_capacity=min_mag_capacity,

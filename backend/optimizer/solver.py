@@ -41,6 +41,7 @@ from optimizer.milp import build_and_solve, compute_stat_ranges as _milp_stat_ra
 class OptimizeParams:
     max_price: Optional[float] = None
     min_ergonomics: Optional[float] = None
+    max_ergonomics: Optional[float] = None
     # Explore-internal only (see explore.py's solve()) - not part of any public
     # request model. Hard-floors true (weight-adjusted, quadratic) EED via
     # milp.py's _solve_with_min_eed, the same lazy tangent-cut technique

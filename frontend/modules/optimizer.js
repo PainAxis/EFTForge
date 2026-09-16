@@ -794,6 +794,7 @@ window.EFTForge.optimizer = (function () {
         // Explore tab is active) and the Explore controls' own copy - keep both in
         // sync regardless of which one is actually visible right now.
         document.querySelectorAll('[data-evo-ergo-toggle]').forEach(el => el.classList.toggle('active', value));
+        document.querySelectorAll('[data-evo-ergo-warning]').forEach(el => el.toggleAttribute('hidden', !value));
         _renderWeightWidget();
         _refreshExploreAxisOptions();
     }
@@ -1113,8 +1114,14 @@ window.EFTForge.optimizer = (function () {
 
     const CONSTRAINT_DEFS = [
         { key: 'budget', label: 'optimizer.budget', min: 10000, max: 2000000, step: 10000, default: 200000, unit: '₽' },
-        { key: 'minErgo', label: 'optimizer.minErgo', min: 1, max: 100, step: 1, default: 40 },
     ];
+
+    // Ergonomics Range is a dual-bound constraint (min AND max) instead of the
+    // single value/def pattern CONSTRAINT_DEFS covers, so it's special-cased
+    // the same way minMag/maxSpread already are below. Capping the top end
+    // matters for Explore especially - it stops the sweep from spending
+    // samples on very-high-ergo builds most players wouldn't actually run.
+    const ERGO_RANGE_DEF = { min: 1, max: 100, step: 1, defaultMin: 40, defaultMax: 100 };
 
     let _constraintState = {};
     let _magCapacityValues = null;   // [10, 20, 30, ...] - GET /build/stat-ranges' mag_capacity.values, sorted
@@ -1128,11 +1135,12 @@ window.EFTForge.optimizer = (function () {
     function _resetConstraintValues() {
         _constraintState = {};
         for (const def of CONSTRAINT_DEFS) _constraintState[def.key] = { on: false, value: def.default };
+        _constraintState.ergoRange = { on: false, min: ERGO_RANGE_DEF.defaultMin, max: ERGO_RANGE_DEF.defaultMax };
         _constraintState.minMag = { on: false, value: 0 };
         _constraintState.maxSpread = { on: false, value: 0 };
     }
 
-    // Only persist the budget constraint across panel reopens - minErgo/minMag/
+    // Only persist the budget constraint across panel reopens - ergoRange/minMag/
     // maxSpread stay session-only.
     function _persistBudgetConstraint() {
         localStorage.setItem('eftforge-optimizer-budget-on', String(_constraintState.budget.on));
@@ -1273,6 +1281,129 @@ window.EFTForge.optimizer = (function () {
         const [range, number] = row.querySelectorAll('input');
         range.addEventListener('input', () => _setConstraintValue(def.key, Number(range.value)));
         number.addEventListener('input', () => _setConstraintValue(def.key, Number(number.value)));
+    }
+
+    // Min Ergonomics only ever floors the plain Ergonomics stat (see
+    // OptimizeParams.min_ergonomics/max_ergonomics) - under the EvoErgo toggle
+    // that's a real gap, since neither bound ever touches EvoErgo/EED itself.
+    // Flag it right where the constraint is set, not on the EvoErgo toggle.
+    function _ergoRangeWarningHtml() {
+        return `<span class="eed-warning-icon" data-evo-ergo-warning data-tooltip="${_escape(_t('optimizer.evoErgoLowWarnTooltip'))}"${_useEvoErgo ? '' : ' hidden'}>&#9888;</span>`;
+    }
+
+    function _ergoRangeHtml() {
+        const state = _constraintState.ergoRange;
+        return `
+            <div class="optimizer-constraint-item">
+                <div class="optimizer-toggle-row">
+                    <span class="stat-label">${_t('optimizer.ergoRange')}${_ergoRangeWarningHtml()}</span>
+                    <button type="button" class="compare-toggle${state.on ? ' active' : ''}" data-constraint="ergoRange">
+                        <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
+                    </button>
+                </div>
+                <div data-constraint-detail="ergoRange">${_ergoRangeDetailHtml()}</div>
+            </div>
+        `;
+    }
+
+    // One track, two overlaid range inputs (min/max) - the standard dual-handle
+    // slider trick: both inputs sit absolutely positioned on the same track with
+    // their native track painting hidden, pointer-events disabled on everything
+    // but the thumb pseudo-element, and a separate div drawing the highlighted
+    // fill between them. A number input flanks each side of the track.
+    function _ergoRangeDetailHtml() {
+        const state = _constraintState.ergoRange;
+        if (!state.on) return '';
+        const d = ERGO_RANGE_DEF;
+        return `
+            <div class="optimizer-constraint-slider-row" data-constraint-slider="ergoRange">
+                <input type="number" class="optimizer-input" min="${d.min}" max="${d.max}" step="${d.step}" value="${state.min}" data-ergo-range-input="min" aria-label="${_escape(_t('optimizer.ergoRangeMin'))}">
+                <div class="optimizer-slider-track">
+                    <div class="optimizer-dual-slider" data-ergo-range-track>
+                        <div class="optimizer-dual-slider-rail"></div>
+                        <div class="optimizer-dual-slider-fill" data-ergo-range-fill></div>
+                        <input type="range" min="${d.min}" max="${d.max}" step="${d.step}" value="${state.min}" data-ergo-range="min" aria-label="${_escape(_t('optimizer.ergoRangeMin'))}">
+                        <input type="range" min="${d.min}" max="${d.max}" step="${d.step}" value="${state.max}" data-ergo-range="max" aria-label="${_escape(_t('optimizer.ergoRangeMax'))}">
+                    </div>
+                    <div class="optimizer-slider-ticks"><span>${d.min}</span><span>${d.max}</span></div>
+                </div>
+                <input type="number" class="optimizer-input" min="${d.min}" max="${d.max}" step="${d.step}" value="${state.max}" data-ergo-range-input="max" aria-label="${_escape(_t('optimizer.ergoRangeMax'))}">
+            </div>
+        `;
+    }
+
+    function _ergoRangePct(value) {
+        const d = ERGO_RANGE_DEF;
+        return ((value - d.min) / (d.max - d.min)) * 100;
+    }
+
+    function _updateErgoRangeFill(track) {
+        if (!track) return;
+        const fill = track.querySelector('[data-ergo-range-fill]');
+        const minPct = _ergoRangePct(_constraintState.ergoRange.min);
+        const maxPct = _ergoRangePct(_constraintState.ergoRange.max);
+        fill.style.left = `${minPct}%`;
+        fill.style.width = `${Math.max(0, maxPct - minPct)}%`;
+    }
+
+    // Two overlapping thumbs at the same pixel position can only ever hit-test
+    // to whichever has the higher z-index, so once they're equal/close a static
+    // z-index would always grab the same one. Instead, track pointer position
+    // continuously (via pointermove, ahead of any actual press) and keep
+    // whichever thumb is nearer the cursor on top, so a click there grabs the
+    // one the user is actually reaching for.
+    function _prioritizeErgoRangeThumb(track, clientX) {
+        const minRange = track.querySelector('input[data-ergo-range="min"]');
+        const maxRange = track.querySelector('input[data-ergo-range="max"]');
+        const rect = track.getBoundingClientRect();
+        if (!rect.width) return;
+        const pct = Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100));
+        const minPct = _ergoRangePct(Number(minRange.value));
+        const maxPct = _ergoRangePct(Number(maxRange.value));
+        const minCloser = Math.abs(pct - minPct) <= Math.abs(pct - maxPct);
+        minRange.style.zIndex = minCloser ? 3 : 2;
+        maxRange.style.zIndex = minCloser ? 2 : 3;
+    }
+
+    function _wireErgoRangeDetail(detail) {
+        const row = detail.querySelector('[data-constraint-slider="ergoRange"]');
+        if (!row) return;
+        const track = row.querySelector('[data-ergo-range-track]');
+        const minRange = row.querySelector('input[data-ergo-range="min"]');
+        const maxRange = row.querySelector('input[data-ergo-range="max"]');
+        const minNumber = row.querySelector('input[data-ergo-range-input="min"]');
+        const maxNumber = row.querySelector('input[data-ergo-range-input="max"]');
+        minRange.addEventListener('input', () => _setErgoRangeValue('min', Number(minRange.value)));
+        maxRange.addEventListener('input', () => _setErgoRangeValue('max', Number(maxRange.value)));
+        minNumber.addEventListener('input', () => _setErgoRangeValue('min', Number(minNumber.value)));
+        maxNumber.addEventListener('input', () => _setErgoRangeValue('max', Number(maxNumber.value)));
+        const prioritize = (e) => _prioritizeErgoRangeThumb(track, e.clientX);
+        track.addEventListener('pointermove', prioritize);
+        track.addEventListener('pointerdown', prioritize);
+        _updateErgoRangeFill(track);
+    }
+
+    // Clamps to ERGO_RANGE_DEF's bounds, then pushes the other handle out of the
+    // way if the two would cross, so min can never end up above max (or vice
+    // versa) regardless of which slider/number input the user is dragging.
+    function _setErgoRangeValue(which, value) {
+        const d = ERGO_RANGE_DEF;
+        const state = _constraintState.ergoRange;
+        const clamped = Math.min(d.max, Math.max(d.min, value));
+        if (which === 'min') {
+            state.min = clamped;
+            if (state.min > state.max) state.max = state.min;
+        } else {
+            state.max = clamped;
+            if (state.max < state.min) state.min = state.max;
+        }
+        const row = document.querySelector('[data-constraint-slider="ergoRange"]');
+        if (!row) return;
+        row.querySelector('input[data-ergo-range="min"]').value = state.min;
+        row.querySelector('input[data-ergo-range-input="min"]').value = state.min;
+        row.querySelector('input[data-ergo-range="max"]').value = state.max;
+        row.querySelector('input[data-ergo-range-input="max"]').value = state.max;
+        _updateErgoRangeFill(row.querySelector('[data-ergo-range-track]'));
     }
 
     function _minMagHtml() {
@@ -1432,7 +1563,7 @@ window.EFTForge.optimizer = (function () {
     }
 
     function _constraintsHtml() {
-        return CONSTRAINT_DEFS.map(_plainConstraintHtml).join('') + _minMagHtml() + _maxSpreadHtml();
+        return CONSTRAINT_DEFS.map(_plainConstraintHtml).join('') + _ergoRangeHtml() + _minMagHtml() + _maxSpreadHtml();
     }
 
     function _renderConstraints() {
@@ -1453,6 +1584,17 @@ window.EFTForge.optimizer = (function () {
             });
             _wirePlainConstraintDetail(def, detail);
         }
+
+        const ergoRangeToggle = el.querySelector('[data-constraint="ergoRange"]');
+        const ergoRangeDetail = el.querySelector('[data-constraint-detail="ergoRange"]');
+        ergoRangeToggle.addEventListener('click', () => {
+            const on = !_constraintState.ergoRange.on;
+            _constraintState.ergoRange.on = on;
+            ergoRangeToggle.classList.toggle('active', on);
+            ergoRangeDetail.innerHTML = _ergoRangeDetailHtml();
+            _wireErgoRangeDetail(ergoRangeDetail);
+        });
+        _wireErgoRangeDetail(ergoRangeDetail);
 
         const magToggle = el.querySelector('[data-constraint="minMag"]');
         const magDetail = el.querySelector('[data-constraint-detail="minMag"]');
@@ -1717,7 +1859,8 @@ window.EFTForge.optimizer = (function () {
             recoil_weight: _recoilWeight / 100,
             price_weight: _priceWeight / 100,
             max_price: _constraintState.budget.on ? _constraintState.budget.value : null,
-            min_ergonomics: _constraintState.minErgo.on ? _constraintState.minErgo.value : null,
+            min_ergonomics: _constraintState.ergoRange.on ? _constraintState.ergoRange.min : null,
+            max_ergonomics: _constraintState.ergoRange.on ? _constraintState.ergoRange.max : null,
             min_mag_capacity: _constraintState.minMag.on ? _constraintState.minMag.value : null,
             max_moa: _constraintState.maxSpread.on ? _constraintState.maxSpread.value : null,
             prevent_overswing: _preventOverswing,

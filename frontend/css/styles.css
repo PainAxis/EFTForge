@@ -7671,6 +7671,74 @@ button.build-tag-chip.active {
 }
 .optimizer-slider-track { flex: 1; min-width: 0; }
 .optimizer-slider-track input[type="range"] { display: block; width: 100%; accent-color: #f5c542; cursor: pointer; }
+
+/* Ergonomics Range's dual-handle slider: two <input type="range"> stacked on
+   the same track with their native painting hidden (pointer-events disabled
+   on everything but the thumb itself, via the ::-webkit/::-moz-range-thumb
+   rules below), plus a separate fill div drawing the highlighted min-max
+   span. See _prioritizeErgoRangeThumb in optimizer.js for how overlapping
+   thumbs still resolve clicks to the right one. */
+.optimizer-dual-slider {
+  position: relative;
+  height: 20px;
+}
+.optimizer-dual-slider-rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 4px;
+  transform: translateY(-50%);
+  background: #444;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.optimizer-dual-slider-fill {
+  position: absolute;
+  top: 50%;
+  height: 4px;
+  transform: translateY(-50%);
+  background: #f5c542;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.optimizer-dual-slider input[type="range"] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  pointer-events: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.optimizer-dual-slider input[type="range"]::-webkit-slider-runnable-track {
+  background: transparent;
+  -webkit-appearance: none;
+}
+.optimizer-dual-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f5c542;
+  cursor: pointer;
+}
+.optimizer-dual-slider input[type="range"]::-moz-range-track {
+  background: transparent;
+}
+.optimizer-dual-slider input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f5c542;
+  border: none;
+  cursor: pointer;
+}
 .optimizer-constraint-slider-row input[type="number"] {
   width: 72px;
   flex-shrink: 0;
@@ -7688,7 +7756,7 @@ button.build-tag-chip.active {
 }
 .optimizer-constraint-slider-row .input-suffix { font-size: 11px; }
 /* Budget's value can run to 7 digits (2,000,000); every other slider here
-   (Min Ergonomics, Max MOA) only ever shows a short 2-4 char number, so the
+   (Ergonomics Range, Max MOA) only ever shows a short 2-4 char number, so the
    box only needs to be wide enough for that instead of matching Budget's. */
 .optimizer-constraint-slider-row:not([data-constraint-slider="budget"]) input[type="number"] {
   width: 40px;
@@ -7713,6 +7781,18 @@ button.build-tag-chip.active {
   font-variant-numeric: tabular-nums;
 }
 .optimizer-slider-ticks span.active { color: #f5c542; font-weight: 700; }
+
+/* Ergonomics Range sits right under a toggle-row with a warning icon (taller
+   than the other constraints' plain label), so the shared -2px negative top
+   margin above reads as cramped here - give this one row extra breathing room
+   above the track and between the track and its endpoint labels, without
+   touching the shared rule every other constraint slider still relies on. */
+.optimizer-constraint-slider-row[data-constraint-slider="ergoRange"] {
+  margin-top: 10px;
+}
+.optimizer-constraint-slider-row[data-constraint-slider="ergoRange"] .optimizer-slider-ticks {
+  margin-top: 6px;
+}
 
 .optimizer-constraint-static {
   font-size: 12px;

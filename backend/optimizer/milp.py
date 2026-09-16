@@ -44,6 +44,7 @@ SUPPRESSOR_CATEGORY_ID = "550aa4cd4bdc2dd8348b456c"
 _NO_CONSTRAINTS_PARAMS = SimpleNamespace(
     max_price=None,
     min_ergonomics=None,
+    max_ergonomics=None,
     max_recoil_v=None,
     max_recoil_sum=None,
     include_categories=None,
@@ -483,6 +484,9 @@ def _build_constraints(weapon, mods: dict, compat_map, candidate_ids: list, pric
 
     if params.min_ergonomics is not None:
         cb.ge({idx[i]: (mods[i].ergonomics_modifier or 0) for i in item_ids}, params.min_ergonomics - base_ergo)
+
+    if params.max_ergonomics is not None:
+        cb.le({idx[i]: (mods[i].ergonomics_modifier or 0) for i in item_ids}, params.max_ergonomics - base_ergo)
 
     if params.max_recoil_v is not None and base_recoil_v is not None:
         cb.le(

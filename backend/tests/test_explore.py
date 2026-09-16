@@ -107,6 +107,13 @@ def test_min_ergonomics_still_enforced_with_evo_ergo_on(db):
         assert point["build"]["final_stats"]["total_ergo"] >= 35
 
 
+def test_max_ergonomics_caps_every_sample(db):
+    result = explore_weapon(db, "gun", OptimizeParams(max_ergonomics=40), "price", 10)
+    assert result["points"]
+    for point in result["points"]:
+        assert point["build"]["final_stats"]["total_ergo"] <= 40
+
+
 def test_evo_ergo_toggle_changes_the_ergo_boundary_pick(db):
     # "c" wins on raw ergonomics (20, vs "b"'s 10) but its weight is heavy enough
     # to tank true (weight-adjusted) EED far below "b"'s - so the plain axis solve
@@ -306,6 +313,7 @@ def test_use_evo_ergo_ranks_the_frontier_by_eed_not_raw_ergo():
         ("tradeoff", "bad"),
         ("max_price", math.nan),
         ("max_recoil_v", math.inf),
+        ("max_ergonomics", -1),
         ("max_weight", -1),
         ("strength_level", 52),
     ],
