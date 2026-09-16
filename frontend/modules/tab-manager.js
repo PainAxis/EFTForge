@@ -992,27 +992,71 @@ function _tpSetQueued(wrap, isQueued) {
 // when hovering several tab chips in a row on a slow connection: without this,
 // the previous tab's gun image stays crisp on screen until the new one decodes,
 // which reads as "the tooltip is showing the wrong gun."
+const _tpImageLoadCleanup = new WeakMap();
+
 function _tpSetImg(imgEl, url) {
     if (!imgEl || !url) return;
+    _tpImageLoadCleanup.get(imgEl)?.();
     imgEl.dataset.tpPendingSrc = url;
     imgEl.style.opacity = "0.35";
     imgEl.style.filter  = "brightness(0.85)";
+    const cleanup = () => {
+        clearTimeout(timer);
+        imgEl.removeEventListener("load", onDone);
+        imgEl.removeEventListener("error", onDone);
+        _tpImageLoadCleanup.delete(imgEl);
+    };
     const onDone = () => {
-        if (imgEl.dataset.tpPendingSrc === url) {
+        cleanup();
+        if (imgEl.dataset.tpPendingSrc === url && imgEl.dataset.tpGenerating !== "1") {
             imgEl.style.opacity = "";
             imgEl.style.filter  = "";
         }
     };
+    const timer = setTimeout(onDone, 5000);
+    _tpImageLoadCleanup.set(imgEl, cleanup);
     imgEl.addEventListener("load", onDone, { once: true });
     imgEl.addEventListener("error", onDone, { once: true });
-    imgEl.src = url;
+    if (imgEl.getAttribute("src") !== url) imgEl.src = url;
+    if (imgEl.complete) onDone();
 }
+
+function _tpSyncActiveImage() {
+    if (!_tpTooltipEl?.classList.contains("visible") || _tpActiveTabId !== EFTForge.state.activeTabId) return;
+    const tab = _tabById(_tpActiveTabId);
+    const gun = EFTForge.state.currentGun;
+    if (!tab || !gun || tab.gunId !== gun.id) return;
+    const imgEl = _tpTooltipEl.querySelector(".tab-preview-img");
+    const imgWrap = _tpTooltipEl.querySelector(".tab-preview-img-wrap");
+    if (!imgEl || !imgWrap) return;
+
+    // Read the live build so tab-record synchronization cannot delay the image update.
+    const key = _pairsKey(collectSlotPairs(EFTForge.state.buildTree || { children: {} }));
+    const enabled = window._bpIsEnabled?.();
+    const liveUrl = enabled && window._bpGetLastKey?.() === key ? window._bpGetLastImageUrl?.() : null;
+    const generating = enabled && !window._bpIsGloballyDisabled?.() && window._bpIsInflight?.() && !liveUrl;
+    imgEl.dataset.tpGenerating = generating ? "1" : "0";
+    imgEl.referrerPolicy = liveUrl && EFTForge.state.communityBuild?.cardImageUrl === liveUrl ? "no-referrer" : "";
+    const fallback = (enabled && key === "" ? gun.bare_image_512_link : null) || gun.image_512_link || gun.icon_link || "";
+    _tpSetImg(imgEl, liveUrl || fallback);
+    if (generating) {
+        imgEl.style.opacity = "0.35";
+        imgEl.style.filter = "brightness(0.85)";
+    }
+    _tpSetQueued(imgWrap, !!(generating && window._bpIsQueued?.()));
+}
+
+window.addEventListener("eftforge:build-preview-change", _tpSyncActiveImage);
 
 // Resolve (and, for background tabs, lazily generate) the preview image for a
 // tab's chip tooltip. Mirrors build-preview.js's _bpGenerate state machine
 // (dimming + queue overlay) but scoped to the tooltip's own <img>, and never
 // touches the shared _bp* state that drives the main gun image elsewhere.
 async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
+    if (tab.id === EFTForge.state.activeTabId) {
+        _tpSyncActiveImage();
+        return;
+    }
     if (!window._bpIsEnabled?.()) return; // static asset already showing
 
     // Community build with a pre-rendered card image (hosted on Gitee) - use it directly
@@ -1027,25 +1071,6 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
 
     const pairs = (tab.pairs || []).map(pair => pair.slice());
     const key = _pairsKey(pairs);
-
-    if (tab.id === EFTForge.state.activeTabId) {
-        // Active tab's image is already being managed by build-preview.js - just mirror it.
-        // Its cached URL lags a tab switch: the generation for the newly activated build
-        // is still in flight for a moment, during which _bpLastKey/_bpLastImageUrl still
-        // describe the build we just switched AWAY from. Only trust them when the key
-        // actually matches this tab's current build, otherwise the tooltip would show the
-        // previous tab's gun right after activating this one.
-        if (window._bpGetLastKey?.() === key) {
-            const liveUrl = window._bpGetLastImageUrl?.();
-            if (liveUrl) _tpSetImg(imgEl, liveUrl);
-        }
-        if (window._bpIsInflight?.()) {
-            imgEl.style.opacity = "0.35";
-            imgEl.style.filter  = "brightness(0.85)";
-        }
-        if (window._bpIsQueued?.()) _tpSetQueued(imgWrap, true);
-        return;
-    }
 
     // Keyed on gun+build, not tab id: two tabs holding the same build (a
     // Duplicate, or the same community build opened twice) share one generation.
@@ -1142,6 +1167,15 @@ async function _tpShow(tab, cx, cy, connected = false) {
     _tpActiveTabId = tab.id;
 
     const el = _tpEnsureTooltipEl();
+    const previousImg = el.querySelector(".tab-preview-img");
+    if (previousImg) {
+        _tpImageLoadCleanup.get(previousImg)?.();
+        delete previousImg.dataset.tpGenerating;
+        previousImg.style.opacity = "";
+        previousImg.style.filter = "";
+    }
+    const previousWrap = el.querySelector(".tab-preview-img-wrap");
+    if (previousWrap) _tpSetQueued(previousWrap, false);
     const staticImg = gun.image_512_link || gun.icon_link || "";
 
     // "Connected" = swapping straight from another chip's still-visible

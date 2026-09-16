@@ -366,8 +366,19 @@ function _bpBuildSptItemsForPairs(gun, pairs) {
     return _bpWalkTreeToSptItems(gun, _bpTreeFromPairs(gun, pairs || []));
 }
 
-// Apply url to the placeholder element. Called on success and after every
-// renderFullTree to re-stamp the image over whatever the render put there.
+let _bpStateNotificationPending = false;
+
+function _bpNotifyStateChange() {
+    if (_bpStateNotificationPending) return;
+    _bpStateNotificationPending = true;
+    // Publish the settled state after synchronous reset/update steps finish.
+    queueMicrotask(() => {
+        _bpStateNotificationPending = false;
+        window.dispatchEvent(new Event("eftforge:build-preview-change"));
+    });
+}
+
+// Re-stamp the placeholder after successful generation and tree renders.
 function _bpSetPlaceholder(url) {
     const img = document.getElementById("gun-display-image");
     if (!img) return;
@@ -405,6 +416,7 @@ function _bpApplyImageUrl(url) {
 
     _bpPlaceholderUrl = url || fallback;
     _bpSetPlaceholder(_bpPlaceholderUrl);
+    _bpNotifyStateChange();
 }
 
 // Apply a static image (tarkov.dev asset, or - when isCommunityCard is set - a
@@ -436,6 +448,7 @@ function _bpApplyStatic(staticUrl, isCommunityCard = false) {
     }
 
     if (staticUrl) _bpSetPlaceholder(staticUrl);
+    _bpNotifyStateChange();
 }
 
 // Show a "generating..." state while waiting for the API.
@@ -455,12 +468,14 @@ function _bpSetLoading(isLoading) {
 
     const phImg = document.getElementById("gun-display-image");
     if (phImg) phImg.style.opacity = isLoading ? "0.35" : "1";
+    _bpNotifyStateChange();
 }
 
 // Show or hide a queue overlay icon on the gun images, with a hover tooltip
 // explaining that the request is waiting behind another user's generation.
 function _bpSetQueued(isQueued) {
     _bpQueued = isQueued;
+    _bpNotifyStateChange();
     const tooltipText = isQueued ? EFTForge.lang.t("toast.imgGenQueuedMsg") : "";
 
     function _injectOrRemove(container) {
