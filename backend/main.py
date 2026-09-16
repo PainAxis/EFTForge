@@ -35,6 +35,7 @@ from optimizer.solver import OptimizeParams
 from optimizer.gunsmith import get_gunsmith_tasks
 from optimizer.explore_request import ExploreRequest
 from optimizer.process_runner import run_gunsmith, run_job, stream_explore
+from optimizer.cancellation import SolveCancelled, SolveCancellationMiddleware, SolveStreamingResponse
 from optimizer.compat_map import build_compatibility_map
 from solver_cache_epoch import SolverCacheEpochTracker
 from database_changelog import changelog_engine, ChangelogSessionLocal, ChangelogBase
@@ -72,6 +73,7 @@ _redoc_url = "/redoc" if ENABLE_API_DOCS else None
 _openapi_url = "/openapi.json" if ENABLE_API_DOCS else None
 
 app = FastAPI(title="EFTForge API", docs_url=_docs_url, redoc_url=_redoc_url, openapi_url=_openapi_url)
+app.add_middleware(SolveCancellationMiddleware)
 
 # Recorded once at process start - clients use this to detect a backend restart
 # and bypass their local update-check TTL so a fresh deploy is noticed immediately.
@@ -2279,16 +2281,31 @@ def build_explore(request: Request, payload: ExploreRequest, db: Session = Depen
     # status is committed to 200 the moment it starts - has begun sending anything.
     slot = _solve_slot(ip)
     slot.__enter__()
+    released = False
+
+    def release_slot():
+        nonlocal released
+        if not released:
+            released = True
+            slot.__exit__(None, None, None)
 
     def _stream():
         try:
-            for event in stream_explore(payload.weapon_id, payload.optimize_params(), payload.tradeoff, payload.steps):
-                yield f"data: {json.dumps(event)}\n\n"
+            with contextlib.closing(
+                stream_explore(payload.weapon_id, payload.optimize_params(), payload.tradeoff, payload.steps)
+            ) as events:
+                for event in events:
+                    yield f"data: {json.dumps(event)}\n\n"
+        except SolveCancelled:
+            return
         finally:
-            slot.__exit__(None, None, None)
+            release_slot()
 
-    return StreamingResponse(
-        _stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    return SolveStreamingResponse(
+        _stream(),
+        cleanup=release_slot,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

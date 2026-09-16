@@ -267,11 +267,8 @@ window.EFTForge.optimizer = (function () {
         });
     }
 
-    // Lets the user bail out of a slow solve instead of being stuck staring
-    // at "Solving...". This only abandons the fetch client-side - a solve
-    // already running on the server keeps running (a synchronous HiGHS call
-    // can't be interrupted mid-flight from outside), it just stops waiting
-    // on it and frees the drawer back up.
+    // Abort the request to stop waiting and let the backend disconnect monitor
+    // terminate this solve's worker process.
     let _abortController = null;
 
     function _t(key) { return window.t ? window.t(key) : key; }
@@ -330,10 +327,14 @@ window.EFTForge.optimizer = (function () {
         // close button, or an accidental click-out) is just a visibility toggle, not
         // an "abandon my solve" action. The solve keeps running and rendering into the
         // (now-hidden) panel body, so reopening the drawer shows wherever it landed.
-        // showPanel() already guards against a stale _result from a different gun.
-        // Explicit cancellation still goes through _cancelSolve (the panel's Cancel
-        // button).
+        // Cancel through onBuildLeave when leaving the build, or through
+        // _cancelSolve when clicking the panel's Cancel button.
         _resultImgAbort?.abort();
+    }
+
+    function onBuildLeave() {
+        _abortController?.abort('build-left');
+        hidePanel();
     }
 
     function onLangChange() {
@@ -2283,6 +2284,7 @@ window.EFTForge.optimizer = (function () {
                 let data;
                 try {
                     data = await exploreStream(body, signal, ev => {
+                        if (signal.aborted) return;
                         // The two boundary solves (minimize/maximize a single axis with
                         // no constraint on the other) are real points, but they're
                         // deliberately extreme - way off the eventual curve - so they're
@@ -2303,10 +2305,12 @@ window.EFTForge.optimizer = (function () {
                         };
                         _scheduleSolveRender();
                     }, () => {
+                        if (signal.aborted) return;
                         _solveStartedAt = Date.now();
                         _solveElapsedTimer = setInterval(_tickSolveElapsed, 100);
                     });
                 } catch (err) {
+                    signal.throwIfAborted();
                     if (err.status === 429 && err.reasonKey === 'optimizer.reason.serverBusy' && Date.now() < deadline) {
                         _waitingForSlot = true;
                         _renderResult();
@@ -2319,7 +2323,9 @@ window.EFTForge.optimizer = (function () {
                     }
                     throw err;
                 }
+                signal.throwIfAborted();
                 if (_solveProgress?.points?.length) await _playDiscardAnimation(_solveProgress.points, data.points, signal);
+                signal.throwIfAborted();
                 _explore = { ...data, request: body };
                 _exploreJustSolved = true;
                 _result = data.points[0]?.build || null;
@@ -2327,7 +2333,7 @@ window.EFTForge.optimizer = (function () {
                 break;
             }
         } catch (err) {
-            _error = _t(err.name === 'AbortError' ? 'optimizer.cancelled' : 'optimizer.solveFailed');
+            _error = signal.reason === 'build-left' ? null : _t(err.name === 'AbortError' ? 'optimizer.cancelled' : 'optimizer.solveFailed');
         } finally {
             _solving = false;
             _waitingForSlot = false;
@@ -3189,6 +3195,7 @@ window.EFTForge.optimizer = (function () {
                 });
                 if (res.status === 429) {
                     const data = await res.json().catch(() => null);
+                    signal.throwIfAborted();
                     const key = data?.detail?.reason_key;
                     if (key === 'optimizer.reason.serverBusy' && Date.now() < deadline) {
                         _waitingForSlot = true;
@@ -3201,6 +3208,7 @@ window.EFTForge.optimizer = (function () {
                 }
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
+                signal.throwIfAborted();
                 if (data.status === 'optimal' || data.status === 'feasible') {
                     _result = data;
                 } else {
@@ -3209,7 +3217,7 @@ window.EFTForge.optimizer = (function () {
                 return;
             }
         } catch (err) {
-            _error = err.name === 'AbortError' ? _t('optimizer.cancelled') : _t('optimizer.solveFailed');
+            _error = signal.reason === 'build-left' ? null : (err.name === 'AbortError' ? _t('optimizer.cancelled') : _t('optimizer.solveFailed'));
         } finally {
             _solving = false;
             _waitingForSlot = false;
@@ -4226,6 +4234,6 @@ window.EFTForge.optimizer = (function () {
     // Scripts are loaded at the end of <body> so DOM is ready; init immediately.
     init();
 
-    return { showPanel, hidePanel, onLangChange, onTraderLevelsChange, pulse };
+    return { showPanel, hidePanel, onBuildLeave, onLangChange, onTraderLevelsChange, pulse };
 
 }());

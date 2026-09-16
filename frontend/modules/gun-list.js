@@ -348,6 +348,7 @@ function updateToggleUI() {
 
 function returnToGunSelection() {
 
+    EFTForge.optimizer?.onBuildLeave();
     EFTForge.tabs?.deactivateActiveTab();
 
     if (EFTForge.state.publishMode) {
@@ -588,6 +589,7 @@ async function selectGun(gun, liElement, { skipTreeRender = false, suppressPulse
         return;
     }
 
+  EFTForge.optimizer?.onBuildLeave();
   EFTForge.state.currentGun = gun;
   EFTForge.state.currentEquipErgoModifier = 0;
 

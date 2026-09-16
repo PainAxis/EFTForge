@@ -263,6 +263,100 @@ def test_api_rejects_unknown_weapon_before_solver(db, monkeypatch):
     assert error.value.status_code == 404
 
 
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+@pytest.mark.parametrize("disconnect_after_progress", [False, True])
+def test_api_disconnect_releases_slot_and_allows_next_solve(
+    db, monkeypatch, tmp_path, spec_version, disconnect_after_progress
+):
+    import asyncio
+    import json
+    import threading
+
+    import main
+    from optimizer.cancellation import check_cancelled
+
+    started = threading.Event()
+    progress_sent = threading.Event()
+    stopped = threading.Event()
+    ip = "203.0.113.81"
+    monkeypatch.setattr(main, "_SOLVE_LOCK_DIR", str(tmp_path))
+    monkeypatch.setattr(main, "_SOLVE_CONCURRENCY_SEM", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(main, "_check_solve_rate_limit", lambda ip: None)
+
+    def solve(*args):
+        started.set()
+        try:
+            if disconnect_after_progress:
+                yield {"type": "progress", "done": 1}
+            while True:
+                check_cancelled()
+                stopped.wait(0.01)
+        finally:
+            stopped.set()
+
+    monkeypatch.setattr(main, "stream_explore", solve)
+    main.app.dependency_overrides[main.get_db] = lambda: db
+
+    async def run(disconnect):
+        body_sent = False
+        sent = []
+
+        async def receive():
+            nonlocal body_sent
+            if not body_sent:
+                body_sent = True
+                return {"type": "http.request", "body": json.dumps({"weapon_id": "gun", "steps": 10}).encode()}
+            if not disconnect:
+                await asyncio.Event().wait()
+            while not started.is_set() or (disconnect_after_progress and not progress_sent.is_set()):
+                await asyncio.sleep(0.01)
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            sent.append(message)
+            if message["type"] == "http.response.body" and b"progress" in message.get("body", b""):
+                progress_sent.set()
+
+        await asyncio.wait_for(
+            main.app(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/build/explore",
+                    "query_string": b"",
+                    "headers": [(b"content-type", b"application/json")],
+                    "client": (ip, 1234),
+                    "scheme": "http",
+                    "server": ("localhost", 8000),
+                    "http_version": "1.1",
+                    "asgi": {"spec_version": spec_version},
+                },
+                receive,
+                send,
+            ),
+            timeout=5,
+        )
+        return sent
+
+    try:
+        asyncio.run(run(True))
+        assert stopped.is_set()
+        assert not list(tmp_path.iterdir())
+
+        def completed(*args):
+            yield {"type": "result", "data": {"points": [], "complete": True}}
+
+        monkeypatch.setattr(main, "stream_explore", completed)
+        sent = asyncio.run(run(False))
+        assert sent[0]["status"] == 200
+        assert b'"complete": true' in b"".join(message.get("body", b"") for message in sent)
+        assert not list(tmp_path.iterdir())
+        assert main._SOLVE_CONCURRENCY_SEM.acquire(blocking=False)
+        main._SOLVE_CONCURRENCY_SEM.release()
+    finally:
+        main.app.dependency_overrides.pop(main.get_db, None)
+
+
 def test_market_and_infeasibility_are_respected(db):
     result = explore_weapon(db, "gun", OptimizeParams(trader_levels={"mechanic": 0}, flea_available=False))
     assert result["points"] == []

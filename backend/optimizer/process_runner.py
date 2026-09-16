@@ -12,6 +12,7 @@ import traceback
 from dataclasses import asdict
 
 from optimizer.explore import EXPLORE_TIME_LIMIT_SECONDS, frontier_points
+from optimizer.cancellation import check_cancelled
 from optimizer.milp import SOLVE_TIME_LIMIT_SECONDS
 
 PROCESS_EXIT_GRACE_SECONDS = 2.0
@@ -105,6 +106,7 @@ def _explore_worker(connection, payload: dict) -> None:
 
 
 def _start_process(target, *args):
+    check_cancelled()
     context = multiprocessing.get_context("spawn")
     receive, send = context.Pipe(duplex=False)
     process = context.Process(target=target, args=(send, *args), daemon=True)
@@ -130,11 +132,13 @@ def run_job(kind: str, weapon_id: str, params, **kwargs) -> dict:
     deadline = time.monotonic() + PROCESS_HARD_TIMEOUT_SECONDS
     try:
         while time.monotonic() < deadline:
+            check_cancelled()
             if receive.poll(min(PROCESS_POLL_SECONDS, max(0, deadline - time.monotonic()))):
                 try:
                     event = receive.recv()
                 except EOFError:
                     break
+                check_cancelled()
                 if event["type"] == "result":
                     return event["data"]
                 raise RuntimeError(f"Optimizer child failed: {event['message']}\n{event['traceback']}")
@@ -151,11 +155,13 @@ def run_gunsmith(task_name: str, **kwargs) -> dict:
     deadline = time.monotonic() + PROCESS_HARD_TIMEOUT_SECONDS
     try:
         while time.monotonic() < deadline:
+            check_cancelled()
             if receive.poll(min(PROCESS_POLL_SECONDS, max(0, deadline - time.monotonic()))):
                 try:
                     event = receive.recv()
                 except EOFError:
                     break
+                check_cancelled()
                 if event["type"] == "result":
                     return event["data"]
                 raise RuntimeError(f"Optimizer child failed: {event['message']}\n{event['traceback']}")
@@ -181,11 +187,13 @@ def stream_explore(weapon_id: str, params, tradeoff: str, steps: int):
     solve_count = 0
     try:
         while time.monotonic() < deadline:
+            check_cancelled()
             if receive.poll(min(PROCESS_POLL_SECONDS, max(0, deadline - time.monotonic()))):
                 try:
                     event = receive.recv()
                 except EOFError:
                     break
+                check_cancelled()
                 if event["type"] == "error":
                     raise RuntimeError(f"Optimizer child failed: {event['message']}\n{event['traceback']}")
                 if event["type"] == "progress":
