@@ -329,7 +329,9 @@ window.EFTForge.optimizer = (function () {
         // (now-hidden) panel body, so reopening the drawer shows wherever it landed.
         // Cancel through onBuildLeave when leaving the build, or through
         // _cancelSolve when clicking the panel's Cancel button.
+        ++_resultImgGen;
         _resultImgAbort?.abort();
+        _resultImgAbort = null;
     }
 
     function onBuildLeave() {
@@ -3414,13 +3416,15 @@ window.EFTForge.optimizer = (function () {
     }
 
     async function _loadResultGunImage() {
+        const gen = ++_resultImgGen;
+        _resultImgAbort?.abort();
+        _resultImgAbort = null;
         const imgEl = document.getElementById('optimizer-result-gun-img');
         if (!imgEl || !_result) return;
         const gun = _gunForResult();
         if (!gun) return;
 
-        const gen = ++_resultImgGen;
-        const pairs = _result.slot_pairs || [];
+        const pairs = (_result.slot_pairs || []).map(pair => pair.slice());
         const key = pairs.map(p => p.join(':')).sort().join(',');
 
         // Static default (toggle off, factory config, or kill-switch): the preset
@@ -3447,9 +3451,9 @@ window.EFTForge.optimizer = (function () {
             try {
                 const batch = await fetchItemSlotsBatch(uncached);
                 for (const [iid, slots] of Object.entries(batch)) cacheSet(EFTForge.state.slotCache, iid, slots);
-            } catch (_) { /* generation below just skips any still-unresolved slots */ }
+            } catch (_) { return; }
         }
-        if (gen !== _resultImgGen) return;
+        if (gen !== _resultImgGen || !window._bpIsEnabled?.() || window._bpIsGloballyDisabled?.()) return;
 
         const sptData = _bpBuildSptItemsForPairs(gun, pairs);
         if (!sptData) return;
@@ -3470,17 +3474,19 @@ window.EFTForge.optimizer = (function () {
                     if (gen === _resultImgGen && busyData.busy) _setResultQueued(true);
                 }
             } catch (_) {}
-            if (gen !== _resultImgGen) return;
+            if (gen !== _resultImgGen || signal.aborted || !window._bpIsEnabled?.()
+                || window._bpIsGloballyDisabled?.()) return;
 
             const resp = await fetch(`${EFTForge.config.API_BASE}/build-image`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(sptData),
+                body: JSON.stringify({ ...sptData, source: "optimizer" }),
                 signal,
             });
             if (!resp.ok) return;
             const data = await resp.json();
-            if (data.image_url && gen === _resultImgGen) imgEl.src = data.image_url;
+            if (data.image_url && gen === _resultImgGen && !signal.aborted
+                && window._bpIsEnabled?.() && !window._bpIsGloballyDisabled?.()) imgEl.src = data.image_url;
         } catch (_) {
             // Network failure or aborted - leave the static preset image showing.
         } finally {
@@ -3489,7 +3495,7 @@ window.EFTForge.optimizer = (function () {
                 imgEl.style.filter = '';
                 _setResultQueued(false);
             }
-            _resultImgAbort = null;
+            if (_resultImgAbort?.signal === signal) _resultImgAbort = null;
         }
     }
 

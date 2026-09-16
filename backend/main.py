@@ -31,6 +31,7 @@ from models_weapon_presets import WeaponDefaultPreset  # noqa: F401 - registers 
 from stats import _compute_stats, apply_full_mag_ammo
 from compatibility import CompatibilityIndex
 from combo_transport import ComboResponseFormat, combo_result_event, format_combo_result
+from image_jobs import ImageJobs, ImageQueueFull, build_image_key
 from optimizer.solver import OptimizeParams
 from optimizer.gunsmith import get_gunsmith_tasks
 from optimizer.explore_request import ExploreRequest
@@ -3557,9 +3558,39 @@ async def _do_pw_request(id: str, items: list, weapon_name: str) -> dict:
         _pw_in_flight -= 1
 
 
+async def _generate_image_job(id: str, items: list, weapon_name: str) -> dict:
+    # Finish or recover each browser operation before dispatching another job.
+    try:
+        return await asyncio.wait_for(_do_pw_request(id, items, weapon_name), timeout=120)
+    except Exception:
+        await _reset_pw_page()
+        raise
+
+
+_image_jobs = ImageJobs(_generate_image_job)
+
+
+async def _await_image_job(future, request: Request | None = None):
+    # Withdraw disconnected subscribers without interrupting an active browser operation.
+    wrapped = asyncio.wrap_future(future)
+    deadline = time.monotonic() + 120
+    try:
+        while not wrapped.done():
+            if request is not None and await request.is_disconnected():
+                raise HTTPException(status_code=499, detail="Image request disconnected")
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Timed out waiting for image generation")
+            await asyncio.wait({wrapped}, timeout=0.1)
+        return wrapped.result()
+    finally:
+        if not wrapped.done():
+            wrapped.cancel()
+        future.cancel()
+
+
 @app.get("/build-image/busy")
 async def build_image_busy():
-    return {"busy": _pw_in_flight > 0, "disabled": _imggen_disabled}
+    return {"busy": _image_jobs.busy, "disabled": _imggen_disabled}
 
 
 @app.api_route("/health/imggen", methods=["GET", "HEAD"])
@@ -3580,17 +3611,17 @@ async def health_imggen():
         raise HTTPException(status_code=503, detail="No builds available for probe")
 
     pairs = json.loads(build.pairs_json)
-    items = _build_spt_items(build.gun_id, pairs)
-    _pw_loop_ready.wait(timeout=10)
-    future = asyncio.run_coroutine_threadsafe(_do_pw_request(build.gun_id, items, build.gun_name), _pw_loop)
     try:
-        uvloop = asyncio.get_event_loop()
-        await uvloop.run_in_executor(None, lambda: future.result(timeout=120))
+        items = _build_spt_items(build.gun_id, pairs)
+        if not _pw_loop_ready.is_set():
+            raise RuntimeError("Image generator is still starting")
+        future = asyncio.run_coroutine_threadsafe(
+            _image_jobs.request(build.gun_id, items, build.gun_name, priority=2, source="health"), _pw_loop
+        )
+        await _await_image_job(future)
         _IMGGEN_HEALTH_CACHE["result"] = {"status": "ok", "ts": now, "error": None}
         return {"status": "ok"}
     except Exception as exc:
-        future.cancel()
-        asyncio.run_coroutine_threadsafe(_reset_pw_page(), _pw_loop)
         err = str(exc)
         _IMGGEN_HEALTH_CACHE["result"] = {"status": "down", "ts": now, "error": err}
         raise HTTPException(status_code=503, detail=err)
@@ -3598,8 +3629,10 @@ async def health_imggen():
 
 @app.post("/build-image")
 async def proxy_build_image(
+    request: Request,
     id: str = Body(...),
     items: List[dict] = Body(...),
+    source: Literal["preview", "hover", "optimizer", "export"] = Body("preview"),
     db: Session = Depends(get_db),
 ):
     if _imggen_disabled:
@@ -3607,32 +3640,31 @@ async def proxy_build_image(
 
     _cap_list("items", items, MAX_IMAGE_ITEMS)
 
-    # Stable cache key: hash of sorted item tpl+slot pairs
-    cache_key_src = json.dumps(sorted((i.get("_tpl", "") + i.get("slotId", "")) for i in items))
-    cache_key = hashlib.sha256(cache_key_src.encode()).hexdigest()[:16]
-
-    if cache_key in _IMAGE_GEN_CACHE:
-        return {"image_url": _IMAGE_GEN_CACHE[cache_key]}
-
     weapon = db.get(Item, id)
     if not weapon:
         raise HTTPException(status_code=404, detail=f"Unknown weapon id: {id}")
+    if not weapon.is_weapon:
+        raise HTTPException(status_code=422, detail="Build image root must be a weapon")
+    try:
+        cache_key = build_image_key(id, items)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if cache_key in _IMAGE_GEN_CACHE:
+        return {"image_url": _IMAGE_GEN_CACHE[cache_key]}
     weapon_name = weapon.name
 
-    _pw_loop_ready.wait(timeout=10)
-
-    future = asyncio.run_coroutine_threadsafe(_do_pw_request(id, items, weapon_name), _pw_loop)
+    if not _pw_loop_ready.is_set():
+        raise HTTPException(status_code=503, detail="Image generator is still starting")
+    future = asyncio.run_coroutine_threadsafe(
+        _image_jobs.request(id, items, weapon_name, priority=1 if source == "hover" else 0, source=source), _pw_loop
+    )
     try:
-        uvloop = asyncio.get_event_loop()
-        data = await uvloop.run_in_executor(None, lambda: future.result(timeout=120))
+        data = await _await_image_job(future, request)
+    except HTTPException:
+        raise
+    except ImageQueueFull as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
-        # Cancel the coroutine in the pw loop so it releases _pw_req_lock and
-        # decrements _pw_in_flight - without this the lock is held forever and
-        # all subsequent /build-image requests queue up as zombies.
-        future.cancel()
-        # Reset _pw_page so the next request gets a fresh page rather than
-        # trying to interact with a Chromium that may be in a broken UI state.
-        asyncio.run_coroutine_threadsafe(_reset_pw_page(), _pw_loop)
         _logger.error("build-image failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=502, detail=f"Image generator request failed: {exc}")
 
@@ -3705,11 +3737,11 @@ def _build_spt_items(gun_id: str, pairs: list) -> list:
     for slot_id, item_id in pairs:
         slot = slot_map.get(slot_id)
         if not slot:
-            continue
+            raise ValueError(f"Unknown build image slot: {slot_id}")
         game_slot_name = slot.slot_game_name or slot.slot_name
         parent_instance = instance_map.get(slot.parent_item_id)
         if not parent_instance:
-            continue
+            raise ValueError(f"Unresolved build image parent for slot: {slot_id}")
         instance_id = _bp_hex24(parent_instance + ":" + game_slot_name)
         items.append(
             {
@@ -3950,13 +3982,18 @@ def _generate_and_save_build_image(build_id: int, gun_id: str, gun_name: str, pa
 
     # build the full SPT-format items array the image-gen API expects,
     # matching the frontend _bpBuildSptItems() exactly
-    items = _build_spt_items(gun_id, pairs)
-
-    # generate via patchright - blocks until the lock is acquired and generation completes
-    future = asyncio.run_coroutine_threadsafe(_do_pw_request(gun_id, items, gun_name), _pw_loop)
+    future = None
     try:
+        items = _build_spt_items(gun_id, pairs)
+        if not _pw_loop_ready.wait(timeout=10):
+            raise RuntimeError("Image generator is still starting")
+        future = asyncio.run_coroutine_threadsafe(
+            _image_jobs.request(gun_id, items, gun_name, priority=2, source="publication"), _pw_loop
+        )
         data = future.result(timeout=120)
     except Exception as exc:
+        if future is not None:
+            future.cancel()
         _logger.error("build-image gen failed for build %s: %s", build_id, exc)
         return False
 
@@ -4046,7 +4083,7 @@ async def _bg_migrate_build_images(force: bool = False):
     while True:
         try:
             # yield to real user requests
-            if _pw_in_flight > 0:
+            if _image_jobs.busy:
                 await asyncio.sleep(5)
                 continue
 

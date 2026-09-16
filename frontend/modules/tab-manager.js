@@ -615,16 +615,11 @@ let _tpLastY       = 0;
    key outlives any particular tab, and stats keys multiply by ammo/strength
    settings, so neither has a natural per-tab owner to prune against.
 
-   The in-flight maps matter more than the caches. renderTabBar() re-renders the
-   chip strip underneath a stationary cursor, and the replacement chip fires a
-   fresh mouseenter while renderTabBar separately re-connects the tooltip - so
-   _tpShow can run twice for one hover. The generation counter discards the
-   loser's DOM update, but without these both calls would still have hit the
-   network, and for the image path that means two server-side generations. */
+   Share in-flight stats locally. Let the backend share image jobs so leaving
+   a hover can withdraw its request without cancelling another consumer. */
 const TP_CACHE_MAX = 60;
 
 const _tpImageCache    = new Map(); // `${gunId}:${pairsKey}` -> generated image URL
-const _tpImageInflight = new Map(); // same key -> Promise<url|null> currently generating
 const _tpStatsCache    = new Map(); // stats key (see _tpStatsKey) -> calculateBuild() response
 const _tpStatsInflight = new Map(); // same key -> Promise<data|null> currently calculating
 
@@ -657,7 +652,7 @@ function _tpStatsKey(tab) {
     ].join("|");
 }
 
-// Shared by the stats and image paths: return the cached value, join an
+// Return cached stats, join an
 // identical request already in flight, or start one and register it.
 function _tpDedupe(cache, inflight, key, run) {
     const cached = _tpCacheGet(cache, key);
@@ -1030,7 +1025,8 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
         return;
     }
 
-    const key = _tabPairsKey(tab);
+    const pairs = (tab.pairs || []).map(pair => pair.slice());
+    const key = _pairsKey(pairs);
 
     if (tab.id === EFTForge.state.activeTabId) {
         // Active tab's image is already being managed by build-preview.js - just mirror it.
@@ -1087,57 +1083,49 @@ async function _tpLoadImage(tab, gun, imgWrap, imgEl, gen) {
     imgEl.style.opacity = "0.35";
     imgEl.style.filter  = "brightness(0.85)";
 
+    _tpImgAbort?.abort();
+    const abort = new AbortController();
+    _tpImgAbort = abort;
+    const current = () => _tpGen === gen && !abort.signal.aborted
+        && window._bpIsEnabled?.() && !_bpGlobalDisabled;
     try {
-        const url = await _tpDedupe(_tpImageCache, _tpImageInflight, cacheKey, async () => {
-            // Warm slotCache for any pairs items the gun's own factory data didn't cover.
-            const uncachedItemIds = [...new Set(
-                (tab.pairs || []).map(([, iid]) => iid).filter(iid => !EFTForge.state.slotCache[iid])
-            )];
-            if (uncachedItemIds.length) {
-                try {
-                    const batch = await fetchItemSlotsBatch(uncachedItemIds);
-                    for (const [iid, slots] of Object.entries(batch)) cacheSet(EFTForge.state.slotCache, iid, slots);
-                } catch (_) { /* image gen below will just skip unresolved slots */ }
+        const uncachedItemIds = [...new Set(
+            pairs.map(([, iid]) => iid).filter(iid => !EFTForge.state.slotCache[iid])
+        )];
+        if (uncachedItemIds.length) {
+            const batch = await fetchItemSlotsBatch(uncachedItemIds);
+            for (const [iid, slots] of Object.entries(batch)) cacheSet(EFTForge.state.slotCache, iid, slots);
+        }
+        if (!current()) return;
+        const sptData = _bpBuildSptItemsForPairs(gun, pairs);
+        if (!sptData) return;
+        try {
+            const busyResp = await fetch(`${EFTForge.config.API_BASE}/build-image/busy`, { signal: abort.signal });
+            if (busyResp.ok) {
+                const busyData = await busyResp.json();
+                if (current() && busyData.busy) _tpSetQueued(imgWrap, true);
             }
-
-            const sptData = _bpBuildSptItemsForPairs(gun, tab.pairs || []);
-            if (!sptData) return null;
-
-            // The abort controller is deliberately NOT shared with the dedupe
-            // entry: hovering away aborts this hover's view of the request, but a
-            // second hover that joined the same in-flight generation still wants
-            // the result. Only the /build-image POST itself is left to finish.
-            const abort = new AbortController();
-            _tpImgAbort = abort;
-            try {
-                try {
-                    const busyResp = await fetch(`${EFTForge.config.API_BASE}/build-image/busy`, { signal: abort.signal });
-                    if (busyResp.ok) {
-                        const busyData = await busyResp.json();
-                        if (_tpGen === gen && busyData.busy) _tpSetQueued(imgWrap, true);
-                    }
-                } catch (_) { /* best-effort queue indicator only */ }
-
-                const resp = await fetch(`${EFTForge.config.API_BASE}/build-image`, {
-                    method:  "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body:    JSON.stringify(sptData),
-                });
-                if (!resp.ok) return null;
-                const data = await resp.json();
-                return data.image_url || null;
-            } finally {
-                if (_tpImgAbort === abort) _tpImgAbort = null;
-            }
+        } catch (_) { /* Keep the queue indicator best-effort. */ }
+        if (!current()) return;
+        const resp = await fetch(`${EFTForge.config.API_BASE}/build-image`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...sptData, source: "hover" }),
+            signal: abort.signal,
         });
-
-        if (url && _tpGen === gen) imgEl.src = url;
+        if (!resp.ok || !current()) return;
+        const data = await resp.json();
+        if (data.image_url && current()) {
+            _tpCachePut(_tpImageCache, cacheKey, data.image_url);
+            imgEl.src = data.image_url;
+        }
     } catch (_) {
-        // Network failure - leave the static fallback showing.
+        // Leave the static fallback showing when generation or slot resolution fails.
     } finally {
+        if (_tpImgAbort === abort) _tpImgAbort = null;
         if (_tpGen === gen) {
             imgEl.style.opacity = "";
-            imgEl.style.filter  = "";
+            imgEl.style.filter = "";
             _tpSetQueued(imgWrap, false);
         }
     }
@@ -1147,6 +1135,8 @@ async function _tpShow(tab, cx, cy, connected = false) {
     const gun = gunById(tab.gunId);
     if (!gun) return;
 
+    _tpImgAbort?.abort();
+    _tpImgAbort = null;
     const gen = ++_tpGen;
     const isSameTab = tab.id === _tpActiveTabId;
     _tpActiveTabId = tab.id;

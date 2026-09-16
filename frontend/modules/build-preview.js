@@ -18,7 +18,9 @@ window.EFTForge = window.EFTForge || {};
 let _bpInflight         = false;
 let _bpAbortController  = null;   // AbortController for the current in-flight fetch
 let _bpQueued           = false;  // true while we're waiting in the server generation queue
-let _bpPendingKey       = null;   // key waiting to be generated
+let _bpRevision = 0;
+let _bpDesiredId = null;
+let _bpLastGunId = null;
 let _bpLastKey          = null;   // key of the image currently displayed
 let _bpLastImageUrl     = null;   // URL currently displayed in the gun cell
 let _bpPlaceholderUrl   = null;   // URL shown on the placeholder (persists across attachment changes)
@@ -72,11 +74,7 @@ function _bpSetGlobalDisabled(disabled) {
     _bpApplyGlobalDisabledClass();
     if (disabled) {
         // Abort any in-flight generation
-        clearTimeout(_bpDebounceTimer);
-        if (_bpAbortController) { _bpAbortController.abort(); _bpAbortController = null; }
-        _bpInflight   = false;
-        _bpSetQueued(false);
-        _bpPendingKey = null;
+        _bpCancelPending();
     }
 }
 
@@ -220,11 +218,8 @@ function _bpApplyToggle(next) {
 
     if (!_bpEnabled) {
         // Clear any in-progress state and revert images to static tarkov.dev sources
-        clearTimeout(_bpDebounceTimer);
-        if (_bpAbortController) { _bpAbortController.abort(); _bpAbortController = null; }
-        _bpInflight       = false;
-        _bpSetQueued(false);
-        _bpPendingKey     = null;
+        _bpCancelPending();
+        _bpLastGunId = null;
         _bpLastKey        = null;
         _bpLastImageUrl   = null;
         _bpPlaceholderUrl = null;
@@ -301,7 +296,7 @@ function _bpWalkTreeToSptItems(gun, tree) {
         for (const slotId in node.children) {
             const child    = node.children[slotId];
             const slotMeta = parentSlots.find(s => s.id === slotId);
-            if (!slotMeta) continue; // slot not in cache - skip
+            if (!slotMeta) return false;
 
             // Use the EFT internal slot name (mod_pistol_grip, mod_barrel, etc.)
             // which is what the image-gen API expects for slotId.
@@ -316,11 +311,13 @@ function _bpWalkTreeToSptItems(gun, tree) {
                 slotId:   gameSlotName,
                 parentId: parentInstanceId,
             });
-            walk(child, child.item.id, instanceId);
+            if (!walk(child, child.item.id, instanceId)) return false;
         }
+        return true;
     }
 
-    walk(tree, gun.id, gunInstanceId);
+    // Decline incomplete payloads instead of silently dropping attachments.
+    if (!tree || !walk(tree, gun.id, gunInstanceId)) return null;
     return { id: gun.id, items };
 }
 
@@ -353,7 +350,7 @@ function _bpTreeFromPairs(gun, pairs) {
 
     for (const [slotId, itemId] of pairs) {
         const parent = slotToParent[slotId];
-        if (!parent) continue; // slot not in cache - skip
+        if (!parent) return null;
         const node = { item: { id: itemId }, children: {} };
         parent.children[slotId] = node;
         addSlots(node);
@@ -381,8 +378,7 @@ function _bpSetPlaceholder(url) {
 }
 
 // Update every image element that should show the build preview.
-// Passing null resets the target image to the factory image but leaves
-// the placeholder showing the last generated image.
+// Reset every target to the factory image when generation fails.
 function _bpApplyImageUrl(url) {
     _bpLastImageUrl        = url;
     _bpLastIsCommunityCard = false;
@@ -407,12 +403,8 @@ function _bpApplyImageUrl(url) {
         }
     }
 
-    // Placeholder: only update when we have a real generated URL so it
-    // keeps showing the previous composite while a new one is generating.
-    if (url) {
-        _bpPlaceholderUrl = url;
-        _bpSetPlaceholder(url);
-    }
+    _bpPlaceholderUrl = url || fallback;
+    _bpSetPlaceholder(_bpPlaceholderUrl);
 }
 
 // Apply a static image (tarkov.dev asset, or - when isCommunityCard is set - a
@@ -448,7 +440,7 @@ function _bpApplyStatic(staticUrl, isCommunityCard = false) {
 
 // Show a "generating..." state while waiting for the API.
 function _bpSetLoading(isLoading) {
-    if (!_bpEnabled) return;
+    if (isLoading && !_bpEnabled) return;
 
     if (EFTForge.state.gridView) {
         const gunCellImg = document.querySelector(".ag-gun-cell img");
@@ -520,75 +512,67 @@ function _bpSetQueued(isQueued) {
 function _bpWaitForImgLoad(img) {
     return new Promise(resolve => {
         if (!img || img.complete) { resolve(); return; }
-        const done = () => resolve();
-        img.addEventListener("load",  done, { once: true });
+        const done = () => {
+            clearTimeout(timer);
+            img.removeEventListener("load", done);
+            img.removeEventListener("error", done);
+            resolve();
+        };
+        const timer = setTimeout(done, 5000);
+        img.addEventListener("load", done, { once: true });
         img.addEventListener("error", done, { once: true });
-        setTimeout(resolve, 5000);
     });
 }
 
 // --- Core generate function ----------------------------------
 
-async function _bpGenerate(key) {
-    const gun = EFTForge.state.currentGun;
+// Wait for a pause in editing before committing work to the shared generator.
+const _BP_DEBOUNCE_MS = 1500;
+let _bpDebounceTimer = null;
 
-    // No attachments - use bare gun body image from tarkov.dev.
-    if (key === "") {
-        _bpLastKey = key;
-        _bpApplyStatic(gun.bare_image_512_link || gun.image_512_link || gun.icon_link);
-        return;
-    }
+function _bpCancelPending() {
+    ++_bpRevision;
+    clearTimeout(_bpDebounceTimer);
+    _bpDebounceTimer = null;
+    _bpAbortController?.abort();
+    _bpAbortController = null;
+    _bpDesiredId = null;
+    _bpInflight = false;
+    _bpSetQueued(false);
+    _bpSetLoading(false);
+}
 
-    // Factory configuration - factoryPairsKey uses the same collectSlotPairs
-    // format as _bpPairsKey, so a direct string compare is reliable.
-    if (key === EFTForge.state.factoryPairsKey) {
-        _bpLastKey = key;
-        _bpApplyStatic(gun.image_512_link || gun.icon_link);
-        return;
-    }
+async function _bpGenerate(snapshot, revision) {
+    const { gunId, key, payload } = snapshot;
+    const current = () => revision === _bpRevision && _bpEnabled && !_bpGlobalDisabled
+        && EFTForge.state.currentGun?.id === gunId && _bpPairsKey() === key;
+    if (!current()) return;
 
-    // Custom build - fire the image gen request.
-    // Abort any previous in-flight request so a stale result can't overwrite
-    // the image after the user has already moved to a different build state.
-    if (_bpAbortController) _bpAbortController.abort();
-    _bpAbortController = new AbortController();
-    const signal = _bpAbortController.signal;
-
+    const controller = new AbortController();
+    _bpAbortController = controller;
+    const signal = controller.signal;
     _bpInflight = true;
     _bpSetLoading(true);
-
     try {
-        const sptData = _bpBuildSptItems();
-        if (!sptData) {
-            _bpApplyImageUrl(null);
-            return;
-        }
-
-        // Check server state: queue status and global disabled flag.
         try {
             const busyResp = await fetch(`${EFTForge.config.API_BASE}/build-image/busy`, { signal });
             if (busyResp.ok) {
                 const busyData = await busyResp.json();
-                if (typeof busyData.disabled === "boolean" && busyData.disabled !== _bpGlobalDisabled) {
-                    _bpSetGlobalDisabled(busyData.disabled);
-                }
-                if (_bpGlobalDisabled) return;
-                if (busyData.busy) _bpSetQueued(true);
+                if (!current()) return;
+                if (typeof busyData.disabled === "boolean") _bpSetGlobalDisabled(busyData.disabled);
+                if (!current()) return;
+                _bpSetQueued(!!busyData.busy);
             }
-        } catch (_) {}
-
-        const resp = await fetch(
-            `${EFTForge.config.API_BASE}/build-image`,
-            {
-                method:  "POST",
-                headers: { "Content-Type": "application/json" },
-                body:    JSON.stringify(sptData),
-                signal,
-            }
-        );
-
+        } catch (_) { /* Keep the status check best-effort. */ }
+        if (!current() || signal.aborted) return;
+        const resp = await fetch(`${EFTForge.config.API_BASE}/build-image`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...payload, source: "preview" }),
+            signal,
+        });
+        if (!current()) return;
         if (!resp.ok) {
-            console.warn("[build-preview] backend returned", resp.status);
             _bpApplyImageUrl(null);
             if (resp.status === 502) {
                 const t = EFTForge.lang.t;
@@ -596,87 +580,78 @@ async function _bpGenerate(key) {
             }
             return;
         }
-
         const data = await resp.json();
-        if (data.image_url) {
-            _bpLastKey = key;
-            _bpApplyImageUrl(data.image_url);
-            // Wait for both visible images to finish loading before undimming.
-            // Without this the opacity resets while the browser is still fetching
-            // the new src, causing a visible flash of the dimmed factory image.
-            const targetImg   = EFTForge.state.gridView
-                ? document.querySelector(".ag-gun-cell img")
-                : _bpGetListViewImg();
-            const placeholder = document.getElementById("gun-display-image");
-            await Promise.all([
-                _bpWaitForImgLoad(targetImg),
-                _bpWaitForImgLoad(placeholder),
-            ]);
-        } else {
-            console.warn("[build-preview] no image_url in response", data);
+        if (!current()) return;
+        if (!data.image_url) {
+            _bpApplyImageUrl(null);
+            return;
+        }
+        _bpLastKey = key;
+        _bpLastGunId = gunId;
+        _bpApplyImageUrl(data.image_url);
+        const targetImg = EFTForge.state.gridView
+            ? document.querySelector(".ag-gun-cell img") : _bpGetListViewImg();
+        await Promise.all([
+            _bpWaitForImgLoad(targetImg),
+            _bpWaitForImgLoad(document.getElementById("gun-display-image")),
+        ]);
+    } catch (err) {
+        if (err.name !== "AbortError" && current()) {
+            console.warn("[build-preview] failed:", err);
             _bpApplyImageUrl(null);
         }
-    } catch (err) {
-        if (err.name === "AbortError") return; // superseded by a newer request - do nothing
-        console.warn("[build-preview] failed:", err);
-        _bpApplyImageUrl(null);
     } finally {
-        _bpInflight = false;
-        _bpAbortController = null;
-        _bpSetQueued(false);
-        _bpSetLoading(false);
-
-        // If a newer key arrived while we were in-flight, generate it now
-        if (_bpPendingKey && _bpPendingKey !== _bpLastKey) {
-            const next = _bpPendingKey;
-            _bpPendingKey = null;
-            _bpGenerate(next);
+        // Only release state owned by this revision, including after image loading.
+        if (revision === _bpRevision) {
+            _bpInflight = false;
+            _bpAbortController = null;
+            _bpDesiredId = null;
+            _bpSetQueued(false);
+            _bpSetLoading(false);
         }
     }
 }
 
-// --- Debounced public entry point ----------------------------
-
-let _bpDebounceTimer = null;
-
 function scheduleBuildPreview() {
-    if (!_bpEnabled || _bpGlobalDisabled || !EFTForge.state.currentGun) return;
-
+    const gun = EFTForge.state.currentGun;
+    if (!_bpEnabled || _bpGlobalDisabled || !gun) return;
     const key = _bpPairsKey();
-
-    // Community build with a pre-rendered card image (hosted on Gitee) - reuse it
-    // instead of paying for a fresh generation of an image that already exists.
-    // communityBuild is cleared the moment the build diverges from what was loaded
-    // (see syncBuildDisplayName in build-manager.js), so this stays trustworthy.
+    const identity = JSON.stringify([gun.id, key]);
     const cb = EFTForge.state.communityBuild;
-    if (cb && cb.cardImageUrl && cb.pairsKey === key) {
-        clearTimeout(_bpDebounceTimer);
-        _bpPendingKey = null;
-        // Cancel/override anything already scheduled or in flight for this key -
-        // syncBuildDisplayName() re-invokes this once communityBuild is authoritatively
-        // set, which can land after an earlier call already kicked off a generation.
-        if (_bpAbortController) { _bpAbortController.abort(); _bpAbortController = null; }
-        _bpInflight = false;
-        _bpSetQueued(false);
-        _bpSetLoading(false);
+    const cardUrl = cb?.pairsKey === key ? cb.cardImageUrl : null;
+    if (!cardUrl && identity === _bpDesiredId) return;
+
+    // Invalidate old work immediately, even when returning to the displayed build.
+    _bpCancelPending();
+    if (_bpLastGunId !== gun.id) {
+        _bpLastKey = null;
+        _bpLastImageUrl = null;
+        _bpPlaceholderUrl = null;
+    }
+    if (cardUrl || key === "" || key === EFTForge.state.factoryPairsKey) {
+        const url = cardUrl || (key === "" ? gun.bare_image_512_link : null)
+            || gun.image_512_link || gun.icon_link;
         _bpLastKey = key;
-        _bpApplyStatic(cb.cardImageUrl, true);
+        _bpLastGunId = gun.id;
+        _bpApplyStatic(url, !!cardUrl);
         return;
     }
+    if (key === _bpLastKey && _bpLastGunId === gun.id && _bpLastImageUrl) return;
 
-    // Already showing this key - nothing to do
-    if (key === _bpLastKey && _bpLastImageUrl) return;
-
-    _bpPendingKey = key;
-    clearTimeout(_bpDebounceTimer);
+    // Capture the payload now so later edits cannot change a queued build.
+    const payload = _bpBuildSptItems();
+    if (!payload) {
+        _bpApplyImageUrl(null);
+        return;
+    }
+    _bpDesiredId = identity;
+    const revision = _bpRevision;
+    _bpInflight = true;
+    _bpSetLoading(true);
     _bpDebounceTimer = setTimeout(() => {
-        if (!_bpInflight) {
-            const k = _bpPendingKey;
-            _bpPendingKey = null;
-            _bpGenerate(k);
-        }
-        // If inflight, the finally-block will pick up _bpPendingKey
-    }, 350);
+        _bpDebounceTimer = null;
+        _bpGenerate({ gunId: gun.id, key, payload }, revision);
+    }, _BP_DEBOUNCE_MS);
 }
 
 // Fetch the generated build image URL for export purposes.
@@ -689,7 +664,7 @@ async function _bpFetchForExport() {
     const key = _bpPairsKey();
 
     // Already have a valid generated URL for this exact build - reuse it.
-    if (key === _bpLastKey && _bpLastImageUrl) return _bpLastImageUrl;
+    if (key === _bpLastKey && gun.id === _bpLastGunId && _bpLastImageUrl) return _bpLastImageUrl;
 
     // Bare/stripped build
     if (key === "") return gun.bare_image_512_link || gun.image_512_link || gun.icon_link || null;
@@ -704,7 +679,7 @@ async function _bpFetchForExport() {
     try {
         const resp = await fetch(
             `${EFTForge.config.API_BASE}/build-image`,
-            { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sptData) }
+            { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...sptData, source: "export" }) }
         );
         if (!resp.ok) return null;
         const data = await resp.json();
@@ -718,14 +693,11 @@ window.fetchBuildImageForExport = _bpFetchForExport;
 
 // Reset state when the gun changes
 function resetBuildPreview() {
-    clearTimeout(_bpDebounceTimer);
-    if (_bpAbortController) { _bpAbortController.abort(); _bpAbortController = null; }
-    _bpInflight       = false;
-    _bpSetQueued(false);
+    _bpCancelPending();
+    _bpLastGunId = null;
     _bpLastKey        = null;
     _bpLastImageUrl   = null;
     _bpPlaceholderUrl = null;
-    _bpPendingKey     = null;
     _bpLastIsCommunityCard = false;
 }
 
@@ -739,7 +711,7 @@ function resetBuildPreview() {
         const result = _prev(preserveScroll);
         if (EFTForge.state.currentGun) {
             Promise.resolve(result).then(() => {
-                if (_bpEnabled && _bpLastImageUrl) {
+                if (_bpEnabled && _bpLastImageUrl && _bpLastGunId === EFTForge.state.currentGun?.id) {
                     if (EFTForge.state.gridView) {
                         // Re-stamp the gun cell - renderFullTree recreates the ag-gun-cell
                         // element from scratch with the factory image src every render.
@@ -763,7 +735,7 @@ function resetBuildPreview() {
                 }
                 // Re-stamp the placeholder after every render - the render cycle
                 // resets gun-display-image src to the factory image.
-                if (_bpPlaceholderUrl) {
+                if (_bpPlaceholderUrl && _bpLastGunId === EFTForge.state.currentGun?.id) {
                     _bpSetPlaceholder(_bpPlaceholderUrl);
                     if (_bpInflight) {
                         const phImg = document.getElementById("gun-display-image");
@@ -779,9 +751,9 @@ function resetBuildPreview() {
 
 // Expose state for slot-selector.js, which builds header HTML directly
 // and needs to use the generated URL and match the current loading opacity.
-window._bpGetLastImageUrl     = () => _bpLastImageUrl;
-window._bpGetLastKey          = () => _bpLastKey;
-window._bpGetPlaceholderUrl   = () => _bpPlaceholderUrl;
+window._bpGetLastImageUrl     = () => _bpLastGunId === EFTForge.state.currentGun?.id ? _bpLastImageUrl : null;
+window._bpGetLastKey          = () => _bpLastGunId === EFTForge.state.currentGun?.id ? _bpLastKey : null;
+window._bpGetPlaceholderUrl   = () => _bpLastGunId === EFTForge.state.currentGun?.id ? _bpPlaceholderUrl : null;
 window._bpIsInflight          = () => _bpInflight;
 window._bpIsQueued            = () => _bpQueued;
 window._bpIsEnabled           = () => _bpEnabled;
