@@ -152,12 +152,51 @@ window.EFTForge.optimizer = (function () {
     let _customPresets = _loadCustomPresets();
     let _presetAddOpen = false;
 
+    function _loadFilterPresets() {
+        try {
+            const presets = JSON.parse(localStorage.getItem('eftforge-optimizer-filter-presets') || '[]');
+            return Array.isArray(presets) ? presets.filter(p => p && typeof p.id === 'string'
+                && typeof p.name === 'string' && Array.isArray(p.locked) && Array.isArray(p.banned)
+                && [...p.locked, ...p.banned].every(item => item && typeof item.id === 'string')) : [];
+        } catch {
+            return [];
+        }
+    }
+    let _filterPresets = _loadFilterPresets();
+
+    function _saveFilterPresets() {
+        localStorage.setItem('eftforge-optimizer-filter-presets', JSON.stringify(_filterPresets));
+    }
+
     // Mod Filter (GET /build/mods) - cached per weapon+lang so switching tabs
     // or re-rendering doesn't refetch.
     let _modFilterData = null;      // { weaponId, lang, mods: [{id,name,short_name,icon,category,category_priority}] }
     let _modFilterPromise = null;
     let _includedModIds = [];
     let _excludedModIds = [];
+    const _defaultBannedModIds = [
+        '591c4e1186f77410354b316e', // Axion Kobra sight shade
+        '5a7c74b3e899ef0014332c29', // NSPU-M night scope
+    ];
+    const _defaultBanExceptions = new Set();
+
+    function _applyDefaultModBans() {
+        if (_modFilterData?.weaponId !== window.EFTForge.state?.currentGun?.id) return;
+        const available = new Set(_modFilterData.mods.map(item => item.id));
+        for (const id of _defaultBannedModIds) {
+            if (available.has(id) && !_defaultBanExceptions.has(id)
+                && !_includedModIds.includes(id) && !_excludedModIds.includes(id)) _excludedModIds.push(id);
+        }
+    }
+
+    function _rememberDefaultBanChoices(ids = _defaultBannedModIds) {
+        const available = new Set(_modFilterData?.mods.map(item => item.id) || []);
+        for (const id of ids) {
+            if (!_defaultBannedModIds.includes(id) || !available.has(id)) continue;
+            if (_excludedModIds.includes(id)) _defaultBanExceptions.delete(id);
+            else _defaultBanExceptions.add(id);
+        }
+    }
     let _modSearch = '';            // category-view search query
     let _modCategoryFilter = '';    // category-view dropdown selection ('' = all)
     // The tile grid can hold hundreds of icons - only build it once per
@@ -565,11 +604,14 @@ window.EFTForge.optimizer = (function () {
         return `${items}<button type="button" class="optimizer-preset-add-btn" id="optimizer-preset-add-btn" title="${_escape(_t('optimizer.presetSaveTitle'))}">+</button>`;
     }
 
-    function _confirmDeletePreset(btn, id) {
+    function _confirmDeletePreset(btn, id, remove = () => {
+        _customPresets = _customPresets.filter(p => p.id !== id);
+        _saveCustomPresets();
+        _renderCustomPresetRow();
+    }) {
         if (btn.dataset.confirming === '1') {
-            _customPresets = _customPresets.filter(p => p.id !== id);
-            _saveCustomPresets();
-            _renderCustomPresetRow();
+            window.EFTForge.tooltip?.hide();
+            remove();
             return;
         }
         btn.dataset.confirming = '1';
@@ -607,12 +649,12 @@ window.EFTForge.optimizer = (function () {
         document.getElementById('optimizer-preset-add-btn').addEventListener('click', _toggleAddPresetForm);
     }
 
-    function _presetAddFormHtml() {
+    function _presetAddFormHtml(prefix = 'optimizer-preset') {
         return `
-            <input type="text" class="optimizer-input optimizer-preset-name-input" id="optimizer-preset-name-input"
+            <input type="text" class="optimizer-input optimizer-preset-name-input" id="${prefix}-name-input"
                    placeholder="${_escape(_t('optimizer.presetNamePlaceholder'))}" maxlength="30">
-            <button type="button" class="optimizer-preset-btn" id="optimizer-preset-add-confirm">${_t('modal.saveBtn')}</button>
-            <button type="button" class="optimizer-preset-btn" id="optimizer-preset-add-cancel">${_t('ui.cancel')}</button>
+            <button type="button" class="optimizer-preset-btn" id="${prefix}-add-confirm">${_t('modal.saveBtn')}</button>
+            <button type="button" class="optimizer-preset-btn" id="${prefix}-add-cancel">${_t('ui.cancel')}</button>
         `;
     }
 
@@ -654,6 +696,126 @@ window.EFTForge.optimizer = (function () {
         _saveCustomPresets();
         _toggleAddPresetForm();
         _renderCustomPresetRow();
+    }
+
+    function _filterPresetTooltipHtml(preset) {
+        const tiles = (items, status) => items.map(saved => {
+                const compatible = _modFilterData?.mods.find(mod => mod.id === saved.id);
+                const item = compatible || saved;
+                const icon = item.icon_link || item.icon || '';
+                const name = item.short_name || item.name || item.id;
+                const label = `${name}: ${_t(`optimizer.filterPreset.${status}`)}${compatible ? '' : ` (${_t('optimizer.filterPreset.incompatible')})`}`;
+                return `<div class="mf-tile-icon-wrap attachment-icon-wrapper optimizer-filter-preset-${status}${compatible ? '' : ' incompatible'}" role="img" aria-label="${escapeHtml(label)}">${icon ? `<img class="attachment-icon" src="${escapeHtml(icon)}" alt="" onerror="this.style.visibility='hidden'">` : ''}<div class="slot-shortname">${_escape(name)}</div><span class="optimizer-filter-preset-status" aria-hidden="true">${status === 'locked' ? _LOCK_SVG : _BAN_SVG}</span></div>`;
+            }).join('');
+        const count = preset.locked.length + preset.banned.length;
+        return `<div class="optimizer-filter-preset-tooltip" style="grid-template-columns:repeat(${Math.min(count || 1, 5)},max-content)">${tiles(preset.locked, 'locked')}${tiles(preset.banned, 'banned')}${count ? '' : _t('optimizer.filterPreset.empty')}</div>`;
+    }
+
+    function _renderFilterPresets() {
+        const row = document.getElementById('optimizer-filter-preset-row');
+        if (!row) return;
+        const empty = !_includedModIds.length && !_excludedModIds.length;
+        const saveButton = document.getElementById('optimizer-filter-preset-add-confirm');
+        if (saveButton) saveButton.disabled = empty;
+        row.innerHTML = _filterPresets.map(p => `
+            <div class="optimizer-preset-custom-item">
+                <button type="button" class="optimizer-preset-btn optimizer-preset-btn-custom" data-filter-preset-apply="${escapeHtml(p.id)}">${_escape(p.name)}</button>
+                <button type="button" class="optimizer-preset-delete-btn" data-filter-preset-delete="${_escape(p.id)}" data-tooltip="${_escape(_t('optimizer.presetDeleteTitle'))}">&#x2715;</button>
+            </div>`).join('') + `<button type="button" class="optimizer-preset-btn" data-filter-preset-add ${empty ? 'disabled' : ''} title="${_escape(_t(empty ? 'optimizer.filterPreset.empty' : 'optimizer.filterPreset.save'))}">${_t('optimizer.filterPreset.create')}</button>`
+            + (empty ? '' : `<button type="button" class="optimizer-preset-btn" data-filter-clear>${_t('optimizer.clearFilters')}</button>`);
+        row.querySelectorAll('[data-filter-preset-apply]').forEach(btn => {
+            // Assign rich markup through the DOM, like the combo price breakdown.
+            const preset = _filterPresets.find(p => p.id === btn.dataset.filterPresetApply);
+            if (preset) btn.dataset.tooltipHtml = _filterPresetTooltipHtml(preset);
+            // Scroll long previews while keeping the pointer over the preset button.
+            btn.addEventListener('wheel', ev => {
+                const preview = document.querySelector('#eft-tooltip.visible .optimizer-filter-preset-tooltip');
+                if (!preview || preview.scrollHeight <= preview.clientHeight) return;
+                ev.preventDefault();
+                preview.scrollTop += ev.deltaY * (ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? preview.clientHeight : 1);
+            }, { passive: false });
+            btn.addEventListener('click', () => {
+                const preset = _filterPresets.find(p => p.id === btn.dataset.filterPresetApply);
+                if (!preset) return;
+                const available = new Set(_modFilterData.mods.map(item => item.id));
+                const locked = new Set(_includedModIds);
+                const banned = new Set(_excludedModIds);
+                // Merge compatible entries and let the clicked preset replace conflicting states.
+                for (const item of preset.locked) {
+                    if (!available.has(item.id)) continue;
+                    banned.delete(item.id);
+                    locked.add(item.id);
+                }
+                for (const item of preset.banned) {
+                    if (!available.has(item.id)) continue;
+                    locked.delete(item.id);
+                    banned.add(item.id);
+                }
+                _includedModIds = [...locked];
+                _excludedModIds = [...banned];
+                _rememberDefaultBanChoices();
+                window.EFTForge.tooltip?.hide();
+                _renderModFilterWidget();
+                _syncManifestIcons();
+                _refreshExpandedPicker();
+            });
+        });
+        row.querySelectorAll('[data-filter-preset-delete]').forEach(btn => {
+            btn.addEventListener('click', () => _confirmDeletePreset(btn, btn.dataset.filterPresetDelete, () => {
+                _filterPresets = _filterPresets.filter(p => p.id !== btn.dataset.filterPresetDelete);
+                _saveFilterPresets();
+                _renderFilterPresets();
+            }));
+        });
+        row.querySelector('[data-filter-preset-add]').addEventListener('click', _toggleFilterPresetForm);
+        row.querySelector('[data-filter-clear]')?.addEventListener('click', () => {
+            _includedModIds = [];
+            _excludedModIds = [];
+            _rememberDefaultBanChoices();
+            window.EFTForge.tooltip?.hide();
+            _renderModFilterWidget();
+            _syncManifestIcons();
+            _refreshExpandedPicker();
+        });
+    }
+
+    function _toggleFilterPresetForm() {
+        const row = document.getElementById('optimizer-filter-preset-add-row');
+        if (!row) return;
+        if (row.classList.contains('open')) {
+            row.classList.remove('open');
+            row.innerHTML = '';
+            return;
+        }
+        if (!_includedModIds.length && !_excludedModIds.length) return;
+        row.classList.add('open');
+        row.innerHTML = _presetAddFormHtml('optimizer-filter-preset');
+        const input = row.querySelector('input');
+        const save = () => {
+            if (!_includedModIds.length && !_excludedModIds.length) return;
+            const name = input.value.trim().slice(0, 30);
+            if (!name) { input.focus(); return; }
+            // Snapshot display metadata so previews survive weapon changes and reloads.
+            const snapshot = ids => ids.map(id => {
+                const item = _modFilterData?.mods.find(mod => mod.id === id)
+                    || _filterPresets.flatMap(p => [...p.locked, ...p.banned]).find(mod => mod.id === id);
+                return { id, short_name: item?.short_name || item?.name || id, icon: item?.icon_link || item?.icon || '' };
+            });
+            _filterPresets.push({
+                id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                name, locked: snapshot(_includedModIds), banned: snapshot(_excludedModIds),
+            });
+            _saveFilterPresets();
+            _toggleFilterPresetForm();
+            _renderFilterPresets();
+        };
+        input.addEventListener('keydown', ev => {
+            if (ev.key === 'Enter') save();
+            else if (ev.key === 'Escape') _toggleFilterPresetForm();
+        });
+        row.querySelector('#optimizer-filter-preset-add-confirm').addEventListener('click', save);
+        row.querySelector('#optimizer-filter-preset-add-cancel').addEventListener('click', _toggleFilterPresetForm);
+        input.focus();
     }
 
     function _setWeights(ergo, recoil, price) {
@@ -862,7 +1024,7 @@ window.EFTForge.optimizer = (function () {
         if (_modFilterData && _modFilterData.weaponId === weaponId && _modFilterData.lang === lang) {
             return Promise.resolve(_modFilterData);
         }
-        if (_modFilterPromise) return _modFilterPromise;
+        if (_modFilterPromise) return _modFilterPromise.then(() => _fetchModFilterData(weaponId));
         _modFilterPromise = fetch(`${EFTForge.config.API_BASE}/build/mods?weapon_id=${weaponId}&lang=${lang}`)
             .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
             .then(data => {
@@ -1032,6 +1194,13 @@ window.EFTForge.optimizer = (function () {
         const el = document.getElementById('optimizer-mod-filter-widget');
         if (!el) return;
 
+        // Move the existing form back with the picker so an unfinished name survives.
+        if (!_pickerExpanded) {
+            const presets = document.getElementById('optimizer-filter-presets');
+            const home = document.getElementById('optimizer-filter-presets-home');
+            if (presets && home) home.appendChild(presets);
+        }
+
         const weaponId = window.EFTForge.state?.currentGun?.id;
         const lang = (window.EFTForge.state && window.EFTForge.state.lang) || 'en';
         if (!_modFilterData || _modFilterData.weaponId !== weaponId || _modFilterData.lang !== lang) {
@@ -1044,8 +1213,11 @@ window.EFTForge.optimizer = (function () {
             return;
         }
 
+        _applyDefaultModBans();
         const modTags = _filterTagsHtml(_includedModIds, _modFilterData.mods, 'include')
             + _filterTagsHtml(_excludedModIds, _modFilterData.mods, 'exclude');
+
+        _renderFilterPresets();
 
         el.innerHTML = `
             <div class="optimizer-filter-group">
@@ -1058,6 +1230,7 @@ window.EFTForge.optimizer = (function () {
             const id = tag.dataset.removeId;
             _includedModIds = _includedModIds.filter(m => m !== id);
             _excludedModIds = _excludedModIds.filter(m => m !== id);
+            _rememberDefaultBanChoices([id]);
             _renderModFilterWidget();
             _syncManifestIcons();
             _refreshExpandedPicker();
@@ -1641,12 +1814,14 @@ window.EFTForge.optimizer = (function () {
         _preventOverswing = localStorage.getItem('eftforge-optimizer-prevent-overswing') === 'true';
         _requireSuppressor = localStorage.getItem('eftforge-optimizer-require-suppressor') === 'true';
         _customPresets = _loadCustomPresets();
+        _filterPresets = _loadFilterPresets();
         _presetAddOpen = false;
         const settingsWeaponId = window.EFTForge.state?.currentGun?.id;
         if (!preserveSettings || _settingsWeaponId !== settingsWeaponId) {
             _resetConstraintState();
             _includedModIds = [];
             _excludedModIds = [];
+            _defaultBanExceptions.clear();
         }
         _settingsWeaponId = settingsWeaponId;
         _modSearch = '';
@@ -1740,6 +1915,10 @@ window.EFTForge.optimizer = (function () {
                 <div class="optimizer-section-body" data-section-body>
                   <div class="optimizer-section-body-inner">
                    <div class="optimizer-section-body-content">
+                    ${_activeTab === 'explore' ? `<div id="optimizer-filter-presets-home"><div id="optimizer-filter-presets">
+                    <div class="optimizer-preset-row" id="optimizer-filter-preset-row"></div>
+                    <div class="optimizer-preset-add-row" id="optimizer-filter-preset-add-row"></div>
+                    </div></div>` : ''}
                     <div id="optimizer-mod-filter-widget"></div>
                    </div>
                   </div>
@@ -1810,6 +1989,7 @@ window.EFTForge.optimizer = (function () {
         _wireSection('modFilter', () => {
             _includedModIds = [];
             _excludedModIds = [];
+            _rememberDefaultBanChoices();
             _modSearch = '';
             _modCategoryFilter = '';
             _renderModFilterWidget();
@@ -1848,6 +2028,21 @@ window.EFTForge.optimizer = (function () {
         _error = null;
         _result = null;
         _renderResult();
+
+        try {
+            await _fetchModFilterData(weaponId);
+        } catch {
+            _solving = false;
+            _error = _t('optimizer.modsLoadFailed');
+            _renderResult();
+            return;
+        }
+        if (window.EFTForge.state?.currentGun?.id !== weaponId) {
+            _solving = false;
+            _renderResult();
+            return;
+        }
+        _applyDefaultModBans();
 
         const state = window.EFTForge.state || {};
         const ammoSelect = document.getElementById('ammo-select');
@@ -3450,6 +3645,8 @@ window.EFTForge.optimizer = (function () {
     // see _pickerExpanded. Closing it just re-runs _renderResult(), which
     // naturally falls through to whichever of those states is current.
     function _renderExpandedPicker(container) {
+        // Keep the controls and their form listeners when rebuilding the expanded picker.
+        const presets = document.getElementById('optimizer-filter-presets');
         const weaponId = window.EFTForge.state?.currentGun?.id;
         const lang = (window.EFTForge.state && window.EFTForge.state.lang) || 'en';
         const dataReady = _modFilterData && _modFilterData.weaponId === weaponId && _modFilterData.lang === lang;
@@ -3457,11 +3654,13 @@ window.EFTForge.optimizer = (function () {
             <div class="optimizer-picker-popout">
                 <button type="button" class="optimizer-picker-popout-close" id="optimizer-picker-popout-close">&#x3C;&#x3C;&#x3C;</button>
                 <div class="optimizer-picker-popout-title">${_t('optimizer.modFilter')}</div>
+                <div id="optimizer-filter-presets-expanded"></div>
                 <div class="optimizer-picker-popout-body" id="mf-view-body-expanded">
                     ${dataReady ? '' : `<div class="optimizer-filter-loading">${_t('optimizer.loadingMods')}</div>`}
                 </div>
             </div>
         `;
+        if (presets) document.getElementById('optimizer-filter-presets-expanded').appendChild(presets);
         document.getElementById('optimizer-picker-popout-close').addEventListener('click', () => {
             _pickerExpanded = false;
             _renderModFilterWidget();
@@ -3883,6 +4082,7 @@ window.EFTForge.optimizer = (function () {
             _includedModIds.push(id);
             _excludedModIds = _excludedModIds.filter(x => x !== id);
         }
+        _rememberDefaultBanChoices([id]);
         _syncFilterSurfaces();
     }
 
@@ -3893,6 +4093,7 @@ window.EFTForge.optimizer = (function () {
             _excludedModIds.push(id);
             _includedModIds = _includedModIds.filter(x => x !== id);
         }
+        _rememberDefaultBanChoices([id]);
         _syncFilterSurfaces();
     }
 

@@ -7631,6 +7631,60 @@ button.build-tag-chip.active {
   flex-shrink: 0;
 }
 
+#optimizer-filter-presets-expanded #optimizer-filter-presets {
+  padding-bottom: 12px;
+}
+#optimizer-filter-presets .optimizer-preset-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background-color: #1a1a1a;
+  border-color: #333;
+  color: #ccc;
+  transform: none;
+}
+#optimizer-filter-presets-expanded #optimizer-filter-preset-add-row {
+  margin-top: 12px;
+}
+
+.optimizer-preset-btn[data-filter-clear] {
+  color: #e74c3c;
+  border-color: rgba(231,76,60,0.45);
+  background-color: rgba(231,76,60,0.10);
+}
+.optimizer-preset-btn[data-filter-clear]:hover {
+  color: #e74c3c;
+  border-color: #e74c3c;
+  background-color: rgba(231,76,60,0.20);
+}
+
+.optimizer-filter-preset-tooltip {
+  display: grid;
+  gap: 1px;
+  width: max-content;
+  max-width: calc(100vw - 40px);
+  max-height: min(480px, calc(100vh - 40px));
+  overflow-y: auto;
+  white-space: normal;
+}
+.optimizer-filter-preset-tooltip .optimizer-filter-preset-locked { color: #4CAF50; border-color: #4CAF50; }
+.optimizer-filter-preset-tooltip .optimizer-filter-preset-banned { color: #e74c3c; border-color: #e74c3c; }
+.optimizer-filter-preset-status {
+  position: absolute;
+  bottom: 1px;
+  left: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: #171717;
+}
+.optimizer-filter-preset-tooltip .incompatible { color: #888; border-color: #888; }
+.optimizer-filter-preset-tooltip .incompatible .attachment-icon { filter: grayscale(1); opacity: 0.5; }
+.optimizer-filter-preset-tooltip .incompatible .slot-shortname { color: #888; }
+
 .optimizer-toggle-row {
   display: flex;
   align-items: center;
