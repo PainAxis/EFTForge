@@ -1033,7 +1033,18 @@ TCHEBYCHEFF_Z_BOUND = 1e6
 
 def _pure_axis_objective(kind, item_ids, idx, mods, prices, n):
     """A single-axis-only objective (no blending, no TIEBREAK) used purely to
-    find that axis's own best-achievable value - the Tchebycheff ideal point."""
+    find that axis's own best-achievable value - the Tchebycheff ideal point.
+    Deliberately has zero price/other-axis pressure: _compute_ideal_and_nadir
+    needs this axis's *true* best-achievable value, and even a tiny tiebreak
+    term can shift which tied build gets returned, which shifts the other two
+    axes' values on that build - the payoff-table nadir estimate - enough to
+    move the Tchebycheff-normalized result (confirmed via
+    test_literal_zero_weight_does_not_cliff_against_the_next_ui_tick).
+    Callers that return this build straight to the user instead (Explore's
+    objective_axis path) should use _axis_objective_for_explore below, which
+    adds back a price tiebreak since there's no Tchebycheff normalization to
+    disturb there.
+    """
     c = np.zeros(n + 1)
     if kind == "ergo":
         c[n] = -1.0  # maximize capped_ergo
@@ -1043,6 +1054,33 @@ def _pure_axis_objective(kind, item_ids, idx, mods, prices, n):
     else:
         for item_id in item_ids:
             c[idx[item_id]] = prices[item_id]["price_rub"]
+    return c
+
+
+def _axis_objective_for_explore(kind, item_ids, idx, mods, prices, n):
+    """_pure_axis_objective, plus a price tiebreak for the ergo/recoil axes.
+
+    Explore's objective_axis solves (see explore.py's solve()) return this
+    build straight to the user as a real point on the tradeoff curve, so -
+    unlike the Tchebycheff ideal-point use of _pure_axis_objective - there's
+    no normalization step downstream to get thrown off by it. Without this,
+    two items with identical ergo/recoil/weight/conflicts but very different
+    price (e.g. the AR-15 Strike Industries ARE tube's two colorways) are a
+    literal tie in the ergo/recoil objective, and HiGHS's tie-break has
+    nothing to do with price - it can land on the far pricier twin.
+
+    price_eps is scaled to this solve's own max price so the tiebreak sum
+    across a whole build can never approach the smallest real recoil_modifier
+    step (~0.003 in the item data) or a single ergo point - it only decides
+    between exact ties, never competes with a genuine difference.
+    """
+    c = _pure_axis_objective(kind, item_ids, idx, mods, prices, n)
+    if kind not in ("ergo", "recoil"):
+        return c
+    max_price = max((prices[item_id]["price_rub"] for item_id in item_ids), default=0) or 1
+    price_eps = 1e-6 / max_price
+    for item_id in item_ids:
+        c[idx[item_id]] += price_eps * prices[item_id]["price_rub"]
     return c
 
 
@@ -1331,7 +1369,7 @@ def build_and_solve(
             # No usable ideal point (an axis solve timed out/failed) - fall back
             # to weighted-sum rather than fail the request outright.
         c = (
-            _pure_axis_objective(objective_axis, item_ids, idx, mods, prices, n)
+            _axis_objective_for_explore(objective_axis, item_ids, idx, mods, prices, n)
             if objective_axis
             else _weighted_objective(item_ids, idx, mods, prices, params)
         )
