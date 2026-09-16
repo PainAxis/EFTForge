@@ -7700,8 +7700,10 @@ button.build-tag-chip.active {
   overflow-y: auto;
   white-space: normal;
 }
-.optimizer-filter-preset-tooltip .optimizer-filter-preset-locked { color: #4CAF50; border-color: #4CAF50; }
-.optimizer-filter-preset-tooltip .optimizer-filter-preset-banned { color: #e74c3c; border-color: #e74c3c; }
+.optimizer-filter-preset-tooltip .optimizer-filter-preset-locked,
+.optimizer-filter-tags .optimizer-filter-preset-locked { color: #4CAF50; border-color: #4CAF50; }
+.optimizer-filter-preset-tooltip .optimizer-filter-preset-banned,
+.optimizer-filter-tags .optimizer-filter-preset-banned { color: #e74c3c; border-color: #e74c3c; }
 .optimizer-filter-preset-status {
   position: absolute;
   bottom: 1px;
@@ -8009,21 +8011,16 @@ button.build-tag-chip.active {
 .optimizer-filter-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 1px;
 }
 
 .optimizer-filter-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 3px;
-  font-size: 11px;
+  appearance: none;
+  background: #171717;
   cursor: pointer;
-  border: 1px solid transparent;
 }
-.optimizer-filter-tag-include { background: rgba(76,175,80,0.12); color: #4CAF50; border-color: rgba(76,175,80,0.35); }
-.optimizer-filter-tag-exclude { background: rgba(231,76,60,0.12); color: #e74c3c; border-color: rgba(231,76,60,0.35); }
+.optimizer-filter-tag:hover { background: #252525; }
+.optimizer-filter-tag:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 
 /* --- Mod-filter category view (icon tiles grouped by Handbook category) --- */
 
@@ -8215,9 +8212,14 @@ button.build-tag-chip.active {
   contain-intrinsic-size: 54px 54px;
 }
 
-.mf-tile-icon-wrap {
+.mf-tile-icon-wrap,
+.mf-tile-icon-wrap.optimizer-filter-tag {
   width: 52px;
   height: 52px;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: content-box;
+  padding: 0;
   border: 1px solid transparent;
   display: flex;
   align-items: center;
@@ -8226,6 +8228,8 @@ button.build-tag-chip.active {
 }
 .mf-tile.mf-tile-included .mf-tile-icon-wrap { border-color: #4CAF50; }
 .mf-tile.mf-tile-excluded .mf-tile-icon-wrap { border-color: #e74c3c; }
+.mf-tile-icon-wrap.optimizer-filter-tag.optimizer-filter-preset-locked { border-color: #4CAF50; }
+.mf-tile-icon-wrap.optimizer-filter-tag.optimizer-filter-preset-banned { border-color: #e74c3c; }
 
 .mf-tile-icon-wrap .attachment-icon {
   width: 100%;
@@ -8234,6 +8238,9 @@ button.build-tag-chip.active {
 }
 
 .mf-tile-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   position: absolute;
   bottom: 1px;
   width: 16px;
@@ -8248,6 +8255,7 @@ button.build-tag-chip.active {
   padding: 0;
 }
 .mf-tile-require { left: 1px; }
+.mf-tile-btn svg { flex-shrink: 0; }
 .mf-tile-ban { right: 1px; }
 .mf-tile-require:hover, .mf-tile-require.active { border-color: #4CAF50; color: #4CAF50; background: rgba(76,175,80,0.15); }
 .mf-tile-ban:hover, .mf-tile-ban.active { border-color: #e74c3c; color: #e74c3c; background: rgba(231,76,60,0.15); }

@@ -722,14 +722,19 @@ window.EFTForge.optimizer = (function () {
         _renderCustomPresetRow();
     }
 
+    function _filterTileContentHtml(item, status) {
+        const icon = item.icon_link || item.icon || '';
+        const name = item.short_name || item.name || item.id;
+        return `${icon ? `<img class="attachment-icon" src="${escapeHtml(icon)}" alt="" onerror="this.style.visibility='hidden'">` : ''}<span class="slot-shortname">${_escape(name)}</span><span class="optimizer-filter-preset-status" aria-hidden="true">${status === 'locked' ? _LOCK_SVG : _BAN_SVG}</span>`;
+    }
+
     function _filterPresetTooltipHtml(preset) {
         const tiles = (items, status) => items.map(saved => {
                 const compatible = _modFilterData?.mods.find(mod => mod.id === saved.id);
                 const item = compatible || saved;
-                const icon = item.icon_link || item.icon || '';
                 const name = item.short_name || item.name || item.id;
                 const label = `${name}: ${_t(`optimizer.filterPreset.${status}`)}${compatible ? '' : ` (${_t('optimizer.filterPreset.incompatible')})`}`;
-                return `<div class="mf-tile-icon-wrap attachment-icon-wrapper optimizer-filter-preset-${status}${compatible ? '' : ' incompatible'}" role="img" aria-label="${escapeHtml(label)}">${icon ? `<img class="attachment-icon" src="${escapeHtml(icon)}" alt="" onerror="this.style.visibility='hidden'">` : ''}<div class="slot-shortname">${_escape(name)}</div><span class="optimizer-filter-preset-status" aria-hidden="true">${status === 'locked' ? _LOCK_SVG : _BAN_SVG}</span></div>`;
+                return `<div class="mf-tile-icon-wrap attachment-icon-wrapper optimizer-filter-preset-${status}${compatible ? '' : ' incompatible'}" role="img" aria-label="${escapeHtml(label)}">${_filterTileContentHtml(item, status)}</div>`;
             }).join('');
         const count = preset.locked.length + preset.banned.length;
         return `<div class="optimizer-filter-preset-tooltip" style="grid-template-columns:repeat(${Math.min(count || 1, 5)},max-content)">${tiles(preset.locked, 'locked')}${tiles(preset.banned, 'banned')}${count ? '' : _t('optimizer.filterPreset.empty')}</div>`;
@@ -1074,9 +1079,11 @@ window.EFTForge.optimizer = (function () {
 
     function _filterTagsHtml(ids, lookup, cls) {
         return ids.map(id => {
-            const name = lookup.find(x => x.id === id)?.name || id;
-            const sign = cls === 'include' ? '+' : '-';
-            return `<span class="optimizer-filter-tag optimizer-filter-tag-${cls}" data-remove-id="${_escape(id)}">${sign} ${_escape(name)} &times;</span>`;
+            const item = lookup.find(x => x.id === id)
+                || _filterPresets.flatMap(p => [...p.locked, ...p.banned]).find(x => x.id === id) || { id };
+            const status = cls === 'include' ? 'locked' : 'banned';
+            const label = `${item.name || item.short_name || id}: ${_t(`optimizer.filterPreset.${status}`)}. ${_t('optimizer.removeFilter')}`;
+            return `<button type="button" class="mf-tile-icon-wrap attachment-icon-wrapper optimizer-filter-tag optimizer-filter-preset-${status}" data-remove-id="${escapeHtml(id)}" data-tooltip="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${_filterTileContentHtml(item, status)}</button>`;
         }).join('');
     }
 
@@ -1091,8 +1098,8 @@ window.EFTForge.optimizer = (function () {
                 <div class="mf-tile-icon-wrap attachment-icon-wrapper">
                     <img class="attachment-icon" src="${_escape(item.icon_link || item.icon || '')}" loading="lazy" decoding="async" data-tooltip="${_escape(item.name || '')}" onerror="this.style.visibility='hidden'">
                     <div class="slot-shortname">${_escape(item.short_name || '')}</div>
-                    <button type="button" class="mf-tile-btn mf-tile-require${isIncluded ? ' active' : ''}" data-require-id="${_escape(item.id)}">+</button>
-                    <button type="button" class="mf-tile-btn mf-tile-ban${isExcluded ? ' active' : ''}" data-ban-id="${_escape(item.id)}">-</button>
+                    <button type="button" class="mf-tile-btn mf-tile-require${isIncluded ? ' active' : ''}" data-require-id="${_escape(item.id)}" aria-label="${escapeHtml(_t('optimizer.lockItem'))}" aria-pressed="${isIncluded}">${_LOCK_SVG}</button>
+                    <button type="button" class="mf-tile-btn mf-tile-ban${isExcluded ? ' active' : ''}" data-ban-id="${_escape(item.id)}" aria-label="${escapeHtml(_t('optimizer.banItem'))}" aria-pressed="${isExcluded}">${_BAN_SVG}</button>
                 </div>
             </div>
         `;
@@ -1264,6 +1271,7 @@ window.EFTForge.optimizer = (function () {
         `;
 
         el.querySelectorAll('[data-remove-id]').forEach(tag => tag.addEventListener('click', () => {
+            window.EFTForge.tooltip?.hide();
             const id = tag.dataset.removeId;
             _includedModIds = _includedModIds.filter(m => m !== id);
             _excludedModIds = _excludedModIds.filter(m => m !== id);
@@ -2407,8 +2415,8 @@ window.EFTForge.optimizer = (function () {
         const useEvoErgo = !!_explore.request?.use_evo_ergo && tradeoff !== 'ergo';
         const xKey = tradeoff === 'ergo' ? 'recoil_v' : (useEvoErgo ? 'eed' : 'ergo');
         const yKey = tradeoff === 'price' ? 'recoil_v' : 'price';
-        const xLabel = xKey === 'recoil_v' ? _t('optimizer.recoil') : _t(useEvoErgo ? 'optimizer.evoErgoShort' : 'optimizer.ergonomics');
-        const yLabel = _t(yKey === 'price' ? 'optimizer.price' : 'optimizer.recoil');
+        const xLabel = xKey === 'recoil_v' ? _t('optimizer.recoilAxis') : _t(useEvoErgo ? 'optimizer.evoErgoShort' : 'optimizer.ergonomics');
+        const yLabel = _t(yKey === 'price' ? 'optimizer.price' : 'optimizer.recoilAxis');
         const xs = points.map(p => p[xKey]), ys = points.map(p => p[yKey]);
         const minX = Math.min(...xs), minY = Math.min(...ys);
         const spanX = Math.max(...xs) - minX || 1, spanY = Math.max(...ys) - minY || 1;
@@ -3015,8 +3023,8 @@ window.EFTForge.optimizer = (function () {
 
         let chart = mergedBody.querySelector('.optimizer-explore-chart');
         if (!chart) {
-            const xLabel = xKey === 'recoil_v' ? _t('optimizer.recoil') : _t(useEvoErgo ? 'optimizer.evoErgoShort' : 'optimizer.ergonomics');
-            const yLabel = _t(yKey === 'price' ? 'optimizer.price' : 'optimizer.recoil');
+            const xLabel = xKey === 'recoil_v' ? _t('optimizer.recoilAxis') : _t(useEvoErgo ? 'optimizer.evoErgoShort' : 'optimizer.ergonomics');
+            const yLabel = _t(yKey === 'price' ? 'optimizer.price' : 'optimizer.recoilAxis');
             chart = _buildLiveChartSkeleton(_exploreAxesLabel(tradeoff, useEvoErgo), xLabel, yLabel);
             mergedBody.prepend(chart);
             // Snap straight to the first cluster - only domain changes *after*
