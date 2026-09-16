@@ -1,6 +1,15 @@
 {
   "posts": [
     {
+      "id": "2026-09-16-v158-release",
+      "title": "v1.5.8 - PvP Season Pricing, EvoErgo Curves & Filter Presets",
+      "title_zh": "v1.5.8 - PvP赛季服定价、Evo人机曲线舆配件预设",
+      "date": "2026-09-16",
+      "tags": ["patch-notes", "minor-update"],
+      "file": "2026-09-16-v158-release.md",
+      "file_zh": "2026-09-16-v158-release.zh.md"
+    },
+    {
       "id": "2026-09-12-v154-release",
       "title": "v1.5.4 - The Revamped Weapon Optimizer!!!!",
       "title_zh": "v1.5.4 - 武器优化器大改版！！！！",

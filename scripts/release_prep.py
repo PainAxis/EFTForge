@@ -12,7 +12,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-FRONTEND_DIR = Path(__file__).resolve().parent
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 INDEX_HTML = FRONTEND_DIR / "index.html"
 CONFIG_JS = FRONTEND_DIR / "modules" / "config.js"
 
