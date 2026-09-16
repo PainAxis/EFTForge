@@ -7,6 +7,21 @@ from optimizer.solver import OptimizeParams, optimize_weapon
 
 EXPLORE_TIME_LIMIT_SECONDS = 30
 
+# How many ergo points below the true achievable max to search for a
+# materially better recoil/price trade at the sweep's ergo-max boundary.
+# Tarkov mod stats are chunky, not continuous, so the single item combo that
+# hits the exact top of the ergo axis can be a completely different (and far
+# worse) pick than one just a point or two below it - without this, that
+# boundary point is a pure ergo-maximize with zero regard for recoil/price
+# (see solve()'s "ergo" axis branch), so the graph's edge can land on an
+# abhorrent-recoil build purely because it happens to sit at the very top.
+ERGO_BOUNDARY_LEEWAY_POINTS = 3
+# Only give up an ergo point at that boundary if it buys at least this much
+# relative improvement on the true tradeoff stat (recoil or price) - small
+# enough to catch a real cliff, large enough that ergo isn't given away for
+# noise-level gains.
+ERGO_BOUNDARY_MIN_RELATIVE_GAIN = 0.03
+
 
 def frontier_points(points, tradeoff, use_evo_ergo=False):
     # Compare displayed stats and break coordinate ties on the omitted axis. Under
@@ -68,7 +83,7 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
     done_calls = 0
     total_calls = steps + 1  # 2 boundary solves + (steps - 1) sweep solves
 
-    def solve(axis, **overrides):
+    def solve(axis, *, record=True, **overrides):
         nonlocal completed
         if time.perf_counter() >= deadline:
             completed = False
@@ -102,8 +117,44 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
             "price": result["grand_total_rub"],
             "build": result,
         }
-        points.append(point)
+        if record:
+            points.append(point)
         return point
+
+    def ergo_boundary_point(axis):
+        """Refine the sweep's ergo-max boundary point (see
+        ERGO_BOUNDARY_LEEWAY_POINTS above for why the raw pure-ergo solve
+        alone isn't good enough). First finds the true max achievable ergo,
+        then re-solves on the real tradeoff axis at that max and at a few
+        floors just below it, keeping the lowest-ergo candidate that still
+        clears ERGO_BOUNDARY_MIN_RELATIVE_GAIN's bar over the current best.
+        Every probe here is unrecorded - only the final pick is added to the
+        graph, so the discarded high-ergo/bad-recoil probes never show up as
+        their own points.
+        """
+        max_point = solve("ergo", record=False)
+        if max_point is None:
+            return None
+        max_ergo = max_point["ergo"]
+        stat_key = "recoil_v" if axis == "recoil" else "price"
+        best = solve(axis, min_ergonomics=max_ergo, record=False) or max_point
+        # min_ergonomics is passed as a full override (dataclasses.replace), so it
+        # would otherwise silently relax the caller's own explicit floor below what
+        # they asked for - clamp to it, and stop once clamping leaves no room left.
+        user_floor = params.min_ergonomics if params.min_ergonomics is not None else 0
+        prev_floor = max_ergo
+        for d in range(1, ERGO_BOUNDARY_LEEWAY_POINTS + 1):
+            floor = max(max_ergo - d, user_floor)
+            if floor <= 0 or floor >= prev_floor or time.perf_counter() >= deadline:
+                break
+            prev_floor = floor
+            candidate = solve(axis, min_ergonomics=floor, record=False)
+            if candidate is None or not best[stat_key]:
+                continue
+            gain = (best[stat_key] - candidate[stat_key]) / best[stat_key]
+            if gain >= ERGO_BOUNDARY_MIN_RELATIVE_GAIN * d:
+                best = candidate
+        return best
 
     def progress(phase, point, axis, bound_stat=None, bound_value=None):
         nonlocal done_calls
@@ -140,7 +191,12 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
         axis = "recoil" if tradeoff == "price" else "price"
         low = solve(axis)
         yield progress("boundary_low", low, axis)
-        high = solve("ergo")
+        if use_evo_ergo:
+            high = solve("ergo")
+        else:
+            high = ergo_boundary_point(axis)
+            if high is not None:
+                points.append(high)
         yield progress("boundary_high", high, "ergo")
         if low and high:
             # Under the EvoErgo toggle, the "ergo" endpoint above was chosen by true

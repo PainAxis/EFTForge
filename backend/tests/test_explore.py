@@ -114,6 +114,32 @@ def test_max_ergonomics_caps_every_sample(db):
         assert point["build"]["final_stats"]["total_ergo"] <= 40
 
 
+def test_ergo_boundary_leeway_avoids_a_bad_recoil_cliff(db):
+    # "d" sits just 1 ergo point below "c" (the raw ergo-max item) but has far
+    # better recoil - a real Tarkov-shaped cliff (chunky, non-monotonic mod
+    # stats), not a synthetic edge case. Without the leeway search, the
+    # boundary point is a pure ergo-maximize that only ever sees "c" (ergo 20)
+    # and never even considers "d" (ergo 19), landing the graph's edge on the
+    # worse-recoil build purely because it's 1 point higher on ergo.
+    db.add(Item(id="d", name="d", is_weapon=False, ergonomics_modifier=19, recoil_modifier=-0.9, weight=0.1))
+    db.add(SlotAllowedItem(slot_id="slot", allowed_item_id="d"))
+    db.add(
+        ItemOffer(item_id="d", vendor_normalized="mechanic", trader_level=1, price=500, price_rub=500, currency="RUB")
+    )
+    db.commit()
+
+    events = list(explore_weapon_stream(db, "gun", OptimizeParams(), "price", 10))
+    high = next(e for e in events if e.get("phase") == "boundary_high")
+    assert high["point"]["build"]["selected_items"] == ["d"]
+    assert high["point"]["ergo"] == 49
+    assert high["point"]["recoil_v"] == pytest.approx(10.0)
+
+    # The discarded high-ergo/bad-recoil probe ("c" at ergo 50) must not leak
+    # into the graph as its own point once a better nearby trade won instead.
+    result = next(e for e in events if e["type"] == "result")["data"]
+    assert ("c",) not in {tuple(p["build"]["selected_items"]) for p in result["points"]}
+
+
 def test_evo_ergo_toggle_changes_the_ergo_boundary_pick(db):
     # "c" wins on raw ergonomics (20, vs "b"'s 10) but its weight is heavy enough
     # to tank true (weight-adjusted) EED far below "b"'s - so the plain axis solve
