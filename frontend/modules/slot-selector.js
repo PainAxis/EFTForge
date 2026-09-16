@@ -11,7 +11,9 @@ function _getPriceRub(item) {
     const hasTrader = item.trader_vendor && item.trader_price_rub != null;
     const traderAvail = hasTrader &&
         (EFTForge.state.traderLevels[item.trader_vendor] ?? 4) >= (item.trader_min_level ?? 1);
-    const fleaCache = EFTForge.state.pveMode ? EFTForge.state.fleaCachePve : EFTForge.state.fleaCachePvp;
+    const fleaCache = EFTForge.state.priceMode === "pve" ? EFTForge.state.fleaCachePve
+        : EFTForge.state.priceMode === "pvpSeason" ? EFTForge.state.fleaCacheSeasonal
+        : EFTForge.state.fleaCachePvp;
     const fleaPrice = fleaCache?.[item.id] ?? null;
     if (traderAvail && (fleaPrice === null || item.trader_price_rub <= fleaPrice)) return item.trader_price_rub;
     return fleaPrice;
@@ -21,7 +23,9 @@ function _attPriceCellContent(item) {
     const hasTrader = item.trader_vendor && item.trader_price_rub != null;
     const traderAvail = hasTrader &&
         (EFTForge.state.traderLevels[item.trader_vendor] ?? 4) >= (item.trader_min_level ?? 1);
-    const fleaCache = EFTForge.state.pveMode ? EFTForge.state.fleaCachePve : EFTForge.state.fleaCachePvp;
+    const fleaCache = EFTForge.state.priceMode === "pve" ? EFTForge.state.fleaCachePve
+        : EFTForge.state.priceMode === "pvpSeason" ? EFTForge.state.fleaCacheSeasonal
+        : EFTForge.state.fleaCachePvp;
     const fleaPrice = fleaCache?.[item.id] ?? null;
 
     let bestPrice, vendorHtml;
@@ -2452,7 +2456,9 @@ function _buildComboRow(entry) {
         });
         if (breakdownValid) {
             const total = parts.reduce((s, x) => s + x.p, 0);
-            const fleaCache = EFTForge.state.pveMode ? EFTForge.state.fleaCachePve : EFTForge.state.fleaCachePvp;
+            const fleaCache = EFTForge.state.priceMode === "pve" ? EFTForge.state.fleaCachePve
+        : EFTForge.state.priceMode === "pvpSeason" ? EFTForge.state.fleaCacheSeasonal
+        : EFTForge.state.fleaCachePvp;
             const rows = parts.map(({ it, p }) => {
                 const hasTrader = it.trader_vendor && it.trader_price_rub != null;
                 const traderAvail = hasTrader &&

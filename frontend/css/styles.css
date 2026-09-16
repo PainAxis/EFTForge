@@ -2141,6 +2141,40 @@ header:not(.header-expanded) .header-nav-btn-icon {
   border-right: none;
 }
 
+/* Price panel game-mode toggle (PvP / PvE / PvP Season) */
+
+.price-mode-btns {
+  display: flex;
+  gap: 0;
+  flex-shrink: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #333;
+}
+
+.price-mode-btns .toggle-btn {
+  flex: none;
+  padding: 5px 10px;
+  font-size: 11px;
+  border-radius: 0;
+  border: none;
+  border-right: 1px solid #333;
+}
+
+.price-mode-btns .toggle-btn:last-of-type {
+  border-right: none;
+}
+
+.price-mode-btns .price-mode-pve.active {
+  background-color: rgba(56, 117, 159, 0.25);
+  color: #38759F;
+}
+
+.price-mode-btns .price-mode-pvpseason.active {
+  background-color: rgba(40, 134, 98, 0.25);
+  color: #288662;
+}
+
 /* ===========================
    ATTACHMENT GRAPH VIEW
 =========================== */
@@ -9270,6 +9304,8 @@ body[data-mobile="true"] .att-table-header h3 { font-size: 14px; flex: 1; }
 body[data-mobile="true"] .att-table-header-toggles { flex-direction: row; flex-wrap: wrap; width: 100%; margin-left: 0; gap: 8px; }
 body[data-mobile="true"] .combo-view-btns { flex: 1; }
 body[data-mobile="true"] .combo-view-btns .toggle-btn { flex: 1; padding: 6px 4px; }
+body[data-mobile="true"] .price-mode-btns { flex: 1; }
+body[data-mobile="true"] .price-mode-btns .toggle-btn { flex: 1; padding: 6px 4px; }
 /* Mobile: hide short name badge on attachment icons in table */
 body[data-mobile="true"] .attachment-table .slot-shortname { display: none; }
 /* Mobile: combo name cell needs minimum width to show icons; table scrolls to cover stats */

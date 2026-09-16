@@ -85,6 +85,7 @@ STRENGTH_LEVEL_MIN = 0
 STRENGTH_LEVEL_MAX = 51  # 0 = no skill, 51 = elite
 EQUIP_ERGO_MIN = -1.0  # negative = armor/rig ergonomics penalty
 EQUIP_ERGO_MAX = 1.0  # positive = ergonomics bonus
+VALID_GAME_MODES = {"pvp", "pve", "pvpSeason"}
 
 # Request complexity caps - generous for real clients, block abuse of the
 # CPU-heavy calculation endpoints with arbitrarily large payloads.
@@ -298,12 +299,21 @@ def _migrate_slots_db():
             conn.commit()
 
 
+def _migrate_item_offers_db():
+    with engine.connect() as conn:
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(item_offers)"))}
+        if "game_mode" not in existing:
+            conn.execute(text("ALTER TABLE item_offers ADD COLUMN game_mode TEXT"))
+            conn.commit()
+
+
 if DESKTOP_MODE:
     print("EFTFORGE_STATUS=applying_updates", flush=True)
 
 _migrate_builds_db()
 _migrate_items_db()
 _migrate_slots_db()
+_migrate_item_offers_db()
 
 
 # ---------------------------------------------------
@@ -2342,9 +2352,12 @@ def build_optimize(
     assume_full_mag: bool = Body(default=True),
     selected_ammo_id: str | None = Body(default=None),
     selected_ubgl_ammo_id: str | None = Body(default=None),
+    game_mode: str = Body(default="pvp"),
     db: Session = Depends(get_db),
 ):
     _check_solve_rate_limit(_get_client_ip(request))
+    if game_mode not in VALID_GAME_MODES:
+        raise HTTPException(status_code=422, detail=f"game_mode must be one of {sorted(VALID_GAME_MODES)}")
     if not (STRENGTH_LEVEL_MIN <= strength_level <= STRENGTH_LEVEL_MAX):
         raise HTTPException(
             status_code=422, detail=f"strength_level must be between {STRENGTH_LEVEL_MIN} and {STRENGTH_LEVEL_MAX}"
@@ -2405,6 +2418,7 @@ def build_optimize(
         assume_full_mag,
         selected_ammo_id,
         selected_ubgl_ammo_id,
+        game_mode,
     )
     _solve_start = time.perf_counter()
 
@@ -2439,6 +2453,7 @@ def build_optimize(
         trader_levels=trader_levels,
         flea_available=flea_available,
         player_level=player_level,
+        game_mode=game_mode,
         strength_level=strength_level,
         equip_ergo_modifier=equip_ergo_modifier,
         use_evo_ergo=use_evo_ergo,
@@ -2470,6 +2485,7 @@ def build_stat_ranges(
     trader_levels: dict | None = Body(default=None),
     flea_available: bool = Body(default=True),
     player_level: int | None = Body(default=None),
+    game_mode: str = Body(default="pvp"),
     db: Session = Depends(get_db),
 ):
     """Theoretical [min, max] each hard-constraint stat can reach for this
@@ -2479,12 +2495,16 @@ def build_stat_ranges(
         for level in trader_levels.values():
             if not (0 <= level <= 4):
                 raise HTTPException(status_code=422, detail="trader_levels values must be between 0 and 4")
+    if game_mode not in VALID_GAME_MODES:
+        raise HTTPException(status_code=422, detail=f"game_mode must be one of {sorted(VALID_GAME_MODES)}")
 
     weapon = db.query(Item).filter(Item.id == weapon_id, Item.is_weapon == True).first()  # noqa: E712
     if not weapon:
         raise HTTPException(status_code=404, detail="Weapon not found")
 
-    params = OptimizeParams(trader_levels=trader_levels, flea_available=flea_available, player_level=player_level)
+    params = OptimizeParams(
+        trader_levels=trader_levels, flea_available=flea_available, player_level=player_level, game_mode=game_mode
+    )
     with _solve_slot(_get_client_ip(request)):
         result = run_job("stat_ranges", weapon_id, params)
     if result["status"] == "error":
@@ -2499,6 +2519,7 @@ def build_moa_floor(
     trader_levels: dict | None = Body(default=None),
     flea_available: bool = Body(default=True),
     player_level: int | None = Body(default=None),
+    game_mode: str = Body(default="pvp"),
     db: Session = Depends(get_db),
 ):
     """Exact minimum achievable accuracy_moa for this weapon, via a binary
@@ -2509,12 +2530,16 @@ def build_moa_floor(
         for level in trader_levels.values():
             if not (0 <= level <= 4):
                 raise HTTPException(status_code=422, detail="trader_levels values must be between 0 and 4")
+    if game_mode not in VALID_GAME_MODES:
+        raise HTTPException(status_code=422, detail=f"game_mode must be one of {sorted(VALID_GAME_MODES)}")
 
     weapon = db.query(Item).filter(Item.id == weapon_id, Item.is_weapon == True).first()  # noqa: E712
     if not weapon:
         raise HTTPException(status_code=404, detail="Weapon not found")
 
-    params = OptimizeParams(trader_levels=trader_levels, flea_available=flea_available, player_level=player_level)
+    params = OptimizeParams(
+        trader_levels=trader_levels, flea_available=flea_available, player_level=player_level, game_mode=game_mode
+    )
     with _solve_slot(_get_client_ip(request)):
         result = run_job("moa_floor", weapon_id, params)
     if result["status"] == "error":
@@ -2593,6 +2618,7 @@ def build_gunsmith_solve(
     player_level: int | None = Body(default=None),
     strength_level: int = Body(default=10),
     equip_ergo_modifier: float = Body(default=0.0),
+    game_mode: str = Body(default="pvp"),
     db: Session = Depends(get_db),
 ):
     _check_solve_rate_limit(_get_client_ip(request))
@@ -2608,6 +2634,8 @@ def build_gunsmith_solve(
         for level in trader_levels.values():
             if not (0 <= level <= 4):
                 raise HTTPException(status_code=422, detail="trader_levels values must be between 0 and 4")
+    if game_mode not in VALID_GAME_MODES:
+        raise HTTPException(status_code=422, detail=f"game_mode must be one of {sorted(VALID_GAME_MODES)}")
 
     with _solve_slot(_get_client_ip(request)):
         result = run_gunsmith(
@@ -2617,6 +2645,7 @@ def build_gunsmith_solve(
             player_level=player_level,
             strength_level=strength_level,
             equip_ergo_modifier=equip_ergo_modifier,
+            game_mode=game_mode,
         )
     if result["status"] == "error":
         raise HTTPException(status_code=404, detail=result["reason"])

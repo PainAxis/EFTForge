@@ -990,6 +990,23 @@ window.EFTForge.optimizer = (function () {
         _refreshStatRanges();
     }
 
+    // Shares EFTForge.state.priceMode with the price panel's own PvP/PvE/PvP S
+    // toggle (stats-panel.js) - same global setting, same persisted localStorage
+    // key, so switching it here or there stays in sync everywhere. Solve prices
+    // depend on which mode's flea market is active, so this invalidates the
+    // cached stat-ranges/moa-floor the same way a Flea/Trader Access change does.
+    function _setGameMode(mode) {
+        const state = window.EFTForge.state;
+        if (mode === state.priceMode) return;
+        state.priceMode = mode;
+        try { localStorage.setItem('eftforge_price_mode', mode); } catch (_) {}
+        document.getElementById('optimizer-price-mode-pvp')?.classList.toggle('active', mode === 'pvp');
+        document.getElementById('optimizer-price-mode-pvpseason')?.classList.toggle('active', mode === 'pvpSeason');
+        document.getElementById('optimizer-price-mode-pve')?.classList.toggle('active', mode === 'pve');
+        window.EFTForge.utils?.updateBlobColor();
+        _refreshStatRanges();
+    }
+
     // Budget's achievable range depends on which items are purchasable at all
     // right now, so a Flea/Trader Access change invalidates the cached
     // GET /build/stat-ranges response and re-applies the fresh one.
@@ -1459,6 +1476,7 @@ window.EFTForge.optimizer = (function () {
             weapon_id: weaponId,
             trader_levels: state.traderLevels || null,
             flea_available: _fleaAvailable,
+            game_mode: state.priceMode || 'pvp',
         };
         _statRangesPromise = fetch(`${EFTForge.config.API_BASE}/build/stat-ranges`, {
             method: 'POST',
@@ -1484,6 +1502,7 @@ window.EFTForge.optimizer = (function () {
             weapon_id: weaponId,
             trader_levels: state.traderLevels || null,
             flea_available: _fleaAvailable,
+            game_mode: state.priceMode || 'pvp',
         };
         fetch(`${EFTForge.config.API_BASE}/build/moa-floor`, {
             method: 'POST',
@@ -1925,6 +1944,7 @@ window.EFTForge.optimizer = (function () {
 
         const currentGun = window.EFTForge.state && window.EFTForge.state.currentGun;
         const weaponId = currentGun ? currentGun.id : null;
+        const priceMode = window.EFTForge.state?.priceMode || 'pvp';
 
         content.innerHTML = `
           <div class="optimizer-two-pane">
@@ -1992,6 +2012,14 @@ window.EFTForge.optimizer = (function () {
                 <div class="optimizer-section-body" data-section-body>
                   <div class="optimizer-section-body-inner">
                    <div class="optimizer-section-body-content">
+                    <div class="optimizer-toggle-row">
+                        <span class="stat-label">${_t('optimizer.gameMode')}</span>
+                        <div class="price-mode-btns" id="optimizer-price-mode-btns">
+                            <button id="optimizer-price-mode-pvp" class="toggle-btn${priceMode === 'pvp' ? ' active' : ''}">${_t('stats.pvpModeLabel')}</button>
+                            <button id="optimizer-price-mode-pvpseason" class="toggle-btn price-mode-pvpseason${priceMode === 'pvpSeason' ? ' active' : ''}">${_t('stats.pvpSeasonModeLabel')}</button>
+                            <button id="optimizer-price-mode-pve" class="toggle-btn price-mode-pve${priceMode === 'pve' ? ' active' : ''}">${_t('stats.pveModeLabel')}</button>
+                        </div>
+                    </div>
                     <div class="optimizer-toggle-row">
                         <span class="stat-label">${_t('optimizer.fleaAvailable')}</span>
                         <button type="button" class="compare-toggle${_fleaAvailable ? ' active' : ''}" id="optimizer-flea-toggle">
@@ -2099,8 +2127,17 @@ window.EFTForge.optimizer = (function () {
         });
 
         document.getElementById('optimizer-flea-toggle').addEventListener('click', () => _setFleaAvailable(!_fleaAvailable));
+        document.getElementById('optimizer-price-mode-btns')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('.toggle-btn');
+            if (!btn) return;
+            const mode = btn.id === 'optimizer-price-mode-pve' ? 'pve'
+                : btn.id === 'optimizer-price-mode-pvpseason' ? 'pvpSeason'
+                : 'pvp';
+            _setGameMode(mode);
+        });
         _wireSection('market', () => {
             _setFleaAvailable(true);
+            _setGameMode('pvp');
             resetTraderLevels();
         });
         _renderTraderAccessWidget();
@@ -2157,6 +2194,7 @@ window.EFTForge.optimizer = (function () {
             exclude_items: _excludedModIds.length ? _excludedModIds : null,
             flea_available: _fleaAvailable,
             trader_levels: state.traderLevels || null,
+            game_mode: state.priceMode || 'pvp',
             strength_level: state.currentStrengthLevel ?? 10,
             equip_ergo_modifier: state.currentEquipErgoModifier ?? 0,
             // Fills the solved build's magazine(s) with whatever ammo is currently selected in
@@ -3140,6 +3178,7 @@ window.EFTForge.optimizer = (function () {
             task_name: taskName,
             flea_available: document.getElementById('optimizer-gunsmith-flea-available').classList.contains('active'),
             trader_levels: state.traderLevels || null,
+            game_mode: state.priceMode || 'pvp',
             strength_level: state.currentStrengthLevel ?? 10,
             equip_ergo_modifier: state.currentEquipErgoModifier ?? 0,
         };

@@ -84,6 +84,7 @@ def solve_gunsmith_task(
     player_level=None,
     strength_level=10,
     equip_ergo_modifier=0.0,
+    game_mode="pvp",
 ):
     raw_tasks = _load_raw_tasks()
     task = next((t for t in raw_tasks if t["task_name"] == task_name), None)
@@ -107,6 +108,7 @@ def solve_gunsmith_task(
         trader_levels=trader_levels,
         flea_available=flea_available,
         player_level=player_level,
+        game_mode=game_mode,
         strength_level=strength_level,
         equip_ergo_modifier=equip_ergo_modifier,
         # A Gunsmith task is about satisfying its requirements, not chasing a

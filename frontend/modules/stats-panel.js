@@ -20,8 +20,9 @@ function _collectInstalledItemsFlat(node, result = []) {
 function _saveFleaCache() {
     try {
         const ts = new Date().toISOString();
-        localStorage.setItem("eftforge_flea_pvp", JSON.stringify(EFTForge.state.fleaCachePvp));
-        localStorage.setItem("eftforge_flea_pve", JSON.stringify(EFTForge.state.fleaCachePve));
+        localStorage.setItem("eftforge_flea_pvp",       JSON.stringify(EFTForge.state.fleaCachePvp));
+        localStorage.setItem("eftforge_flea_pve",       JSON.stringify(EFTForge.state.fleaCachePve));
+        localStorage.setItem("eftforge_flea_pvpseason", JSON.stringify(EFTForge.state.fleaCacheSeasonal));
         localStorage.setItem("eftforge_flea_ts",  ts);
         EFTForge.state.fleaLastFetched = ts;
     } catch (_) {}
@@ -29,13 +30,16 @@ function _saveFleaCache() {
 
 function restoreFleaCache() {
     try {
-        const pvp = localStorage.getItem("eftforge_flea_pvp");
-        const pve = localStorage.getItem("eftforge_flea_pve");
-        const ts  = localStorage.getItem("eftforge_flea_ts");
-        if (pvp) EFTForge.state.fleaCachePvp  = JSON.parse(pvp);
-        if (pve) EFTForge.state.fleaCachePve  = JSON.parse(pve);
-        if (ts)  EFTForge.state.fleaLastFetched = ts;
-        EFTForge.state.pveMode = localStorage.getItem("eftforge_pve_mode") === "1";
+        const pvp       = localStorage.getItem("eftforge_flea_pvp");
+        const pve       = localStorage.getItem("eftforge_flea_pve");
+        const pvpSeason = localStorage.getItem("eftforge_flea_pvpseason");
+        const ts        = localStorage.getItem("eftforge_flea_ts");
+        if (pvp)       EFTForge.state.fleaCachePvp      = JSON.parse(pvp);
+        if (pve)       EFTForge.state.fleaCachePve      = JSON.parse(pve);
+        if (pvpSeason) EFTForge.state.fleaCacheSeasonal = JSON.parse(pvpSeason);
+        if (ts)        EFTForge.state.fleaLastFetched = ts;
+        const savedMode = localStorage.getItem("eftforge_price_mode");
+        EFTForge.state.priceMode = (savedMode === "pve" || savedMode === "pvpSeason") ? savedMode : "pvp";
         const tl = localStorage.getItem("eftforge_trader_levels");
         if (tl) EFTForge.state.traderLevels = JSON.parse(tl);
     } catch (_) {}
@@ -173,13 +177,15 @@ async function refetchFleaPrices() {
     _fleaFetching = true;
     _startRefetchAnimation();
 
-    EFTForge.state.fleaCachePvp  = {};
-    EFTForge.state.fleaCachePve  = {};
+    EFTForge.state.fleaCachePvp      = {};
+    EFTForge.state.fleaCachePve      = {};
+    EFTForge.state.fleaCacheSeasonal = {};
     EFTForge.state.fleaLastFetched = null;
     // Drop the memoized JSON-API price maps so this refetch pulls fresh data.
     EFTForge.api.clearFleaPriceCache();
     localStorage.removeItem("eftforge_flea_pvp");
     localStorage.removeItem("eftforge_flea_pve");
+    localStorage.removeItem("eftforge_flea_pvpseason");
     localStorage.removeItem("eftforge_flea_ts");
 
     try {
@@ -204,12 +210,14 @@ async function ensureFleaPrices(itemIds) {
     const missing = itemIds.filter(id => !(id in EFTForge.state.fleaCachePvp));
     if (missing.length === 0) return;
     try {
-        const [pvp, pve] = await Promise.all([
+        const [pvp, pve, pvpSeason] = await Promise.all([
             fetchFleaPrices(missing, "regular"),
             fetchFleaPrices(missing, "pve"),
+            fetchFleaPrices(missing, "pvp-season"),
         ]);
         Object.assign(EFTForge.state.fleaCachePvp, pvp);
         Object.assign(EFTForge.state.fleaCachePve, pve);
+        Object.assign(EFTForge.state.fleaCacheSeasonal, pvpSeason);
         _saveFleaCache();
     } catch (err) {
         console.warn("Could not fetch flea prices:", err);
@@ -282,8 +290,10 @@ async function renderPriceOverview() {
     await ensureFleaPrices(allIds);
     if (_fetchDotsInterval) { clearInterval(_fetchDotsInterval); _fetchDotsInterval = null; }
 
-    const pve = EFTForge.state.pveMode;
-    const fleaCache = pve ? EFTForge.state.fleaCachePve : EFTForge.state.fleaCachePvp;
+    const priceMode = EFTForge.state.priceMode;
+    const fleaCache = priceMode === "pve" ? EFTForge.state.fleaCachePve
+        : priceMode === "pvpSeason" ? EFTForge.state.fleaCacheSeasonal
+        : EFTForge.state.fleaCachePvp;
 
     function _priceInfoForItem(item) {
         let traderPrice = null;
@@ -447,7 +457,6 @@ async function renderPriceOverview() {
         }
     }
 
-    const pveBtnActive = pve ? "active" : "";
     const ts = EFTForge.state.fleaLastFetched;
     const tsLabel = ts
         ? new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -460,10 +469,11 @@ async function renderPriceOverview() {
         <div class="stats-section">
             <div class="cost-section-header">
                 <div class="section-title">${t("stats.buildCost")}</div>
-                <button class="compare-toggle ${pveBtnActive}" id="pve-mode-toggle">
-                    ${t("stats.pveModeLabel")}
-                    <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
-                </button>
+                <div class="price-mode-btns" id="price-mode-btns">
+                    <button id="price-mode-pvp" class="toggle-btn${priceMode === "pvp" ? " active" : ""}">${t("stats.pvpModeLabel")}</button>
+                    <button id="price-mode-pvpseason" class="toggle-btn price-mode-pvpseason${priceMode === "pvpSeason" ? " active" : ""}">${t("stats.pvpSeasonModeLabel")}</button>
+                    <button id="price-mode-pve" class="toggle-btn price-mode-pve${priceMode === "pve" ? " active" : ""}">${t("stats.pveModeLabel")}</button>
+                </div>
             </div>
             <div class="cost-meta-row">
                 <div class="cost-flea-ts">${t("stats.fleaTs")} ${escapeHtml(tsLabel)} &middot; <button id="flea-refetch-btn" class="cost-flea-refetch-btn">${t("stats.refetchFlea")}</button></div>
@@ -483,12 +493,15 @@ async function renderPriceOverview() {
         </div>
     `;
 
-    document.getElementById("pve-mode-toggle")?.addEventListener("click", (e) => {
-        EFTForge.state.pveMode = !EFTForge.state.pveMode;
-        localStorage.setItem("eftforge_pve_mode", EFTForge.state.pveMode ? "1" : "0");
-        e.currentTarget.classList.toggle("active", EFTForge.state.pveMode);
+    document.getElementById("price-mode-btns")?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".toggle-btn");
+        if (!btn) return;
+        const mode = btn.id === "price-mode-pve" ? "pve" : btn.id === "price-mode-pvpseason" ? "pvpSeason" : "pvp";
+        if (mode === EFTForge.state.priceMode) return;
+        EFTForge.state.priceMode = mode;
+        localStorage.setItem("eftforge_price_mode", mode);
         EFTForge.utils.updateBlobColor();
-        setTimeout(() => renderPriceOverview(), 220);
+        setTimeout(() => renderPriceOverview(), 160);
     });
 
     document.getElementById("trader-levels-toggle")?.addEventListener("click", () => {

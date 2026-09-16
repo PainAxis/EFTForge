@@ -30,6 +30,7 @@ class ExploreRequest(BaseModel):
     exclude_items: list[str] | None = Field(default=None, max_length=300)
     flea_available: bool = True
     trader_levels: dict[str, int] | None = None
+    game_mode: Literal["pvp", "pve", "pvpSeason"] = "pvp"
     player_level: int | None = Field(default=None, ge=0, le=79)
     strength_level: int = Field(default=10, ge=0, le=51)
     equip_ergo_modifier: float = Field(default=0, ge=-1, le=1)

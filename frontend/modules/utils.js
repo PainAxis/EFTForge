@@ -147,8 +147,11 @@ function _updateBlobColor() {
     if (toasts.length > 0) {
         const blobColor = toasts[toasts.length - 1].dataset.blobColor;
         if (blobColor) document.documentElement.style.setProperty("--blob-color", blobColor);
-    } else if (EFTForge.state.compareMode || (EFTForge.state.pveMode && EFTForge.state.priceView)) {
+    } else if (EFTForge.state.compareMode) {
         document.documentElement.style.setProperty("--blob-color", "rgba(0, 200, 180, 0.10)");
+    } else if (EFTForge.state.priceView && EFTForge.state.priceMode !== "pvp") {
+        const hex = EFTForge.state.priceMode === "pve" ? "#38759F" : "#288662";
+        document.documentElement.style.setProperty("--blob-color", _hexToRgba(hex, 0.10));
     } else {
         document.documentElement.style.removeProperty("--blob-color");
     }
