@@ -49,6 +49,8 @@ function _saveTraderLevels() {
     try {
         localStorage.setItem("eftforge_trader_levels", JSON.stringify(EFTForge.state.traderLevels));
     } catch (_) {}
+    // The 3D view's compact picker shows trader availability: refresh it at once.
+    EFTForge.builder3d?.onTraderLevelsChange();
 }
 
 // Shared trader-levels widget (master "All" row + one row per whitelisted
@@ -555,6 +557,7 @@ function _insertHiddenStatsPanel(animate = true) {
   const fmt = (v, decimals = 2, spt = false) => v != null ? parseFloat(v).toFixed(decimals) : (spt ? "?" : "-");
   const fmtInt = (v) => v != null ? v : "-";
   const fmtFactor = (v) => v != null ? "×" + parseFloat(v).toFixed(2) : "-";
+  const fmtSigned = (v) => v != null ? (v > 0 ? "+" : "") + v : "-";
   const sections = [
     {
       title: t("hidden.sectionGeneral"),
@@ -563,6 +566,7 @@ function _insertHiddenStatsPanel(animate = true) {
         [t("hidden.heatFactor"),    fmtFactor(EFTForge.state.lastHeatFactor),                                    t("hidden.tip.heatFactor")],
         [t("hidden.coolingFactor"), fmtFactor(EFTForge.state.lastCoolingFactor),                                 t("hidden.tip.coolingFactor")],
         [t("hidden.durabilityBurn"), fmtFactor(EFTForge.state.lastDurabilityBurnFactor),                         t("hidden.tip.durabilityBurn")],
+        [t("hidden.loudness"),      fmtSigned(EFTForge.state.lastLoudness),                                      t("hidden.tip.loudness")],
       ],
     },
     {
@@ -785,6 +789,9 @@ async function refreshBuildStats() {
   // Sync UBGL selector first, then read its value (sync may set/restore the selection)
   await syncUbglAmmoSelector();
   syncAmmoDisabledState();
+  // The preview draws the loaded rounds, so the toggle and ammo pickers feed it too;
+  // it returns early when nothing it depends on changed.
+  window.scheduleBuildPreview?.();
 
   if (EFTForge.state.priceView) {
       renderPriceOverview();
@@ -913,7 +920,7 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
   savedEquipErgoPanel?.remove();
   document.getElementById("hidden-stats-panel")?.remove();
 
-  const eed = parseFloat(data.evo_ergo_delta ?? 0);
+  const trueErgo = parseFloat(data.true_ergo_delta ?? 0);
   const totalErgo = parseFloat(data.total_ergo ?? 0);
   const totalWeight = parseFloat(data.total_weight ?? 0);
   EFTForge.state.lastTotalWeight = totalWeight;
@@ -923,17 +930,22 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
   EFTForge.state.lastAccuracyMoa = data.accuracy_moa ?? null;
   EFTForge.state.lastSightingRange = data.sighting_range ?? null;
   EFTForge.state.lastMuzzleVelocity = data.muzzle_velocity ?? null;
-  EFTForge.state.lastEED = parseFloat(data.evo_ergo_delta ?? 0);
+  EFTForge.state.lastTrueErgo = parseFloat(data.true_ergo_delta ?? 0);
   EFTForge.state.lastOverswing  = data.overswing ?? false;
-  EFTForge.state.lastArmStamina = parseFloat(data.arm_stamina ?? 0);
+  EFTForge.state.lastArmStamina = data.arm_stamina ?? null;
   EFTForge.state.lastHeatFactor           = data.heat_factor ?? null;
   EFTForge.state.lastCoolingFactor        = data.cooling_factor ?? null;
   EFTForge.state.lastDurabilityBurnFactor = data.durability_burn_factor ?? null;
+  EFTForge.state.lastLoudness             = data.loudness ?? null;
+  // The 3D view aims with our totals, not its own sums.
+  EFTForge.builder3d?.onStats();
 
-  const eedClass = eed >= 0 ? "positive" : "negative";
+  const trueErgoClass = trueErgo >= 0 ? "positive" : "negative";
+  const nearOverswing = trueErgo >= 0 && trueErgo < TED_WARN && EFTForge.state.currentEquipErgoModifier === 0;
   const overswingClass = data.overswing ? "negative" : "positive";
 
-  const armStamina = parseFloat(data.arm_stamina ?? 0);
+  const armStamina = data.arm_stamina ?? null;
+  const aimSway = parseFloat(data.aim_sway ?? 0);
 
   // Snapshot current fill widths so the transition starts from the previous value
   const prevFills = content.querySelectorAll(".stat-bar-fill");
@@ -1002,18 +1014,18 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
       <div class="stat-col">
       <div class="stat-row stat-row-weight"><span class="stat-label">${t("stats.weight")}</span><span>${totalWeight.toFixed(3)} kg</span></div>
       <div class="stat-row stat-row-eed">
-        <span class="stat-label">${t("stats.eed")}<span class="stamina-info-btn${eed >= 0 && eed < 7 && EFTForge.state.currentEquipErgoModifier === 0 ? " eed-warn-active" : ""}" id="equip-ergo-info-btn" data-tooltip="${t("stats.configEquipErgoTooltip")}">i</span>:</span>
-        <span id="eed-value-span" class="${eedClass}">${eed > 0 ? "+" : ""}${eed.toFixed(1)}</span>${eed >= 0 && eed < 7 && EFTForge.state.currentEquipErgoModifier === 0 ? `<span class="eed-warning-icon" data-tooltip="${t("stats.eedWarnTooltip")}">⚠</span>` : ""}
+        <span class="stat-label">${t("stats.trueErgo")}<span class="stamina-info-btn${nearOverswing ? " eed-warn-active" : ""}" id="equip-ergo-info-btn" data-tooltip="${t("stats.configEquipErgoTooltip")}">i</span>:</span>
+        <span id="true-ergo-value-span" class="${trueErgoClass}">${fmtTrueErgo(trueErgo)}</span>${nearOverswing ? `<span class="eed-warning-icon" data-tooltip="${t("stats.trueErgoWarnTooltip")}">⚠</span>` : ""}
       </div>
       <div class="stat-row">
-        <span class="stat-label">${t("stats.overswing")}</span>
-        <span id="overswing-value-span" class="${overswingClass}">${data.overswing ? t("stats.yes") : t("stats.no")}</span>
+        <span class="stat-label" data-tooltip="${t("stats.aimSwayTip")}">${t("stats.overswing")}</span>
+        <span id="overswing-value-span" class="${overswingClass}">${fmtOverswing(data.overswing, aimSway)}</span>
       </div>
       </div>
       <div class="stat-col">
       <div class="stat-row" id="arm-stam-row">
         <span class="stat-label">${t("stats.armStamina")}<span class="stamina-info-btn" id="stamina-info-btn" data-tooltip="${t("stats.configStrengthTooltip")}">i</span>:</span>
-        <span>${armStamina.toFixed(1)}s</span>
+        <span>${fmtArmStamina(armStamina)}</span>
       </div>
       ${sightingRange !== null ? `<div class="stat-row"><span class="stat-label">${t("stats.sightingRange")}</span><span>${sightingRange} m</span></div>` : ""}
       <div class="stat-row"><span class="stat-label">${t("stats.muzzleVelocity")}</span><span>${muzzleVelocity !== null ? muzzleVelocity + " m/s" : t("stats.noAmmo")}</span></div>
@@ -1040,7 +1052,13 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
   });
 
   // On first render, grow height from 0 so the tree slides down smoothly
-  if (isFirstRender) {
+  if (isFirstRender && content.scrollHeight === 0) {
+    // Rendered while hidden (the 3D view's current build panel collapsed): nothing to
+    // measure, so skip the reveal instead of pinning the panel at 0px for good.
+    content.style.height = "";
+    content.style.overflow = "";
+    content.style.opacity = "";
+  } else if (isFirstRender) {
     const targetHeight = content.scrollHeight;
     content.style.transition = "height 0.3s ease, opacity 0.25s ease";
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -1108,7 +1126,7 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
       }
   });
 
-  // Make the EED warning triangle also open the same panel
+  // Make the TrueErgo warning triangle also open the same panel
   document.querySelector(".eed-warning-icon")?.addEventListener("click", () =>
       document.getElementById("equip-ergo-info-btn")?.click()
   );
@@ -1131,7 +1149,7 @@ async function updateStatsPanel(data, { preloadedAmmo = null, preloadedUbglAmmo 
           panel.className = "stamina-panel";
           panel.id = "equip-ergo-panel";
           panel.innerHTML = `
-                <div class="stamina-disclaimer"><strong style="color:#eee;">${t("stats.eedLabel")}</strong> ${t("stats.eedDesc")}${_lang() === "zh" ? ` <a href="https://www.bilibili.com/video/BV19uAGz1EFX" target="_blank" rel="noopener" style="color:#aad4f5;">MAJ_Kelvin 的视频详解</a>` : ` <a href="https://www.youtube.com/watch?v=zVZ8gSk666g&t" target="_blank" rel="noopener" style="color:#aad4f5;">SpaceMonkey37's video</a>`}</div>
+                <div class="stamina-disclaimer"><strong style="color:#eee;">${t("stats.trueErgoLabel")}</strong> ${t("stats.trueErgoDesc")}</div>
                 <div class="stamina-disclaimer"><strong style="color:#eee;">${t("stats.overswing")}</strong> ${t("stats.overswingDesc")}</div>
               <div class="strength-control">
                   <label style="color:#eee;">${t("stats.equipErgoLabel")}</label>
@@ -1179,12 +1197,13 @@ function wireStrengthControls() {
     slider.addEventListener("input", () => {
         EFTForge.state.currentStrengthLevel = parseInt(slider.value);
         numInput.value = EFTForge.state.currentStrengthLevel;
+        EFTForge.builder3d?.onAimSettings();
 
         // Recalculate arm stamina inline without triggering a DOM rebuild
         const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo, EFTForge.state.currentStrengthLevel, EFTForge.state.currentEquipErgoModifier);
 
         const staminaSpan = document.querySelector("#stamina-info-btn")?.closest(".stat-row")?.lastElementChild;
-        if (staminaSpan) staminaSpan.textContent = armStamina.toFixed(1) + "s";
+        if (staminaSpan) staminaSpan.textContent = fmtArmStamina(armStamina);
     });
 
     slider.addEventListener("change", () => {
@@ -1193,7 +1212,7 @@ function wireStrengthControls() {
         const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo, EFTForge.state.currentStrengthLevel, EFTForge.state.currentEquipErgoModifier);
 
         const staminaSpan = document.querySelector("#stamina-info-btn")?.closest(".stat-row")?.lastElementChild;
-        if (staminaSpan) staminaSpan.textContent = armStamina.toFixed(1) + "s";
+        if (staminaSpan) staminaSpan.textContent = fmtArmStamina(armStamina);
     });
 
     numInput.addEventListener("change", () => {
@@ -1215,12 +1234,51 @@ function wireStrengthControls() {
         EFTForge.state.currentStrengthLevel = val;
         numInput.value = val;
         slider.value = val;
+        EFTForge.builder3d?.onAimSettings();
 
         const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo, EFTForge.state.currentStrengthLevel, EFTForge.state.currentEquipErgoModifier);
 
         const staminaSpan = document.querySelector("#stamina-info-btn")?.closest(".stat-row")?.lastElementChild;
-        if (staminaSpan) staminaSpan.textContent = armStamina.toFixed(1) + "s";
+        if (staminaSpan) staminaSpan.textContent = fmtArmStamina(armStamina);
     });
+}
+
+// Strength set from outside our controls (the 3D view's ADS skills): save it and update the
+// slider, number box and arm stamina in place, as dragging our own slider does.
+function _setStrengthLevel(level) {
+    const val = Math.max(0, Math.min(51, Math.round(Number(level) || 0)));
+    if (val === EFTForge.state.currentStrengthLevel) return;
+    EFTForge.state.currentStrengthLevel = val;
+    localStorage.setItem("eftforge_strength_level", val);
+    const slider = document.getElementById("strength-slider");
+    const numInput = document.getElementById("strength-input");
+    if (slider) slider.value = val;
+    if (numInput) numInput.value = val;
+    const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo, val, EFTForge.state.currentEquipErgoModifier);
+    const staminaSpan = document.querySelector("#stamina-info-btn")?.closest(".stat-row")?.lastElementChild;
+    if (staminaSpan) staminaSpan.textContent = fmtArmStamina(armStamina);
+}
+
+// Warn below this much TED with no equipment modifier set: typical gear takes 10 to 30%
+// off effective ergo, 5 to 15 points on a 50 ergo build.
+const TED_WARN = 10;
+
+// TrueErgoDelta, in ergo points.
+function fmtTrueErgo(ted) {
+    return (ted > 0 ? "+" : "") + Number(ted).toFixed(1);
+}
+
+// Overswing plus its aim-in sway strength (0 to 100), e.g. "Yes - 45%". Show "<1%" for a
+// build that barely overswings so it never reads "Yes - 0%".
+function fmtOverswing(overswing, swayPct) {
+    if (!overswing) return t("stats.no") + " - 0%";
+    const pct = Number(swayPct) || 0;
+    return t("stats.yes") + " - " + (pct < 0.5 ? "<1" : pct.toFixed(0)) + "%";
+}
+
+// Arm stamina in seconds, or infinite for a build that drains none.
+function fmtArmStamina(seconds) {
+    return seconds === null || seconds === undefined ? "∞" : Number(seconds).toFixed(1) + "s";
 }
 
 function wireEquipErgoControls() {
@@ -1229,28 +1287,30 @@ function wireEquipErgoControls() {
     if (!slider || !numInput) return;
 
     function updateEquipErgoDisplay() {
-        const eed = calcEED(EFTForge.state.lastTotalErgo, EFTForge.state.lastTotalWeight, EFTForge.state.currentEquipErgoModifier);
-        const overswing = eed < 0;
+        EFTForge.builder3d?.onAimSettings();
+        const trueErgo = calcTrueErgoDelta(EFTForge.state.lastTotalErgo, EFTForge.state.lastTotalWeight, EFTForge.state.currentEquipErgoModifier);
+        const aimSway = calcAimSway(EFTForge.state.lastTotalErgo, EFTForge.state.lastTotalWeight, EFTForge.state.currentEquipErgoModifier);
+        const overswing = aimSway > 0;
 
-        const eedSpan = document.getElementById("eed-value-span");
-        if (eedSpan) {
-            eedSpan.className = eed >= 0 ? "positive" : "negative";
-            eedSpan.textContent = (eed > 0 ? "+" : "") + eed.toFixed(1);
+        const trueErgoSpan = document.getElementById("true-ergo-value-span");
+        if (trueErgoSpan) {
+            trueErgoSpan.className = trueErgo >= 0 ? "positive" : "negative";
+            trueErgoSpan.textContent = fmtTrueErgo(trueErgo);
         }
 
-        const eedRow = eedSpan?.closest(".stat-row-eed");
+        const eedRow = trueErgoSpan?.closest(".stat-row-eed");
         const infoBtn = document.getElementById("equip-ergo-info-btn");
         if (eedRow) {
             const existing = eedRow.querySelector(".eed-warning-icon");
-            if (eed >= 0 && eed < 7 && EFTForge.state.currentEquipErgoModifier === 0) {
+            if (trueErgo >= 0 && trueErgo < TED_WARN && EFTForge.state.currentEquipErgoModifier === 0) {
                 if (!existing) {
                     const icon = document.createElement("span");
                     icon.className = "eed-warning-icon";
-                    icon.dataset.tooltip = t("stats.eedWarnTooltip");
+                    icon.dataset.tooltip = t("stats.trueErgoWarnTooltip");
                     icon.textContent = "⚠";
                     icon.style.cursor = "pointer";
                     icon.addEventListener("click", () => document.getElementById("equip-ergo-info-btn")?.click());
-                    eedSpan.after(icon);
+                    trueErgoSpan.after(icon);
                 }
                 infoBtn?.classList.add("eed-warn-active");
             } else {
@@ -1262,12 +1322,12 @@ function wireEquipErgoControls() {
         const overswingSpan = document.getElementById("overswing-value-span");
         if (overswingSpan) {
             overswingSpan.className = overswing ? "negative" : "positive";
-            overswingSpan.textContent = overswing ? t("stats.yes") : t("stats.no");
+            overswingSpan.textContent = fmtOverswing(overswing, aimSway * 100);
         }
 
         const armStamina = calcArmStamina(EFTForge.state.lastTotalWeight, EFTForge.state.lastTotalErgo, EFTForge.state.currentStrengthLevel, EFTForge.state.currentEquipErgoModifier);
         const staminaSpan = document.querySelector("#stamina-info-btn")?.closest(".stat-row")?.lastElementChild;
-        if (staminaSpan) staminaSpan.textContent = armStamina.toFixed(1) + "s";
+        if (staminaSpan) staminaSpan.textContent = fmtArmStamina(armStamina);
     }
 
     slider.addEventListener("input", () => {
@@ -1340,8 +1400,16 @@ document.addEventListener("keydown", (e) => {
     }
 });
 
-window.addEventListener("resize", () => {
+// Re-anchor the popover after its button moves (a window resize, the 3D stats dock
+// dragged or scrolled), and close it once the button is no longer shown (dock collapsed).
+function _followHiddenStatsBtn() {
     const panel = document.getElementById("hidden-stats-panel");
     const btn = document.getElementById("hidden-stats-btn");
-    if (panel && btn) _positionHiddenStatsPanel(panel, btn);
-});
+    if (!panel || !panel.classList.contains("show")) return;
+    if (!btn || !btn.getClientRects().length) { _removeHiddenStatsPanel(); return; }
+    _positionHiddenStatsPanel(panel, btn);
+}
+
+window.addEventListener("resize", _followHiddenStatsBtn);
+
+EFTForge.statsPanel = { followHiddenStatsBtn: _followHiddenStatsBtn, setStrengthLevel: _setStrengthLevel };

@@ -11,7 +11,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://hm.baidu.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http://127.0.0.1:8000 http://localhost:8000; connect-src 'self' http://127.0.0.1:8000 http://localhost:8000 https://json.tarkov.dev https://assets.tarkov.dev https://hm.baidu.com https://image-gen.tarkov-changes.com https://gitee.com https://raw.giteeusercontent.com; frame-src https://player.bilibili.com http://player.bilibili.com">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://hm.baidu.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http://127.0.0.1:8000 http://localhost:8000; connect-src 'self' http://127.0.0.1:8000 http://localhost:8000 https://json.tarkov.dev https://assets.tarkov.dev https://hm.baidu.com https://gitee.com https://raw.giteeusercontent.com; frame-src https://player.bilibili.com http://player.bilibili.com https://kitbash.eftforge.com http://127.0.0.1:8765">
 <title>EFTForge - Modding Lab</title>
 <meta name="description" content="EFTForge - 逃离塔科夫改枪实验室：枪械改装、配件数据、改枪模拟与物品数据查询工具。">
 <meta property="og:title" content="EFTForge - 配置实验室">
@@ -19,7 +19,7 @@
 <meta property="og:type" content="website">
 <link rel="icon" type="image/png" sizes="32x32" href="./assets/images/EFTForge32x32.png">
 
-<link rel="stylesheet" href="./css/styles.css?v=6cbb19c679">
+<link rel="stylesheet" href="./css/styles.css?v=d4e3bd31bf">
 <script>
 var _hmt = _hmt || [];
 (function() {
@@ -108,6 +108,9 @@ var _hmt = _hmt || [];
 
 <div class="container no-gun" id="main-container">
 
+  <!-- PAGE BACKGROUND (styles.css #page-bg; app.js moves the dot grid) -->
+  <div id="page-bg" aria-hidden="true"><div id="page-bg-dots"></div></div>
+
   <!-- LEFT PANEL -->
   <div class="left-panel">
     <div id="weapon-selector">
@@ -171,7 +174,7 @@ var _hmt = _hmt || [];
 
         <div id="attachment-placeholder" class="attachment-placeholder">
             <div class="placeholder-inner">
-                <img id="gun-display-image" class="gun-display-image" style="display:none;" />
+                <div class="bp-display-wrap"><img id="gun-display-image" class="gun-display-image" style="display:none;" /></div>
                 <div id="gun-display-name" class="gun-display-name"></div>
                 <div id="build-display-tags" class="build-display-tags"></div>
                 <strong><em id="placeholder-main">
@@ -183,7 +186,7 @@ var _hmt = _hmt || [];
                     </em></strong>
                 </span>
             </div>
-            <div id="optimizer-edge-tab" class="optimizer-edge-tab optimizer-edge-tab-pulse-snap" onclick="EFTForge.optimizer.showPanel()">
+            <div id="optimizer-edge-tab" class="optimizer-edge-tab" onclick="EFTForge.optimizer.showPanel()">
                 <div class="optimizer-edge-tab-glow optimizer-edge-tab-glow-rest"></div>
                 <div class="optimizer-edge-tab-glow optimizer-edge-tab-glow-hover"></div>
                 <div class="optimizer-edge-tab-clip">
@@ -321,6 +324,11 @@ var _hmt = _hmt || [];
   </div>
   <div class="tracker-controls">
     <input type="text" id="tracker-search" class="tracker-search" placeholder="Search items...">
+    <div class="tracker-period-wrap">
+      <select id="tracker-period-select">
+        <option value="recent">Last 7 Days</option>
+      </select>
+    </div>
     <div class="tracker-type-filter" id="tracker-type-filter">
       <button class="tracker-filter-btn active" data-filter="all" id="tracker-filter-all">All</button>
       <button class="tracker-filter-btn" data-filter="weapons" id="tracker-filter-weapons">Weapons</button>
@@ -351,36 +359,40 @@ var _hmt = _hmt || [];
 
 <div id="toast-container"></div>
 <!-- Cache-busting: the ?v= params below (and on styles.css at line 22) are content hashes, run frontend/release_prep.py before deploying -->
-<script src="modules/config.js?v=de01bda25f"></script>
-<script src="modules/state.js?v=46965659c5"></script>
-<script src="modules/lang.js?v=71fd2c6380"></script>
-<script src="modules/utils.js?v=c50dcc84d1"></script>
+<script src="modules/config.js?v=700747f0ed"></script>
+<script src="modules/state.js?v=3c8f373891"></script>
+<script src="modules/lang.js?v=d0d94850ee"></script>
+<script src="modules/utils.js?v=aac102f306"></script>
 <script src="modules/media-viewer.js?v=cf890c9d21"></script>
-<script src="modules/calculations.js?v=539abd8ab5"></script>
+<script src="modules/calculations.js?v=719ee33adf"></script>
 <div id="eft-tooltip"></div>
-<script src="modules/api.js?v=01ab4479a9"></script>
-<script src="modules/gun-list.js?v=25677d7538"></script>
-<script src="modules/stats-panel.js?v=0070d08e28"></script>
-<script src="modules/tree.js?v=421484b10d"></script>
-<script src="modules/attachment-grid.js?v=79ea7d13b0"></script>
+<script src="modules/api.js?v=ff6dd5ead1"></script>
+<script src="modules/gun-list.js?v=5581c5e30d"></script>
+<script src="modules/stats-panel.js?v=1d33a0a14d"></script>
+<script src="modules/tree.js?v=3f6549ed77"></script>
+<script src="modules/attachment-grid.js?v=a1d7c3d5b3"></script>
 <script src="modules/attachment-grid-devtool.js?v=3b7e6c2a3c"></script><!-- dev only -->
-<script src="modules/build-preview.js?v=c0a8df7b5d"></script>
-<script src="modules/slot-selector.js?v=f57657ac3c"></script>
-<script src="modules/graph.js?v=02ee9f7611"></script>
-<script src="modules/build-manager.js?v=77a5df0fd9"></script>
-<script src="modules/tab-manager.js?v=b2ca2386ad"></script>
-<script src="modules/optimizer.js?v=5448eb3b6f"></script>
+<script src="modules/build-preview.js?v=658cf08b61"></script>
+<script src="modules/slot-selector.js?v=dbe6b626ff"></script>
+<script src="modules/graph.js?v=6821f127eb"></script>
+<script src="data/build-code-catalog-v1.js"></script>
+<script src="modules/build-manager.js?v=b1f575941e"></script>
+<script src="modules/tab-manager.js?v=5cc021436d"></script>
+<script src="modules/optimizer.js?v=6671057e73"></script>
+<script src="modules/builder-3d.js?v=e8cc1af748"></script>
+<script src="modules/builder-3d-panels.js?v=7a6ae6ba68"></script>
+<script src="modules/builder-3d-overlaps.js?v=9401d4db5d"></script>
 <script src="modules/profile.js?v=00295da068"></script>
-<script src="modules/screenshot-devtool.js?v=779ad1edbd"></script><!-- dev only -->
-<script src="app.js?v=a85cb7e88e"></script>
+<script src="modules/screenshot-devtool.js?v=ebee737506"></script><!-- dev only -->
+<script src="app.js?v=414e68bd9a"></script>
 <script src="lzstring.min.js?v=95f4d1cbf0"></script>
-<script src="marked.min.js?v=3e7e7d7feb"></script>
-<script src="modules/news.js?v=dd8b25c56b"></script>
-<script src="modules/leaderboard.js?v=75184268b6"></script>
-<script src="modules/tracker.js?v=bb88a80911"></script>
-<script src="modules/ammo-table.js?v=2f85d90691"></script>
-<script src="modules/tracker-devtool.js?v=199318f699"></script><!-- dev only -->
-<script src="modules/perf-metrics.js?v=ba68382527"></script>
+<script src="marked.min.js?v=742ee84b0d"></script>
+<script src="modules/news.js?v=c6f66fa9f6"></script>
+<script src="modules/leaderboard.js?v=0bb9713e96"></script>
+<script src="modules/tracker.js?v=0352978b12"></script>
+<script src="modules/ammo-table.js?v=c5682b35b4"></script>
+<script src="modules/tracker-devtool.js?v=da80365624"></script><!-- dev only -->
+<script src="modules/perf-metrics.js?v=440516ce26"></script>
 <script src="modules/desktop-settings.js?v=5bdf2b23c1"></script><!-- desktop app only -->
 <script src="modules/window-controls.js?v=5842871eb2"></script><!-- desktop app only -->
 <div class="beian-footer">

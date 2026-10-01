@@ -461,11 +461,6 @@ header.header-expanded ~ #tab-bar {
   transition: opacity 0.15s ease, filter 0.15s ease;
 }
 
-.tab-preview-img-wrap .bp-queue-overlay {
-  width: 26px;
-  height: 26px;
-}
-
 .tab-preview-gunname {
   font-size: 12px;
   font-weight: 700;
@@ -1046,20 +1041,44 @@ header:not(.header-expanded) .header-nav-btn-icon {
   transition: --blob-color 1s ease;
 }
 
-/* Gun modding background */
-.container:not(.no-gun) {
-  background:
-    radial-gradient(ellipse 100% 100% at 50% 50%, transparent 20%, rgba(0,0,0,0.72) 100%),
-    radial-gradient(ellipse 70% 70% at 85% 90%, var(--blob-color), transparent 70%),
-    radial-gradient(circle, rgba(255,255,255,0.11) 1px, transparent 1px),
-    linear-gradient(160deg, #141414 0%, #111111 50%, #0f0e0b 100%);
-  background-size: 100% 100%, 100% 100%, 30px 30px, 100% 100%;
-  background-position: 0 0, 0 0, var(--dot-parallax-pos, 0px 0px), 0 0;
-  background-attachment: scroll, scroll, fixed, scroll;
+/* Page background, behind both the gun list and the build area (index.html #page-bg).
+   The gradient, the dot grid and the glow with its vignette are separate layers, so the
+   cursor parallax (app.js) only moves the dots' own GPU layer: no repaint, no style
+   recalc. The dots' tiles start at the viewport's corner (app.js sets their
+   background-position), as the page's fixed grid always has. */
+.container {
+  position: relative;
 }
 
-.container:not(.no-gun) .left-panel,
-.container:not(.no-gun) .right-panel {
+#page-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background: linear-gradient(160deg, #141414 0%, #111111 50%, #0f0e0b 100%);
+}
+
+/* A tile of slack on every side, so the shifted grid never shows an edge. */
+#page-bg-dots {
+  position: absolute;
+  inset: -30px;
+  background: radial-gradient(circle, rgba(255,255,255,0.11) 1px, transparent 1px);
+  background-size: 30px 30px;
+  will-change: transform;
+}
+
+#page-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 100% 100% at 50% 50%, transparent 20%, rgba(0,0,0,0.72) 100%),
+    radial-gradient(ellipse 70% 70% at 85% 90%, var(--blob-color), transparent 70%);
+}
+
+.container .left-panel,
+.container .right-panel {
   background-color: transparent;
 }
 
@@ -1068,14 +1087,6 @@ header:not(.header-expanded) .header-nav-btn-icon {
   flex: 1 1 100%;
   width: 100% !important;
   overflow-y: auto;
-  background:
-    radial-gradient(ellipse 100% 100% at 50% 50%, transparent 20%, rgba(0,0,0,0.72) 100%),
-    radial-gradient(ellipse 70% 70% at 85% 90%, var(--blob-color), transparent 70%),
-    radial-gradient(circle, rgba(255,255,255,0.11) 1px, transparent 1px),
-    linear-gradient(160deg, #141414 0%, #111111 50%, #0f0e0b 100%);
-  background-size: 100% 100%, 100% 100%, 30px 30px, 100% 100%;
-  background-position: 0 0, 0 0, var(--dot-parallax-pos, 0px 0px), 0 0;
-  background-attachment: scroll, scroll, fixed, scroll;
 }
 
 .container.no-gun .right-panel {
@@ -1146,6 +1157,95 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .left-panel::-webkit-scrollbar-thumb:hover,
 .right-panel::-webkit-scrollbar-thumb:hover {
   background: #555;
+}
+
+/* =========================
+   CUSTOM SCROLLBAR (utils.js setupCustomScrollbar)
+========================= */
+
+/* Every scroller in the page draws our overlay rail instead of the native bar (utils.js
+   attaches it on first hover or scroll), so hide native bars up front: hiding them only
+   on attach would shift the layout under the cursor. !important beats the per-element
+   scrollbar-width rules, and in Chromium a non-auto scrollbar-width also switches off
+   the ::-webkit-scrollbar rules. Touch devices keep their native overlay bars. */
+@media not all and (pointer: coarse) {
+  body * {
+    scrollbar-width: none !important;
+  }
+
+  body *::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* These used to reserve a stable 10px gutter for the native bar; the padding takes
+     it over now so the layout (and #stats' matching padding) stays put. */
+  #slots,
+  #weapon-selector,
+  #price-overview {
+    padding-right: 20px;
+  }
+}
+
+.cs-rail {
+  position: absolute;
+  z-index: 2;
+  border-radius: 999px;
+  opacity: 0;
+  transition: opacity 0.25s ease, background-color 0.15s ease;
+  user-select: none;
+  touch-action: none;
+}
+
+.cs-rail[hidden] {
+  display: none;
+}
+
+.cs-rail-y { width: 10px; }
+.cs-rail-x { height: 10px; }
+
+.cs-rail.cs-visible,
+.cs-rail:hover,
+.cs-rail.cs-dragging {
+  opacity: 1;
+}
+
+.cs-rail:hover,
+.cs-rail.cs-dragging {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cs-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: #444;
+  border-radius: 999px;
+  cursor: default;
+  transition: background-color 0.15s ease, left 0.15s ease, right 0.15s ease, top 0.15s ease, bottom 0.15s ease;
+}
+
+/* Slim at rest, fattening up when the pointer comes for it */
+.cs-rail-y .cs-thumb { left: 3px; right: 3px; }
+.cs-rail-x .cs-thumb { top: 3px; bottom: 3px; }
+
+.cs-rail-y:hover .cs-thumb,
+.cs-rail-y.cs-dragging .cs-thumb { left: 2px; right: 2px; }
+
+.cs-rail-x:hover .cs-thumb,
+.cs-rail-x.cs-dragging .cs-thumb { top: 2px; bottom: 2px; }
+
+.cs-rail:hover .cs-thumb {
+  background: #666;
+}
+
+.cs-rail.cs-dragging .cs-thumb {
+  background: #f5c542;
+}
+
+/* Keep a thumb drag from selecting text or tripping hover states under the cursor */
+html.cs-drag-active,
+html.cs-drag-active * {
+  user-select: none !important;
 }
 
 *, *::before, *::after {
@@ -1705,7 +1805,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
 }
 
 /* Auto-hide empty columns */
-/* Column order: 1=name 2=price 3=₽/recoil 4=weight 5=recoil 6=acc 7=ergo 8=evo 9=R+E 10=heat/cool/burn 11=velocity */
+/* Column order: 1=name 2=price 3=₽/recoil 4=weight 5=recoil 6=acc 7=ergo 8=evo 9=R+E 10=heat/cool/burn 11=velocity 12=loudness */
 .attachment-table.hide-col-price th:nth-child(2),
 .attachment-table.hide-col-price td:nth-child(2) { display: none; }
 .attachment-table.hide-col-rub-recoil th:nth-child(3),
@@ -1726,6 +1826,8 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .attachment-table.hide-col-heat td:nth-child(10) { display: none; }
 .attachment-table.hide-col-vel th:nth-child(11),
 .attachment-table.hide-col-vel td:nth-child(11) { display: none; }
+.attachment-table.hide-col-loud th:nth-child(12),
+.attachment-table.hide-col-loud td:nth-child(12) { display: none; }
 
 /* Balance controls: slider shown when R+E sort is active */
 .balance-controls {
@@ -2027,6 +2129,49 @@ header:not(.header-expanded) .header-nav-btn-icon {
 .bp-imggen-toggle.active:hover { color: #888; }
 .bp-imggen-toggle.active .compare-toggle-track { background: #1e1800; border-color: #f5c542; }
 .bp-imggen-toggle.active .compare-toggle-knob  { background: #f5c542; }
+
+/* Kitbash! wordmark in front of the toggle label (_bpToggleLogoHtml in
+   build-preview.js). Sized so the letters match the 13px label, dimmed until
+   hovered; the hover jump itself is driven from JS so a leave mid-jump can
+   ease the letters back down. */
+.kb-toggle-logo {
+    --kb-h: 18px;
+    --kb-u: calc(var(--kb-h) / 600);
+    display: inline-flex;
+    flex: none;
+    height: var(--kb-h);
+    margin-right: -3px;
+    /* lift the letters onto the Latin label's baseline */
+    position: relative;
+    top: -1.5px;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+}
+.kb-toggle-logo.kb-toggle-logo-zh {
+    top: 0;
+}
+.bp-imggen-toggle:hover .kb-toggle-logo {
+    opacity: 1;
+}
+.kb-toggle-logo > span {
+    --kb-rest: #eeeeea;
+    --kb-peak: #f5c542;
+    flex: none;
+    width: calc(var(--kb-u) * var(--w));
+    height: 100%;
+    background-color: var(--kb-rest);
+    -webkit-mask: url("../assets/images/kitbash-wordmark-36.png") no-repeat;
+    mask: url("../assets/images/kitbash-wordmark-36.png") no-repeat;
+    -webkit-mask-size: calc(var(--kb-u) * 1524) 100%;
+    mask-size: calc(var(--kb-u) * 1524) 100%;
+    -webkit-mask-position: calc(var(--kb-u) * var(--x) * -1) 0;
+    mask-position: calc(var(--kb-u) * var(--x) * -1) 0;
+}
+/* the ! stays gold */
+.kb-toggle-logo > span:last-child {
+    --kb-rest: #f5c542;
+    --kb-peak: #fff1bf;
+}
 
 .bp-imggen-globally-disabled {
     opacity: 0.45;
@@ -2838,7 +2983,7 @@ header:not(.header-expanded) .header-nav-btn-icon {
   font-weight: 700;
 }
 
-/* EvoErgo column - muted */
+/* TrueErgo column - muted */
 .evo-positive {
   color: #6ea86e;
   font-weight: 600;
@@ -3929,23 +4074,96 @@ body[data-mobile="true"] .gun-card.mid-build {
     width: 100%;
     object-fit: contain;
 }
-/* Queue overlay - shown on gun images while waiting in server generation queue */
 .bp-gun-img-wrap {
     position: relative;
     display: inline-block;
 }
-.bp-queue-overlay {
+/* Kitbash! is drawing a build we have no image of yet (build-preview.js
+   _bpSetAwaiting): keep the gun art blank instead of flashing the tarkov.dev image. */
+body.bp-awaiting .ag-gun-cell img,
+body.bp-awaiting .bp-gun-img-wrap .att-table-gun-img,
+body.bp-awaiting #gun-display-image {
+    visibility: hidden;
+}
+/* Kitbash! working animation, centered over the gun image while a render runs:
+   the Kitbash! wordmark (_bpWorkingLogoHtml in build-preview.js) with each
+   letter, the gun K included, jumping in turn and flashing gold at the top. The
+   main build images show it under body.bp-working; the tab tooltip and optimizer
+   result toggle .kb-working on their image wrapper. --kb-h is the logo height.
+   Each size gets a sprite pre-shrunk (Lanczos) to twice that height: the browser
+   scales masks with plain bilinear filtering, which turns jagged well past 2x,
+   so it never has to shrink one by more than that. */
+.ag-gun-cell                       { --kb-h: 22px; --kb-sprite: url("../assets/images/kitbash-wordmark-44.png"); }
+.att-table-header .bp-gun-img-wrap { --kb-h: 22px; --kb-sprite: url("../assets/images/kitbash-wordmark-44.png"); }
+.bp-display-wrap                   { --kb-h: 52px; --kb-sprite: url("../assets/images/kitbash-wordmark-104.png"); }
+.tab-preview-img-wrap,
+#optimizer-result-gun-img-wrap     { --kb-h: 44px; --kb-sprite: url("../assets/images/kitbash-wordmark-88.png"); }
+.kb-working-logo {
+    --kb-delay: 0.5s;
+    /* one pixel of the 1524x600 master at this size */
+    --kb-u: calc(var(--kb-h, 44px) / 600);
+    display: none;
     position: absolute;
     top: 50%;
     left: 50%;
+    height: var(--kb-h, 44px);
     transform: translate(-50%, -50%);
-    width: 32px;
-    height: 32px;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.75));
+    /* hoverable for its "working hard" tooltip, even inside the grid gun cell,
+       which turns pointer events off for itself */
+    pointer-events: auto;
     z-index: 1;
+    /* Stay invisible for the first half second, so a quick render finishes
+       before the logo ever shows instead of flickering it on every edit.
+       Showing it (display: none -> flex) restarts the wait each time. */
+    animation: kb-logo-appear 0.15s ease-out var(--kb-delay) both;
 }
-.ag-gun-cell .bp-queue-overlay {
-    width: 20px;
-    height: 20px;
+body.bp-working .ag-gun-cell .kb-working-logo,
+body.bp-working .att-table-header .bp-gun-img-wrap .kb-working-logo,
+body.bp-working .bp-display-wrap .kb-working-logo,
+.kb-working > .kb-working-logo {
+    display: flex;
+}
+/* The placeholder image carries a 16px bottom margin inside its wrapper, so
+   center on the image itself rather than the whole box. */
+.bp-display-wrap .kb-working-logo {
+    top: calc(50% - 8px);
+}
+/* The tab preview follows the cursor, so its logo is never hovered on purpose. */
+.tab-preview-img-wrap .kb-working-logo {
+    pointer-events: none;
+}
+.kb-working-logo > span {
+    --kb-rest: #eeeeea;
+    --kb-peak: #f5c542;
+    flex: none;
+    width: calc(var(--kb-u) * var(--w));
+    height: 100%;
+    background-color: var(--kb-rest);
+    -webkit-mask: var(--kb-sprite, url("../assets/images/kitbash-wordmark-88.png")) no-repeat;
+    mask: var(--kb-sprite, url("../assets/images/kitbash-wordmark-88.png")) no-repeat;
+    -webkit-mask-size: calc(var(--kb-u) * 1524) 100%;
+    mask-size: calc(var(--kb-u) * 1524) 100%;
+    -webkit-mask-position: calc(var(--kb-u) * var(--x) * -1) 0;
+    mask-position: calc(var(--kb-u) * var(--x) * -1) 0;
+    animation: kb-letter-jump 1.3s ease-in-out infinite;
+    animation-delay: calc(var(--kb-delay) + var(--i) * 0.07s);
+}
+/* the ! stays gold, as in the gold wordmark */
+.kb-working-logo > span:last-child {
+    --kb-rest: #f5c542;
+    --kb-peak: #fff1bf;
+}
+/* visibility too, so the logo cannot be hovered while it is still waiting */
+@keyframes kb-logo-appear {
+    from { opacity: 0; visibility: hidden; }
+    to   { opacity: 1; visibility: visible; }
+}
+@keyframes kb-letter-jump {
+    0%, 26%, 100% { transform: translateY(0);                           background-color: var(--kb-rest); }
+    10%           { transform: translateY(calc(var(--kb-h) * -0.16));   background-color: var(--kb-peak); }
+    20%           { transform: translateY(0);                           background-color: var(--kb-rest); }
+    23%           { transform: translateY(calc(var(--kb-h) * -0.025)); }
 }
 .ag-gun-label {
     max-width: none;
@@ -4646,39 +4864,6 @@ body[data-mobile="true"] .gun-card.mid-build {
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
-/* Open-a-gun attention cue - reuses the rail's own mouse-leave collapse, rather than
-   a bespoke pulse animation. EFTForge.optimizer.pulse() (optimizer.js) briefly adds
-   .optimizer-edge-tab-pulse-snap, which forces the rail straight into its expanded
-   (hover) end-state with transitions disabled - an instant, unanimated jump - then
-   immediately removes the class. That removal is a normal style change back to rest,
-   so it's picked up by the base rule's own transition (the collapse curve above,
-   width 0.32s cubic-bezier(0.4,0,0.2,1) etc.) exactly as if the mouse had left after
-   a real hover. Net effect: only the collapse motion ever plays, no expand phase. */
-.optimizer-edge-tab.optimizer-edge-tab-pulse-snap,
-.optimizer-edge-tab.optimizer-edge-tab-pulse-snap .optimizer-edge-tab-glow-rest,
-.optimizer-edge-tab.optimizer-edge-tab-pulse-snap .optimizer-edge-tab-glow-hover,
-.optimizer-edge-tab.optimizer-edge-tab-pulse-snap .optimizer-edge-tab-content {
-    transition: none !important;
-}
-
-.optimizer-edge-tab.optimizer-edge-tab-pulse-snap {
-    width: 158px;
-    backdrop-filter: blur(2px);
-}
-
-.optimizer-edge-tab.optimizer-edge-tab-pulse-snap .optimizer-edge-tab-glow-rest {
-    opacity: 0;
-}
-
-.optimizer-edge-tab.optimizer-edge-tab-pulse-snap .optimizer-edge-tab-glow-hover {
-    opacity: 1;
-}
-
-.optimizer-edge-tab.optimizer-edge-tab-pulse-snap .optimizer-edge-tab-content {
-    opacity: 1;
-    transform: translateX(0);
-}
-
 .price-fetch-placeholder {
     display: flex;
     align-items: center;
@@ -4703,6 +4888,15 @@ body[data-mobile="true"] .gun-card.mid-build {
 
 /* Gun image + name shown in the placeholder while modding.
    Shared by the static markup and build-manager's rebuilt placeholder. */
+/* Positioned box around the placeholder gun image for the Kitbash! working animation. */
+.bp-display-wrap {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 100%;
+}
+
 .gun-display-image {
     max-width: 100%;
     max-height: 180px;
@@ -5100,79 +5294,6 @@ body[data-mobile="true"] .gun-card.mid-build {
 .modal-section strong {
   color: #eee;
   font-weight: 700;
-}
-
-/* =========================
-   CUSTOM CHECKBOX
-   Same track colors as .compare-toggle / .bp-imggen-toggle.active (gold
-   accent), tick icon reused from the attachment/build rating like buttons.
-========================= */
-
-.imggen-check {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  cursor: pointer;
-  margin: 0 0 12px 0;
-  user-select: none;
-}
-
-.imggen-check-box-wrap {
-  position: relative;
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  margin-top: 1px;
-}
-
-.imggen-check-input {
-  position: absolute;
-  inset: 0;
-  margin: 0;
-  opacity: 0;
-  cursor: pointer;
-  z-index: 1;
-}
-
-.imggen-check-box {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #1e1e1e;
-  border: 1px solid #3a3a3a;
-  border-radius: 4px;
-  transition: background 0.2s, border-color 0.2s;
-}
-
-.imggen-check:hover .imggen-check-box {
-  border-color: #555;
-}
-
-.imggen-check-tick {
-  width: 14px;
-  height: 14px;
-  object-fit: contain;
-  opacity: 0;
-  transform: scale(0.6);
-  transition: opacity 0.15s, transform 0.15s;
-}
-
-.imggen-check-input:checked + .imggen-check-box {
-  background: #1e1800;
-  border-color: #f5c542;
-}
-
-.imggen-check-input:checked + .imggen-check-box .imggen-check-tick {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.imggen-check-label {
-  color: #ccc;
-  font-size: 13px;
-  line-height: 1.5;
 }
 
 .modal-row {
@@ -5774,6 +5895,29 @@ button.build-tag-chip.active {
     user-select: none;
 }
 .cb-info-icon:hover { border-color: #999; color: #bbb; }
+
+/* About modal: desktop installer download links (web only) */
+.about-desktop-dl {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: -8px;
+    user-select: none;
+}
+.about-desktop-dl-label {
+    font-size: 13px;
+    color: #888;
+    letter-spacing: 0.5px;
+}
+.about-desktop-dl-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #888;
+    text-decoration: none;
+    transition: color 0.15s;
+}
+.about-desktop-dl-link:hover { color: #f5c542; }
 
 .modal-divider {
     border: none;
@@ -6911,6 +7055,19 @@ button.build-tag-chip.active {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .tracker-search::placeholder { color: #444; }
+.tracker-period-wrap {
+  position: relative;
+  width: 200px;
+  flex-shrink: 0;
+}
+#tracker-period-select {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+.tracker-period-wrap .custom-select-wrapper { width: 100%; }
 .tracker-type-filter {
   display: flex;
   gap: 4px;
@@ -7113,6 +7270,7 @@ button.build-tag-chip.active {
   }
   .tracker-controls { padding: 6px 10px; flex-wrap: wrap; }
   .tracker-type-filter { width: 100%; }
+  .tracker-period-wrap { width: 100%; }
   .tracker-filter-btn { flex: 1; }
   .tracker-col { min-width: 160px; }
 }
@@ -7143,8 +7301,12 @@ button.build-tag-chip.active {
   transform: translateX(100%);
   opacity: 0;
   transition: transform 0.28s cubic-bezier(0.4,0,0.2,1), opacity 0.2s ease;
-  overflow-y: auto;
-  overflow-x: hidden;
+  /* Both-axis scroller: the table is wider than the panel once every ballistics
+     column is shown, so it needs to scroll horizontally too. The column header
+     stays pinned vertically (sticky top) while scrolling with its columns
+     horizontally, and the panel header is pinned to the top-left (sticky left)
+     so the title and close button never scroll off-screen. */
+  overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: #3a3a3a #1a1a1a;
   --ammo-hdr-h: 46px;
@@ -7164,6 +7326,7 @@ button.build-tag-chip.active {
   flex-shrink: 0;
   position: sticky;
   top: 0;
+  left: 0;
   height: var(--ammo-hdr-h, 46px);
   box-sizing: border-box;
   background: #1a1a1a;
@@ -7580,7 +7743,7 @@ button.build-tag-chip.active {
   font-variant-numeric: tabular-nums;
 }
 
-/* Control-label tier: every per-option label (Use EvoErgo, Budget, Prevent
+/* Control-label tier: every per-option label (Use TrueErgo, Budget, Prevent
    Overswing, Consider Flea Market, constraint names...) shares one size and
    weight so the rows read as a single, even rank below the section header. */
 #optimizer-tab-content .optimizer-toggle-row > .stat-label {
@@ -7700,8 +7863,10 @@ button.build-tag-chip.active {
   overflow-y: auto;
   white-space: normal;
 }
-.optimizer-filter-preset-tooltip .optimizer-filter-preset-locked { color: #4CAF50; border-color: #4CAF50; }
-.optimizer-filter-preset-tooltip .optimizer-filter-preset-banned { color: #e74c3c; border-color: #e74c3c; }
+.optimizer-filter-preset-tooltip .optimizer-filter-preset-locked,
+.optimizer-filter-tags .optimizer-filter-preset-locked { color: #4CAF50; border-color: #4CAF50; }
+.optimizer-filter-preset-tooltip .optimizer-filter-preset-banned,
+.optimizer-filter-tags .optimizer-filter-preset-banned { color: #e74c3c; border-color: #e74c3c; }
 .optimizer-filter-preset-status {
   position: absolute;
   bottom: 1px;
@@ -8009,21 +8174,16 @@ button.build-tag-chip.active {
 .optimizer-filter-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 1px;
 }
 
 .optimizer-filter-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 3px;
-  font-size: 11px;
+  appearance: none;
+  background: #171717;
   cursor: pointer;
-  border: 1px solid transparent;
 }
-.optimizer-filter-tag-include { background: rgba(76,175,80,0.12); color: #4CAF50; border-color: rgba(76,175,80,0.35); }
-.optimizer-filter-tag-exclude { background: rgba(231,76,60,0.12); color: #e74c3c; border-color: rgba(231,76,60,0.35); }
+.optimizer-filter-tag:hover { background: #252525; }
+.optimizer-filter-tag:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 
 /* --- Mod-filter category view (icon tiles grouped by Handbook category) --- */
 
@@ -8215,9 +8375,14 @@ button.build-tag-chip.active {
   contain-intrinsic-size: 54px 54px;
 }
 
-.mf-tile-icon-wrap {
+.mf-tile-icon-wrap,
+.mf-tile-icon-wrap.optimizer-filter-tag {
   width: 52px;
   height: 52px;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: content-box;
+  padding: 0;
   border: 1px solid transparent;
   display: flex;
   align-items: center;
@@ -8226,6 +8391,8 @@ button.build-tag-chip.active {
 }
 .mf-tile.mf-tile-included .mf-tile-icon-wrap { border-color: #4CAF50; }
 .mf-tile.mf-tile-excluded .mf-tile-icon-wrap { border-color: #e74c3c; }
+.mf-tile-icon-wrap.optimizer-filter-tag.optimizer-filter-preset-locked { border-color: #4CAF50; }
+.mf-tile-icon-wrap.optimizer-filter-tag.optimizer-filter-preset-banned { border-color: #e74c3c; }
 
 .mf-tile-icon-wrap .attachment-icon {
   width: 100%;
@@ -8234,6 +8401,9 @@ button.build-tag-chip.active {
 }
 
 .mf-tile-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   position: absolute;
   bottom: 1px;
   width: 16px;
@@ -8248,6 +8418,7 @@ button.build-tag-chip.active {
   padding: 0;
 }
 .mf-tile-require { left: 1px; }
+.mf-tile-btn svg { flex-shrink: 0; }
 .mf-tile-ban { right: 1px; }
 .mf-tile-require:hover, .mf-tile-require.active { border-color: #4CAF50; color: #4CAF50; background: rgba(76,175,80,0.15); }
 .mf-tile-ban:hover, .mf-tile-ban.active { border-color: #e74c3c; color: #e74c3c; background: rgba(231,76,60,0.15); }
@@ -8328,6 +8499,7 @@ button.build-tag-chip.active {
 /* Both panes fill the two-pane's full height and scroll their own contents
    in their own box, so dragging one side's scrollbar never moves the other. */
 .optimizer-config-pane {
+  position: relative;
   flex: 0 0 380px;
   min-width: 0;
   min-height: 0;
@@ -8342,6 +8514,27 @@ button.build-tag-chip.active {
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: #3a3a3a #1a1a1a;
+}
+/* While a solve is running, _renderResult() sets [inert] on this pane to block
+   input and appends .optimizer-config-pane-overlay as its last child. inert
+   alone gives no visual signal, so this pins a dark scrim + spinner + label
+   over the pane - anchored to the pane's own box (not the page) via the
+   pane's position:relative, so it stays put over the visible area as content
+   scrolls underneath rather than scrolling away with it. */
+.optimizer-config-pane-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(9, 9, 9, 0.67);
+  cursor: not-allowed;
+  color: #f5c542;
+  font-size: 13px;
+  font-weight: 400;
 }
 /* Being a flex column itself, .optimizer-config-pane would otherwise shrink
    its sections (default flex-shrink:1) to fit its bounded height instead of
@@ -8896,13 +9089,13 @@ body[data-mobile="true"] .optimizer-explore-merged-body {
 .ammo-search:focus { border-color: #f5c542; }
 
 /* ---- Main table ---- */
-/* No overflow-x here: the drawer is wide enough to avoid horizontal scroll,
-   and keeping overflow-x on this container would block position:sticky on th
-   (CSS forces overflow-y:auto too, making this a scroll ancestor). */
-.ammo-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+/* width:auto + min-width:100% (not width:100%) lets the table grow past the
+   panel's own width once every ballistics column is shown, instead of being
+   squeezed to fit - #ammo-overlay above is what actually scrolls it. */
+.ammo-table { width: auto; min-width: 100%; border-collapse: collapse; font-size: 11px; }
 .ammo-th {
   position: sticky; top: var(--ammo-hdr-h, 0); background: #1e1e1e; z-index: 2;
-  padding: 6px 8px; text-align: center; font-weight: 700; font-size: 11px;
+  padding: 5px 6px; text-align: center; font-weight: 700; font-size: 10px;
   letter-spacing: 0.5px; color: #bbb; border-bottom: 2px solid #333;
   white-space: nowrap; text-transform: uppercase; user-select: none;
 }
@@ -8920,16 +9113,16 @@ body[data-mobile="true"] .optimizer-explore-merged-body {
   padding: 6px 8px;
   border-top: 1px solid #3a3a3a;
 }
-.ammo-data-row { height: 56px; }
+.ammo-data-row { height: 38px; }
 .ammo-data-row:hover { background: #252525; }
-.ammo-td { padding: 4px 6px; text-align: center; border-bottom: 1px solid #252525; color: #ddd; }
+.ammo-td { padding: 3px 5px; text-align: center; border-bottom: 1px solid #252525; color: #ddd; }
 .ammo-td.ammo-col-name { text-align: left; white-space: nowrap; color: #eee; }
-.ammo-th.ammo-col-icon { width: 54px; padding: 0; }
-.ammo-td.ammo-col-icon { padding: 3px 3px; width: 54px; }
+.ammo-th.ammo-col-icon { width: 38px; padding: 0; }
+.ammo-td.ammo-col-icon { padding: 2px 2px; width: 38px; }
 .ammo-icon-wrapper {
     position: relative;
-    width: 48px;
-    height: 48px;
+    width: 32px;
+    height: 32px;
     display: inline-block;
     flex-shrink: 0;
 }
@@ -8944,13 +9137,13 @@ body[data-mobile="true"] .optimizer-explore-merged-body {
     top: 1px;
     right: 2px;
     left: auto;
-    max-width: 46px;
+    max-width: 30px;
     text-align: right;
     transform: none;
     transform-origin: top right;
     font-family: "Bender", sans-serif;
     font-weight: 700;
-    font-size: 10px;
+    font-size: 8px;
     letter-spacing: 0.2px;
     color: #d6d6d6;
     text-shadow:
@@ -8960,12 +9153,12 @@ body[data-mobile="true"] .optimizer-explore-merged-body {
          1px  1px 0 #000,
          0    0   2px #000;
 }
-.ammo-col-num { min-width: 32px; }
-.ammo-col-delta { min-width: 38px; }
-.ammo-col-class { min-width: 24px; font-weight: 700; }
+.ammo-col-num { min-width: 26px; }
+.ammo-col-delta { min-width: 32px; }
+.ammo-col-class { min-width: 22px; font-weight: 700; }
 /* Effectiveness columns carry text labels - keep them tight so all 6 fit */
-.ammo-th.ammo-col-class { padding: 6px 3px; }
-.ammo-td.ammo-col-class { padding: 4px 3px; }
+.ammo-th.ammo-col-class { padding: 5px 3px; }
+.ammo-td.ammo-col-class { padding: 3px 3px; }
 
 /* ---- Delta colors ---- */
 .delta-pos { color: #6dcf6d !important; }
@@ -9000,20 +9193,6 @@ body[data-mobile="true"] .optimizer-explore-merged-body {
   #ammo-overlay { width: 100%; min-width: unset; }
   .ammo-cal-chip { font-size: 10px; padding: 3px 6px; }
   .ammo-cal-grid { grid-template-columns: repeat(2, 1fr); }
-}
-
-/* Mobile: the table is wider than the viewport. Let the whole drawer scroll
-   both ways - vertical swipe to read the list, horizontal swipe to reach the far
-   columns - by making the overlay itself the both-axis scroller (like the
-   attachment table's panel). The column header stays pinned vertically (sticky
-   top) while scrolling with its columns horizontally. The panel header is pinned
-   to the top-left so the title and close button never scroll off-screen.
-   Desktop keeps overflow-x hidden, so none of this affects it. */
-body[data-mobile="true"] #ammo-overlay { overflow: auto; }
-body[data-mobile="true"] .ammo-panel-header { left: 0; }
-body[data-mobile="true"] .ammo-table {
-  width: auto;
-  min-width: 100%;
 }
 
 /* =============================================
@@ -9700,3 +9879,870 @@ body[data-mobile="true"].mobile-publish-mode #left-build-area {
   border-color: #2e6b2e;
   color: #4caf50;
 }
+
+/* =========================
+   3D BUILDER (builder-3d.js, builder-3d-panels.js)
+   The Kitbash! 3D view fills the build area; our panels float over it.
+========================= */
+
+body.builder-3d #main-container {
+  position: relative;
+  overflow: hidden;
+  --b3d-edge: 30px;                      /* the optimizer edge tab */
+  --b3d-picker-w: min(1200px, calc(100vw - 80px));
+}
+
+#b3d-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+#b3d-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+
+#b3d-frame.b3d-frame-ready { opacity: 1; }
+
+/* While the viewer starts or draws a build: a dark veil with the jumping Kitbash!
+   wordmark (build-preview.js), over the view and its panels. */
+#b3d-loading {
+  --kb-h: 52px;
+  --kb-sprite: url("../assets/images/kitbash-wordmark-104.png");
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: none;
+  background: rgba(8, 8, 8, 0.72);
+}
+#b3d-loading.on { display: block; }
+#b3d-loading.on.delayed { animation: kb-logo-appear 0.15s ease-out 0.5s both; }
+#b3d-loading .kb-working-logo { display: flex; pointer-events: none; } /* no tooltip here */
+#b3d-loading:not(.delayed) .kb-working-logo { --kb-delay: 0s; }
+
+#b3d-hud {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  font-family: "Bender", Arial, sans-serif;
+}
+
+/* First-use intro (builder-3d.js): a dark veil over the whole 3D view and every panel
+   floating on it. The viewer loads behind it, so the loading veil stays out of sight. */
+body.b3d-intro #b3d-loading { visibility: hidden; }
+
+#b3d-intro {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(8, 8, 8, 0.9);
+  font-family: "Bender", Arial, sans-serif;
+  animation: modalFadeIn 0.25s ease;
+  user-select: none;
+  /* The jumping wordmark while the tour waits for the gun (builder-3d.js). */
+  --kb-h: 52px;
+  --kb-sprite: url("../assets/images/kitbash-wordmark-104.png");
+}
+#b3d-intro .kb-working-logo { pointer-events: none; }
+
+/* The warning screen's veil is an SVG with a hole over the 2D/3D switch (builder-3d.js). */
+#b3d-intro.b3d-intro-holed { background: none; }
+/* It takes over from the flat veil in place, so no fade (the veil would dip). */
+#b3d-intro.b3d-intro-holed .b3d-intro-veil { animation: none; }
+
+.b3d-intro-body {
+  position: relative; /* above the veil's SVG */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 820px;
+  text-align: center;
+  animation: b3d-intro-in 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes b3d-intro-in {
+  from { transform: translateY(12px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.b3d-intro-marks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 28px 40px;
+  margin-bottom: 36px;
+}
+
+.b3d-intro-marks img {
+  display: block;
+  width: auto;
+  height: clamp(72px, 13vh, 132px);
+  -webkit-user-drag: none;
+}
+
+.b3d-intro-divider {
+  align-self: stretch;
+  width: 1px;
+  background: #333;
+}
+
+.b3d-intro-warn {
+  width: clamp(140px, 26vh, 240px);
+  height: clamp(140px, 26vh, 240px);
+  margin-bottom: 24px;
+  color: #e74c3c;
+}
+.b3d-intro-warn svg { width: 100%; height: 100%; display: block; }
+
+.b3d-intro-title {
+  margin: 0 0 12px 0;
+  color: #f5c542;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.b3d-intro-warning .b3d-intro-title { color: #e74c3c; }
+
+.b3d-intro-text {
+  margin: 0 0 32px 0;
+  max-width: 620px;
+  color: #ccc;
+  font-size: 16px;
+  line-height: 1.6;
+}
+.b3d-intro-text strong { color: #eee; font-weight: 700; }
+.b3d-intro-text:has(+ .b3d-intro-note) { margin-bottom: 14px; }
+.b3d-intro-note { color: #999; font-size: 15px; }
+
+.b3d-intro-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.b3d-intro-btns { display: flex; align-items: center; gap: 12px; }
+
+.b3d-intro-skip {
+  order: -1;
+  margin-right: 6px;
+  padding: 4px 2px;
+  background: none;
+  border: 0;
+  color: #777;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.b3d-intro-skip:hover { color: #ccc; }
+
+.b3d-intro-btn {
+  min-width: 200px;
+  padding: 10px 28px;
+  font-size: 15px;
+}
+
+.b3d-intro-dots { display: flex; gap: 8px; }
+.b3d-intro-dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #333;
+  transition: background 0.2s;
+}
+.b3d-intro-dots i.on { background: #f5c542; }
+.b3d-intro-warning .b3d-intro-dots i.on { background: #e74c3c; }
+
+/* The tour: the view shows through the veil, with holes over what each step points at and
+   a card beside them. */
+#b3d-intro.b3d-intro-tour {
+  display: block;
+  padding: 0;
+  background: none;
+  animation: none;
+}
+
+#b3d-intro.b3d-intro-live { pointer-events: none; }
+#b3d-intro.b3d-intro-live .b3d-intro-card { pointer-events: auto; }
+
+.b3d-intro-veil {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  animation: modalFadeIn 0.25s ease;
+}
+/* The outline: fades in as the lock-on ring lands, then breathes in and out while its
+   gradient (builder-3d.js) sweeps round it. */
+.b3d-intro-ring {
+  fill: none;
+  stroke-width: 2;
+  opacity: 0;
+  animation:
+    b3d-intro-ring-in 0.5s ease-out 0.35s forwards,
+    b3d-intro-ring-breathe 2.4s ease-in-out 0.85s infinite;
+}
+@keyframes b3d-intro-ring-in {
+  to { opacity: 1; }
+}
+@keyframes b3d-intro-ring-breathe {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+/* The optimizer's lock-on (optimizer-explore-point-lockon) for a box: the same curve and
+   fade, closing in from a fixed reach outside the hole (--sx, --sy) rather than 5x its
+   size, so a tall panel's ring still starts on screen. */
+.b3d-intro-lockon {
+  fill: none;
+  stroke: #f5c542;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: b3d-intro-lockon 2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes b3d-intro-lockon {
+  0%   { transform: scale(var(--sx), var(--sy)); opacity: 0.9; }
+  100% { transform: scale(1); opacity: 0; }
+}
+
+.b3d-intro-card {
+  position: absolute;
+  width: 390px;
+  max-width: calc(100% - 24px);
+  padding: 16px 18px 14px;
+  background: rgba(20, 20, 20, 0.94);
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  box-shadow: 0 6px 12px -2px rgba(0, 0, 0, 0.7);
+  color: #ccc;
+  animation: b3d-intro-in 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.b3d-intro-card-title {
+  margin-bottom: 8px;
+  padding-left: 8px;
+  border-left: 3px solid #f5c542;
+  color: #f5c542;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.b3d-intro-card-text,
+.b3d-intro-card-note {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.b3d-intro-card-note { color: #999; }
+.b3d-intro-card strong { color: #eee; font-weight: 700; }
+
+.b3d-intro-keys {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  align-items: center;
+  margin: 0 0 12px 0;
+  font-size: 13px;
+}
+.b3d-intro-key {
+  justify-self: start;
+  padding: 2px 8px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #eee;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.b3d-intro-action { color: #ccc; }
+
+.b3d-intro-card .b3d-intro-foot {
+  flex-direction: row;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+.b3d-intro-card .b3d-intro-btns { gap: 8px; }
+.b3d-intro-card .b3d-intro-btn {
+  min-width: 0;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.b3d-intro-card .b3d-intro-dots { gap: 6px; }
+.b3d-intro-card .b3d-intro-dots i { width: 6px; height: 6px; }
+
+#b3d-hud.b3d-waiting > * { display: none !important; }
+#b3d-hud [hidden] { display: none !important; }
+
+body.builder-3d .panel-resizer,
+body.builder-3d #slots,
+body.builder-3d #attachment-placeholder,
+body.builder-3d .mobile-drag-handle,
+body.builder-3d #mobile-drawer-back {
+  display: none !important;
+}
+
+/* The left panel becomes a see-through layer holding the floating pieces. */
+body.builder-3d .left-panel {
+  position: absolute;
+  inset: 0;
+  width: auto !important;
+  padding: 0;
+  z-index: 5;
+  pointer-events: none;
+  overflow: visible;
+  background: none;
+}
+
+body.builder-3d #left-build-area {
+  position: absolute;
+  inset: 0;
+  display: block !important;
+}
+
+/* Top left: build controls, the build/price and 2D/3D switches, settings. */
+#b3d-topleft { display: none; }
+
+body.builder-3d #b3d-topleft {
+  position: absolute;
+  /* Where the 2D left panel's padding puts the same controls, so switching modes does not
+     move them; the width follows the 2D panel's (builder-3d.js). */
+  top: 20px;
+  left: 20px;
+  width: 620px;
+  max-width: calc(100% - 32px);
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+}
+
+body.builder-3d #b3d-topleft #build-controls,
+body.builder-3d #b3d-topleft #view-toggle {
+  margin-right: 0;
+}
+
+#b3d-ammo .mag-controls { margin-bottom: 8px; }
+
+#b3d-settings {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: -4px;
+}
+
+/* The compact picker switch, bottom right with the view buttons: styled as the full mag
+   toggle (.mag-controls .compare-toggle), gold track and knob, label unchanged. */
+#b3d-picker-toggle { white-space: nowrap; flex-shrink: 0; margin-right: 8px; }
+
+/* The sight picture keeps the view clear: no top left controls, no picker switch. The
+   cluster only turns invisible, since the stats dock's default spot hangs below it. */
+body.builder-3d.b3d-sight #b3d-topleft { visibility: hidden; }
+body.builder-3d.b3d-sight #b3d-picker-toggle { display: none; }
+#b3d-picker-toggle.active { color: #555; }
+#b3d-picker-toggle.active:hover { color: #888; }
+#b3d-picker-toggle.active .compare-toggle-track { background: #1e1800; border-color: #f5c542; }
+#b3d-picker-toggle.active .compare-toggle-knob { background: #f5c542; }
+
+#b3d-mode-toggle {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding-left: 10px;
+  border-left: 1px solid #333;
+}
+
+#b3d-mode-toggle .toggle-btn {
+  flex: 0 0 48px;
+}
+
+/* The current build panel, floating: drag by its grip, collapse to its side tab. */
+#b3d-stats-dock { display: none; }
+
+body.builder-3d #b3d-stats-dock {
+  position: absolute;
+  display: flex;
+  align-items: flex-start;
+  pointer-events: auto;
+  z-index: 2;
+  touch-action: none;
+}
+
+/* Dragged panels keep the default cursor; they only stop text selecting while moving. */
+body.builder-3d #b3d-stats-dock.moving,
+body.builder-3d #b3d-stats-dock.moving *,
+.b3d-panel.moving,
+.b3d-panel.moving * {
+  user-select: none;
+}
+
+#b3d-stats-dock .b3d-dock-body {
+  width: 540px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #444 transparent;
+}
+
+#b3d-stats-dock .b3d-dock-body #stats { padding-right: 0; }
+
+/* The price view keeps no scrollbar gutter of its own here: the panel body scrolls,
+   so the collapse tab sits flush against it as it does against the stats. */
+#b3d-stats-dock .b3d-dock-body #price-overview {
+  padding-right: 0;
+  overflow: visible;
+  scrollbar-gutter: auto;
+}
+
+/* The whole panel (stats, ammo picker, full mag toggle) runs smaller over the 3D
+   view. zoom, not transform, so it still lays out and hit-tests at its drawn size. */
+#b3d-stats-dock .b3d-dock-body { zoom: 0.9; }
+
+/* The build and price cards turn to frosted glass over the 3D view, like our other
+   panels there (.b3d-panel). */
+#b3d-stats-dock .b3d-dock-body .stats-section {
+  background: rgba(20, 20, 20, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-color: #2a2a2a;
+}
+
+/* The advanced stats popover hangs off that panel, so it turns to the same glass. */
+body.builder-3d .hidden-stats-popover {
+  background: rgba(20, 20, 20, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-color: #2a2a2a;
+  scrollbar-color: #444 transparent;
+}
+
+body.builder-3d .hidden-stats-popover::-webkit-scrollbar-track { background: transparent; }
+body.builder-3d .hidden-stats-popover::-webkit-scrollbar-thumb { border-color: transparent; background-clip: padding-box; }
+
+#b3d-stats-dock .b3d-dock-tab {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 62px;
+  margin-top: 8px;
+  padding: 0;
+  background: rgba(20, 20, 20, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid #2a2a2a;
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  color: #aaa;
+  font-size: 11px;
+  cursor: pointer;
+  touch-action: none;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+#b3d-stats-dock .b3d-dock-handle { display: none; }
+
+#b3d-stats-dock.collapsed .b3d-dock-body { display: none; }
+
+/* Collapsed: a square handle with the gear, joined to the tab. */
+#b3d-stats-dock.collapsed .b3d-dock-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  margin-top: 8px;
+  background: rgba(20, 20, 20, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid #2a2a2a;
+  border-radius: 0;
+  color: #aaa;
+}
+
+#b3d-stats-dock.collapsed .b3d-dock-handle svg { width: 26px; height: 26px; }
+
+#b3d-stats-dock.collapsed .b3d-dock-tab {
+  height: 56px;
+  border-left: 1px solid #2a2a2a;
+  border-radius: 0 6px 6px 0;
+}
+
+/* The attachment table, docked on the right and see-through so the gun shows. */
+body.builder-3d .right-panel {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  right: calc(var(--b3d-edge) + 12px);
+  width: var(--b3d-picker-w);
+  z-index: 6;
+  padding: 16px 18px;
+  visibility: hidden;
+  pointer-events: none;
+  /* Frosted glass: a heavy blur with a colour lift behind a smoky tint, a hairline edge
+     and a soft light catching the top rim. */
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.015) 18%, rgba(255, 255, 255, 0) 40%),
+    rgba(22, 22, 24, 0.55);
+  backdrop-filter: blur(20px) saturate(170%) brightness(0.9);
+  -webkit-backdrop-filter: blur(20px) saturate(170%) brightness(0.9);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.025),
+    0 12px 32px -4px rgba(0, 0, 0, 0.6);
+}
+
+body.builder-3d.b3d-picker-open .right-panel {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+body.builder-3d.b3d-picker-open .optimizer-edge-tab,
+body.builder-3d.b3d-sight .optimizer-edge-tab { display: none; }
+
+/* The 3D viewer and everything floating over it select no text (builder-3d.js blocks the
+   browser's context menu over the same parts). Text fields still take a selection. */
+body.builder-3d #main-container,
+body.builder-3d .hidden-stats-popover,
+.b3d-frame-select {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* --- Panels over the view --- */
+
+/* Our dropdown list for a dropdown inside the viewer's frame (builder-3d.js): the wrapper
+   sits on the frame's trigger, letting presses through, and hangs the list under it. */
+.b3d-frame-select {
+  position: fixed;
+  z-index: 450;
+  pointer-events: none;
+}
+
+.b3d-frame-select .custom-select-list {
+  pointer-events: auto;
+  right: auto;
+  min-width: 100%;
+}
+
+/* Where a panel covers another, a faint line on top traces the buried one's edge
+   (builder-3d-overlaps.js). */
+.b3d-overlap {
+  position: absolute;
+  z-index: 50;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.b3d-overlap rect {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.16);
+  stroke-width: 1;
+}
+
+.b3d-panel {
+  position: absolute;
+  pointer-events: auto;
+  background: rgba(20, 20, 20, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  box-shadow: 0 6px 12px -2px rgba(0, 0, 0, 0.7);
+  color: #ccc;
+  font-size: 12px;
+  padding: 10px 12px;
+}
+
+.b3d-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.b3d-mini-title {
+  flex: 1;
+  color: #f5c542;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding-left: 8px;
+  border-left: 3px solid #f5c542;
+  text-transform: uppercase;
+}
+
+.b3d-btn,
+.b3d-chip {
+  background-color: #1a1a1a;
+  color: #ccc;
+  border: 1px solid #333;
+  border-radius: 4px;
+  font-family: "Bender", Arial, sans-serif;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.b3d-btn { font-size: 12px; padding: 6px 12px; }
+.b3d-chip { font-size: 11px; padding: 2px 8px; }
+
+.b3d-btn:hover,
+.b3d-chip:hover { background-color: #252525; color: #fff; border-color: #444; }
+
+.b3d-btn:active,
+.b3d-chip:active { transform: scale(0.96); transition: transform 0.08s ease; }
+
+.b3d-chip.active { background-color: #333; color: #f5c542; border-color: #444; }
+.b3d-chip:disabled { opacity: 0.4; cursor: default; transform: none; }
+
+.b3d-chip-row { display: flex; flex-wrap: wrap; gap: 4px; }
+
+#b3d-hud input[type="range"] { accent-color: #f5c542; cursor: pointer; }
+
+/* View buttons, bottom right (left of the table while it is open). */
+.b3d-viewbtns {
+  position: absolute;
+  right: calc(var(--b3d-edge) + 16px);
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+  transition: opacity 0.2s ease, visibility 0.2s;
+}
+
+/* Hidden UI (Hide UI in the sight picture): only the site's nav bar, the build tabs, the
+   footer and the viewer's own watermark stay. Hidden rather than removed, so nothing reflows or resizes
+   the view underneath. */
+body.builder-3d.b3d-ui-hidden #b3d-hud > :not(.b3d-unhide),
+body.builder-3d.b3d-ui-hidden #b3d-topleft,
+body.builder-3d.b3d-ui-hidden #b3d-stats-dock,
+body.builder-3d.b3d-ui-hidden .optimizer-edge-tab,
+body.builder-3d.b3d-ui-hidden .hidden-stats-popover {
+  visibility: hidden !important;
+}
+
+/* The show button's corner: it catches the pointer only while the UI is hidden. */
+.b3d-unhide {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 280px;
+  height: 120px;
+  display: none;
+  pointer-events: auto;
+}
+body.builder-3d.b3d-ui-hidden .b3d-unhide { display: block; }
+.b3d-unhide-btn {
+  position: absolute;
+  right: calc(var(--b3d-edge) + 16px);
+  bottom: 16px;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.b3d-unhide.shown .b3d-unhide-btn { opacity: 1; transition-duration: 0.15s; }
+
+/* The attachment table covers their corner while it is open: fade them out rather than
+   push them aside, and give them back once it closes. */
+body.b3d-picker-open .b3d-viewbtns {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Sight bar, top centre. */
+.b3d-sightbar {
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.b3d-sight-label { color: #f5c542; font-weight: 700; min-width: 80px; text-align: center; }
+.b3d-sight-count,
+.b3d-sight-fov { color: #888; font-size: 12px; }
+.b3d-sight-hint { color: #666; font-size: 11px; }
+.b3d-zoom { display: flex; align-items: center; gap: 6px; }
+.b3d-zoom-modes { display: flex; gap: 4px; }
+.b3d-zoom-modes .b3d-chip { display: flex; align-items: center; gap: 5px; }
+.b3d-reticle { width: 18px; height: 18px; background: #0b0b0b; border-radius: 2px; }
+.b3d-zoom-slider { width: 160px; }
+.b3d-zoom-mag { color: #eee; font-weight: 700; min-width: 36px; }
+
+.b3d-fovnote {
+  position: absolute;
+  top: 62px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 560px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #777;
+  text-shadow: 0 1px 2px #000;
+}
+
+/* ADS simulation, bottom left. */
+.b3d-adspanel {
+  left: 16px;
+  bottom: 16px;
+  width: 390px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  touch-action: none;
+}
+
+.b3d-ads-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.b3d-ads-state { font-weight: 700; font-size: 14px; color: #eee; letter-spacing: 1px; }
+.b3d-ads-state.aiming { color: #00c8b4; }
+.b3d-ads-keys { color: #666; font-size: 11px; text-align: right; }
+.b3d-ads-row { display: flex; align-items: center; gap: 6px; }
+.b3d-ads-name { font-size: 11px; color: #888; width: 88px; flex-shrink: 0; }
+.b3d-ads-bar { display: grid; grid-template-columns: 88px 1fr 44px auto auto; align-items: center; gap: 6px; }
+.b3d-ads-value { text-align: right; font-variant-numeric: tabular-nums; }
+.b3d-track { height: 6px; background: #1e1e1e; border: 1px solid #333; border-radius: 3px; overflow: hidden; }
+.b3d-fill { height: 100%; width: 100%; background: #f5c542; transition: width 0.1s linear; }
+.b3d-fill.low { background: #e74c3c; }
+.b3d-ads-facts { color: #888; font-size: 11px; line-height: 1.5; }
+
+.b3d-skills {
+  display: grid;
+  grid-template-columns: 1fr 110px 38px;
+  gap: 4px 6px;
+  align-items: center;
+  border-top: 1px solid #2a2a2a;
+  padding-top: 6px;
+}
+
+.b3d-skills .b3d-mini-title { grid-column: 1 / -1; }
+.b3d-skills input { width: 100%; }
+.b3d-skill-level { text-align: right; font-variant-numeric: tabular-nums; color: #eee; }
+.b3d-skill-level.elite { color: #f5c542; }
+
+/* Range and aspect ratio, bottom right above the view buttons. */
+.b3d-rangepanel {
+  right: calc(var(--b3d-edge) + 16px);
+  bottom: 60px;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  touch-action: none;
+}
+
+.b3d-range-dist { font-weight: 700; font-size: 14px; color: #eee; font-variant-numeric: tabular-nums; }
+.b3d-range-slider { width: 100%; }
+.b3d-targets .b3d-chip { flex: 1; }
+
+/* Key colour row: the backdrop chip, flat swatches, then a custom picker. */
+.b3d-keyrow { align-items: stretch; }
+.b3d-keyrow[hidden] { display: none; }
+.b3d-key-swatch { width: 22px; padding: 0; }
+.b3d-key-swatch:hover { border-color: #888; }
+.b3d-key-swatch.active { border-color: #f5c542; }
+.b3d-key-custom {
+  width: 26px;
+  height: auto;
+  min-height: 20px;
+  padding: 0;
+  border: 1px solid #333;
+  border-radius: 4px;
+  background: #1a1a1a;
+  cursor: pointer;
+}
+.b3d-key-custom.active { border-color: #f5c542; }
+.b3d-display-head { border-top: 1px solid #2a2a2a; padding-top: 6px; }
+.b3d-monitor { font-size: 11px; color: #777; font-variant-numeric: tabular-nums; }
+.b3d-fps-value { font-size: 11px; color: #bbb; font-variant-numeric: tabular-nums; }
+.b3d-fps-slider { width: 100%; }
+.b3d-fps-slider.b3d-fps-off { opacity: 0.45; }
+
+/* Tactical devices: bottom left over the modding view, top right in the sight picture. */
+.b3d-tactical {
+  left: 16px;
+  bottom: 16px;
+  width: 310px;
+  max-height: 45%;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  touch-action: none;
+}
+
+.b3d-tactical.sight { left: auto; bottom: auto; right: calc(var(--b3d-edge) + 16px); top: 96px; }
+.b3d-tactical .b3d-panel-head { padding: 8px 10px; }
+.b3d-tactical:not(.collapsed) .b3d-panel-head { border-bottom: 1px solid #2a2a2a; }
+.b3d-tac-count { font-size: 11px; color: #777; font-variant-numeric: tabular-nums; }
+.b3d-tac-count.lit { color: #00c8b4; }
+.b3d-tac-list { overflow-y: auto; scrollbar-width: thin; scrollbar-color: #444 transparent; }
+.b3d-tac-device { padding: 6px 10px; border-left: 2px solid transparent; }
+.b3d-tac-device + .b3d-tac-device { border-top: 1px solid #1f1f1f; }
+.b3d-tac-device.powered { border-left-color: #00c8b4; }
+.b3d-tac-device:hover { background: rgba(255, 255, 255, 0.05); border-left-color: #f5c542; }
+.b3d-tac-top { display: flex; align-items: center; gap: 6px; }
+.b3d-tac-name { flex: 1; min-width: 0; font-weight: 700; color: #eee; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.b3d-tac-modes { display: flex; gap: 2px; }
+.b3d-tac-modes .b3d-chip { width: 22px; padding: 2px 0; text-align: center; }
+.b3d-tac-modes .b3d-chip.ir { color: #b39ddb; }
+.b3d-tac-modes .b3d-chip.lit { border-color: #00c8b4; }
+.b3d-power { min-width: 42px; }
+.b3d-power.active { color: #00c8b4; }
+.b3d-tac-mode { font-size: 11px; color: #777; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.b3d-tac-device.powered .b3d-tac-mode { color: #bbb; }
+.b3d-tac-note { padding: 6px 10px; border-top: 1px solid #1f1f1f; font-size: 11px; line-height: 1.35; color: #f5c542; }
+
+/* Muzzle smoke, sight picture only: the right column between the tactical devices and the
+   range panel (its bottom and height come from the panels script). */
+.b3d-smoke {
+  right: calc(var(--b3d-edge) + 16px);
+  bottom: 60px;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #444 transparent;
+  touch-action: none;
+}
+
+.b3d-smoke-rpm { font-size: 11px; color: #777; font-variant-numeric: tabular-nums; }
+.b3d-smoke-fire .b3d-chip { flex: 1; padding: 4px 6px; }
+.b3d-smoke-show { align-items: center; }
+.b3d-smoke-tabs .b3d-chip { flex: 1; padding: 4px 6px; }
+.b3d-smoke-show .b3d-chip { flex: 1; padding: 4px 6px; }
+.b3d-smoke-show-label { font-size: 11px; color: #888; width: 56px; }
+.b3d-smoke-rows { border-top: 1px solid #2a2a2a; padding-top: 6px; }
+.b3d-smoke-row { display: flex; gap: 8px; padding: 2px 0; }
+.b3d-smoke-k { flex: 1; color: #888; }
+.b3d-smoke-v { color: #eee; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.b3d-smoke-sub { font-size: 11px; color: #777; padding: 0 0 2px 8px; font-variant-numeric: tabular-nums; }
+.b3d-smoke-maps-head { font-size: 11px; color: #bbb; padding-top: 6px; }
+.b3d-smoke-maps { display: flex; gap: 6px; padding-top: 4px; }
+.b3d-smoke-maps figure { margin: 0; }
+.b3d-smoke-map { display: block; border: 1px solid #2a2a2a; border-radius: 4px; }
+.b3d-smoke-maps figcaption { font-size: 10px; color: #777; padding-top: 2px; }
+.b3d-smoke-note { border-top: 1px solid #2a2a2a; padding-top: 6px; font-size: 10px; line-height: 1.35; color: #666; }

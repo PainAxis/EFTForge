@@ -349,6 +349,7 @@ function updateToggleUI() {
 function returnToGunSelection() {
 
     EFTForge.optimizer?.onBuildLeave();
+    EFTForge.builder3d?.onBuildLeave();
     EFTForge.tabs?.deactivateActiveTab();
 
     if (EFTForge.state.publishMode) {
@@ -548,7 +549,11 @@ function renderGunList(guns, forceStagger = false) {
         card.setAttribute("role", "button");
         card.setAttribute("aria-label", gun.name);
         card.onclick = gun.caliber === 'Caliber20x1mm'
-            ? () => _selectGunOrRestoreSnapshot(gun, card).then(() => EFTForge.news.showSecretPost())
+            // The 3D builder's first-use intro goes first: no secret post over it (the
+            // page is locked meanwhile), it waits for the next time the toy gun opens.
+            ? () => _selectGunOrRestoreSnapshot(gun, card).then(() => {
+                if (!EFTForge.builder3d?.introActive) EFTForge.news.showSecretPost();
+            })
             : () => _selectGunOrRestoreSnapshot(gun, card);
         card.addEventListener("keydown", (e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -583,7 +588,9 @@ function renderGunList(guns, forceStagger = false) {
 // rendering it here is pure waste - a full renderNode pass over the factory
 // build plus, via build-preview.js's renderFullTree hook, a discarded
 // scheduleBuildPreview() image generation for a build nobody will ever see.
-async function selectGun(gun, liElement, { skipTreeRender = false, suppressPulse = false } = {}) {
+// awaitBuildImage: same caller, installing a saved build - keep the gun images
+// hidden until Kitbash! draws it instead of flashing the factory image first.
+async function selectGun(gun, liElement, { skipTreeRender = false, awaitBuildImage = false } = {}) {
     // If clicking same gun, do nothing
     if (EFTForge.state.currentGun && EFTForge.state.currentGun.id === gun.id) {
         return;
@@ -614,11 +621,12 @@ async function selectGun(gun, liElement, { skipTreeRender = false, suppressPulse
         buildArea.classList.add("panel-enter");
         buildArea.addEventListener("animationend", () => buildArea.classList.remove("panel-enter"), { once: true });
         updateViewToggleLabels();
+        EFTForge.builder3d?.onGunOpen();
 
     // Reset right panel state
     document.getElementById("attachment-table-container").innerHTML = "";
     EFTForge.state.communityBuild = null;
-    resetBuildPreview();
+    resetBuildPreview({ awaitImage: awaitBuildImage });
 
     // clear publish confirm panel if it was showing
     if (EFTForge.state.publishMode) {
@@ -629,14 +637,6 @@ async function selectGun(gun, liElement, { skipTreeRender = false, suppressPulse
     const placeholder = document.getElementById("attachment-placeholder");
     if (placeholder) {
         placeholder.style.display = "flex";
-    }
-
-    // Pulse the optimizer edge-rail so opening a gun draws the eye to it - but not
-    // when this selectGun is just re-installing a build for an already-open tab
-    // (suppressPulse, set by tab-manager's _activateTab), otherwise switching
-    // between existing tabs would replay the pulse every time.
-    if (!suppressPulse) {
-        EFTForge.optimizer?.pulse?.();
     }
 
     EFTForge.state.lastParentNode = null;

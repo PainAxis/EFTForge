@@ -7,6 +7,51 @@ from optimizer.solver import OptimizeParams, optimize_weapon, prepare_optimize_w
 
 EXPLORE_TIME_LIMIT_SECONDS = 30
 
+
+def _diagnose_empty_explore(db, weapon_id, params, failures, deadline):
+    # Preserve proven pre-check failures before spending time on extra solves.
+    for failure in failures:
+        if failure.get("reason_details") or failure.get("reason_key") not in (None, "optimizer.infeasible"):
+            return {k: failure[k] for k in ("reason", "reason_details", "reason_key", "reason_params") if k in failure}
+
+    limits = {
+        name: None
+        for name in (
+            "max_price",
+            "min_ergonomics",
+            "max_ergonomics",
+            "max_recoil_v",
+            "max_recoil_sum",
+            "max_weight",
+            "min_mag_capacity",
+            "min_sighting_range",
+            "max_moa",
+        )
+        if getattr(params, name) is not None
+    }
+    if params.prevent_overswing:
+        limits["prevent_overswing"] = False
+    probes = [({name: value}, name) for name, value in limits.items()]
+    if len(limits) > 1:
+        probes.append((limits, "combinedStats"))
+    diagnostic_solve_count = 0
+    for overrides, label in probes:
+        if time.perf_counter() >= deadline:
+            break
+        # Share the curve's deadline and only report a relaxation backed by a build.
+        result = optimize_weapon(db, weapon_id, replace(params, **overrides), deadline=deadline, objective_axis="price")
+        diagnostic_solve_count += 1
+        if result["status"] in ("optimal", "feasible") and result.get("final_stats"):
+            return {
+                "reason_key": f"optimizer.reason.relax.{label}",
+                "diagnostic_solve_count": diagnostic_solve_count,
+            }
+    return {
+        "reason_key": "optimizer.reason.constraintsConflict",
+        "diagnostic_solve_count": diagnostic_solve_count,
+    }
+
+
 # How many ergo points below the true achievable max to search for a
 # materially better recoil/price trade at the sweep's ergo-max boundary.
 # Tarkov mod stats are chunky, not continuous, so the single item combo that
@@ -60,13 +105,13 @@ def _sampling_value(point, key):
     return min(100, value) if key == "ergo" else value
 
 
-def frontier_points(points, tradeoff, use_evo_ergo=False):
+def frontier_points(points, tradeoff, use_true_ergo=False):
     # Compare displayed stats and break coordinate ties on the omitted axis. Under
-    # the EvoErgo toggle, the ergo axis itself is true EED (see explore_weapon_stream),
-    # so the frontier has to be computed in EED terms too - a build the frontend
-    # will show as ergo-dominant on the true-EED axis must win the dominance/tie
+    # the TrueErgo toggle, the ergo axis itself is TrueErgoDelta (see explore_weapon_stream),
+    # so the frontier has to be computed in TrueErgo terms too - a build the frontend
+    # will show as ergo-dominant on the TrueErgo axis must win the dominance/tie
     # check here in those same terms, not raw ergo's.
-    ergo_key = "eed" if use_evo_ergo else "ergo"
+    ergo_key = "true_ergo_delta" if use_true_ergo else "ergo"
     x_key, y_key, tie_key = {
         "price": (ergo_key, "recoil_v", "price"),
         "recoil": (ergo_key, "price", "recoil_v"),
@@ -106,19 +151,27 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
     started = time.perf_counter()
     deadline = started + EXPLORE_TIME_LIMIT_SECONDS
     # Every regular sample below is a pure single-axis solve (see solve()'s
-    # objective_axis branch) - EvoErgo's blended-objective anchor sweep has no
+    # objective_axis branch) - TrueErgo's blended-objective anchor sweep has no
     # part in those and, worse, ignores objective_axis entirely, so leaving it on
     # would silently swap every sample over to solving the full ergo/recoil/price
     # blend instead of the epsilon-constrained axis this whole sweep depends on.
-    # The one place EvoErgo actually changes anything is the "max ergo" boundary
+    # The one place TrueErgo actually changes anything is the "max ergo" boundary
     # point the price/recoil tradeoffs use to size their sweep - see solve()'s own
-    # use_evo_ergo branch below, which is the only call that ever pays for it.
-    use_evo_ergo = params.use_evo_ergo
-    params = replace(params, use_evo_ergo=False, use_tchebycheff=False)
+    # use_true_ergo branch below, which is the only call that ever pays for it.
+    use_true_ergo = params.use_true_ergo
+    # An unpriced part's cost is unknown, so a curve that plots price can't place a
+    # build holding one. Keep them only on Ergonomics vs. Recoil, where price just
+    # breaks ties (see OptimizeParams.allow_unpriced).
+    params = replace(
+        params,
+        use_true_ergo=False,
+        use_tchebycheff=False,
+        allow_unpriced=params.allow_unpriced and tradeoff == "price",
+    )
     prepared = prepare_optimize_weapon(db, weapon_id, params)
-    prepared.local_price_cleanup = tradeoff == "price" and not use_evo_ergo
+    prepared.local_price_cleanup = tradeoff == "price"
     solutions = _ErgoFloorSolutions(prepared)
-    points, attempts = [], []
+    points, attempts, failures = [], [], []
     reused_count = 0
     completed = True
     done_calls = 0
@@ -129,24 +182,24 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
         if time.perf_counter() >= deadline:
             completed = False
             return None
-        if axis == "ergo" and use_evo_ergo:
-            # Same true-EED anchor sweep the old single-solve EvoErgo mode runs,
+        if axis == "ergo" and use_true_ergo:
+            # Same TrueErgo anchor sweep the old single-solve TrueErgo mode runs,
             # pinned to a pure ergo objective (recoil/price weight zeroed out) so
-            # this boundary point reflects the real weight-adjusted EED best
+            # this boundary point reflects the real weight-adjusted TrueErgo best
             # instead of the raw ergonomics-sum best a plain axis solve finds.
             call_params = replace(
-                params, use_evo_ergo=True, ergo_weight=1.0, recoil_weight=0.0, price_weight=0.0, **overrides
+                params, use_true_ergo=True, ergo_weight=1.0, recoil_weight=0.0, price_weight=0.0, **overrides
             )
             result = optimize_weapon(db, weapon_id, call_params, deadline=deadline, prepared=prepared)
             attempts.append(result["status"])
         else:
             call_params = replace(params, **overrides)
-            # Only reuse plain linear problems. Keep the EED/overswing cutting
+            # Only reuse plain linear problems. Keep the TrueErgo/overswing cutting
             # planes local to each solve, and never reuse across a relaxed bound.
             reusable = (
-                not use_evo_ergo
+                not use_true_ergo
                 and not params.prevent_overswing
-                and params.min_eed is None
+                and params.min_true_ergo_delta is None
                 and set(overrides) <= {"min_ergonomics"}
             )
             result = solutions.get(axis, call_params.min_ergonomics) if reusable else None
@@ -159,6 +212,8 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
                     solutions.add(axis, call_params.min_ergonomics, result)
             else:
                 reused_count += 1
+        if result["status"] == "infeasible" and not overrides:
+            failures.append(result)
         if result["status"] not in ("optimal", "infeasible"):
             completed = False
         if result["status"] not in ("optimal", "feasible") or not result.get("final_stats"):
@@ -169,7 +224,7 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
             return None
         point = {
             "ergo": min(100, stats["total_ergo"]),
-            "eed": stats["evo_ergo_delta"],
+            "true_ergo_delta": stats["true_ergo_delta"],
             "recoil_v": stats["recoil_vertical"],
             "price": result["grand_total_rub"],
             "build": result,
@@ -251,7 +306,7 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
         axis = "recoil" if tradeoff == "price" else "price"
         low = solve(axis)
         yield progress("boundary_low", low, axis)
-        if use_evo_ergo:
+        if use_true_ergo:
             high = solve("ergo")
         else:
             high = ergo_boundary_point(axis)
@@ -259,17 +314,17 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
                 points.append(high)
         yield progress("boundary_high", high, "ergo")
         if low and high:
-            # Under the EvoErgo toggle, the "ergo" endpoint above was chosen by true
-            # EED, not raw ergo sum - so the sweep has to bound each intermediate
-            # point by EED too (via min_eed's cutting-plane floor), or every point
+            # Under the TrueErgo toggle, the "ergo" endpoint above was chosen by
+            # TrueErgo, not raw ergo sum - so the sweep has to bound each intermediate
+            # point by TrueErgo too (via min_true_ergo_delta's cutting-plane floor), or every point
             # in between would still be picked by the plain "at least this much raw
             # ergo" constraint and the toggle would only ever affect that one
             # endpoint, not the balanced/low-recoil builds people actually choose.
             # The user's own explicit min_ergonomics floor (if any) keeps applying
             # underneath this regardless - it's still part of `params`, forwarded
             # to every solve() call below same as always.
-            if use_evo_ergo:
-                span = high["eed"] - low["eed"]
+            if use_true_ergo:
+                span = high["true_ergo_delta"] - low["true_ergo_delta"]
             else:
                 # Price cleanup may improve an endpoint's ergo. Sample the
                 # original endpoints so v1 still solves the same problems.
@@ -281,9 +336,9 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
                 if time.perf_counter() >= deadline:
                     completed = False
                     break
-                if use_evo_ergo:
-                    bound = low["eed"] + span * i / steps
-                    yield progress("sweep", solve(axis, min_eed=bound), axis, "eed", bound)
+                if use_true_ergo:
+                    bound = low["true_ergo_delta"] + span * i / steps
+                    yield progress("sweep", solve(axis, min_true_ergo_delta=bound), axis, "true_ergo_delta", bound)
                 else:
                     bound = low_ergo + span * i / steps
                     if params.min_ergonomics is not None:
@@ -291,7 +346,10 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
                     yield progress("sweep", solve(axis, min_ergonomics=bound), axis, "ergo", bound)
     if not low or not high:
         completed = completed and bool(attempts) and all(s == "infeasible" for s in attempts)
-    frontier = frontier_points(points, tradeoff, use_evo_ergo)
+    frontier = frontier_points(points, tradeoff, use_true_ergo)
+    diagnosis = {}
+    if not frontier and failures:
+        diagnosis = _diagnose_empty_explore(db, weapon_id, params, failures, deadline)
     yield {
         "type": "result",
         "data": {
@@ -305,6 +363,7 @@ def explore_weapon_stream(db, weapon_id: str, params: OptimizeParams, tradeoff="
             "reused_count": reused_count,
             "prepare_ms": round(prepared.candidate_load_ms, 3),
             "processing_ms": round((time.perf_counter() - started) * 1000, 3),
+            **diagnosis,
         },
     }
 

@@ -63,7 +63,7 @@ This runs black, flake8, and eslint automatically on `git commit`.
 
 ## Tests
 
-Backend tests live in `backend/tests/` and currently cover the EvoErgo/EED/arm-stamina
+Backend tests live in `backend/tests/` and currently cover the TrueErgoDelta/overswing/arm-stamina/aim-sway
 calculation formulas, since those are duplicated between the backend and
 `frontend/app.js` and need to stay in sync. There's no frontend test suite yet.
 
@@ -73,9 +73,8 @@ Focus on *why* a change was made, not just what changed.
 
 ## Build date
 
-Don't bump `APP_BUILD_DATE` in `frontend/modules/config.js` yourself, it should be 
-stamped automatically by `frontend/release_prep.py`, which should be ran right
-before a prod release.
+When your PR is ready to merge, please bump `APP_BUILD_DATE` in
+`frontend/modules/config.js` to the current time with `new Date().toISOString()`.
 
 ## Release notes / news posts
 
@@ -84,6 +83,14 @@ Contributors should never add or edit anything under `frontend/news/` (posts,
 version bumps, and the news feed are written and published by Morph1ne **only**, after
 a change has actually shipped. If your PR includes changes in that directory, expect
 to be asked to remove them before merge.
+
+## Licensing of contributions
+
+EFTForge is licensed under AGPL-3.0-or-later (see [LICENSE](LICENSE) and
+[NOTICE](NOTICE)). By opening a pull request, you agree that your contribution is
+licensed under the same terms and that you have the right to submit it. Please only
+submit code you wrote yourself or code under a license compatible with
+AGPL-3.0-or-later, and call out any third-party code in the PR description.
 
 ## Reporting bugs / requesting features
 

@@ -11,11 +11,11 @@ What's deliberately not handled, and why:
     see milp.py's dependency-constraint comment for the narrow correctness
     gap this leaves.
 Found-in-Raid fallback pricing (below) and category include filters and
-EvoErgo mode (optimizer/milp.py) are implemented. Use Tchebycheff scalarization
+TrueErgo mode (optimizer/milp.py) are implemented. Use Tchebycheff scalarization
 for balanced builds and explore.py for sampled two-objective tradeoffs.
 
 Every stat number this module reports comes from stats._compute_stats() -
-EFTForge's own, already-tested EED/overswing/arm-stamina/MOA formulas -
+EFTForge's own, already-tested TrueErgo/overswing/arm-stamina/MOA formulas -
 never a separately-derived formula, so the optimizer and the Combo
 Calculator always agree on what a given attachment set's stats are.
 """
@@ -43,12 +43,12 @@ class OptimizeParams:
     min_ergonomics: Optional[float] = None
     max_ergonomics: Optional[float] = None
     # Explore-internal only (see explore.py's solve()) - not part of any public
-    # request model. Hard-floors true (weight-adjusted, quadratic) EED via
-    # milp.py's _solve_with_min_eed, the same lazy tangent-cut technique
+    # request model. Hard-floors TrueErgoDelta via
+    # milp.py's _solve_with_min_true_ergo, the same lazy tangent-cut technique
     # prevent_overswing uses, instead of min_ergonomics's plain linear sum.
-    # Lets Explore's EvoErgo toggle pick the right build for every point on the
+    # Lets Explore's TrueErgo toggle pick the right build for every point on the
     # curve, not just its "max ergo" boundary.
-    min_eed: Optional[float] = None
+    min_true_ergo_delta: Optional[float] = None
     max_recoil_v: Optional[float] = None
     max_recoil_sum: Optional[float] = None  # vertical + horizontal combined - used by Gunsmith tasks
     max_weight: Optional[float] = None
@@ -70,16 +70,16 @@ class OptimizeParams:
     ergo_weight: float = 1.0
     recoil_weight: float = 1.0
     price_weight: float = 0.0
-    # EvoErgo mode swaps the raw capped-ergo term in the weighted ergo/recoil/
-    # price objective above for stats.py's true (quadratic) EED, approximated
+    # TrueErgo mode swaps the raw capped-ergo term in the weighted ergo/recoil/
+    # price objective above for stats.py's TrueErgo, approximated
     # by a refined tangent sweep since a MILP can only optimize a linear
     # objective (see optimizer/milp.py). The result still has to win on the
     # same ergo/recoil/price blend the weights above describe, not just have
-    # the single highest EED regardless of how it scores on recoil/price.
-    # evo_ergo_k lets a caller pin a specific tangent slope instead of
+    # the single highest TrueErgo regardless of how it scores on recoil/price.
+    # true_ergo_k lets a caller pin a specific exchange rate instead of
     # sweeping (and refining) the default anchor set - mainly useful for tests.
-    use_evo_ergo: bool = False
-    evo_ergo_k: Optional[float] = None
+    use_true_ergo: bool = False
+    true_ergo_k: Optional[float] = None
     # Weighted-sum (the ergo/recoil/price blend above) has a real failure mode:
     # a fixed per-unit exchange rate means one item with a large enough single-
     # axis swing can dominate the objective regardless of slider position, so
@@ -89,20 +89,28 @@ class OptimizeParams:
     # rate with a min-max of each objective's *normalized* distance from its
     # own best-achievable value, so a 50/50 weighting actually lands roughly
     # halfway between the pure-recoil and pure-ergo builds instead of pinning
-    # to one extreme. On by default; only applies to the plain (non-EvoErgo)
-    # objective for now - EvoErgo mode keeps its own weighted-sum-with-
+    # to one extreme. On by default; only applies to the plain (non-TrueErgo)
+    # objective for now - TrueErgo mode keeps its own weighted-sum-with-
     # refinement approach (see milp.py's anchor sweep) until this is extended
     # to it.
     use_tchebycheff: bool = True
     # Hard-constrains the build to stats._compute_stats()'s own "overswing"
-    # definition (total_weight <= KG(effective_ergo)), approximated by tangent
-    # cuts around milp.py's EVO_ERGO_ERGO_ANCHORS since a MILP can't encode the
-    # true quadratic threshold directly.
+    # definition (total_weight <= overswing_limit_kg(effective_ergo)), approximated
+    # by tangent cuts at each rejected build's own ergo since a MILP can't
+    # encode the true convex threshold directly.
     prevent_overswing: bool = False
     # Upper bound on stats.py's accuracy_moa (lower MOA = tighter grouping).
     max_moa: Optional[float] = None
     trader_levels: Optional[Dict[str, int]] = None
     flea_available: bool = True
+    # Admit parts with no accessible trader/flea price (Arena-only parts, barter-only
+    # and flea-banned parts) into the candidate pool (GitHub #50). Their cost is
+    # unknown, so they never count as free: the solver costs each one above every
+    # priced candidate, the reported totals leave them out and list them in
+    # unpriced_items, and a max_price budget drops them again since no build
+    # holding one can be proven to fit it. Explore also drops them on any curve
+    # that plots price (see explore.py).
+    allow_unpriced: bool = False
     player_level: Optional[int] = None
     # "pvp" | "pve" | "pvpSeason" - which game mode's flea prices to solve against.
     # Trader offers don't vary by mode, so this only ever filters ItemOffer's flea rows.
@@ -117,6 +125,11 @@ class OptimizeParams:
     selected_ubgl_ammo_id: Optional[str] = None
 
 
+def _admits_unpriced(params):
+    # A budget cap can't be checked against a part whose cost is unknown.
+    return params.allow_unpriced and params.max_price is None
+
+
 def _prepared_input_key(params):
     # Snapshot every setting used to load candidates, offers or selected ammo.
     # Keep mutable lists/dicts out of the key so later edits cannot hide a change.
@@ -126,6 +139,7 @@ def _prepared_input_key(params):
         tuple(params.exclude_categories or ()),
         None if params.trader_levels is None else tuple(sorted(params.trader_levels.items())),
         params.flea_available,
+        _admits_unpriced(params),
         params.player_level,
         params.game_mode,
         params.assume_full_mag,
@@ -178,6 +192,81 @@ def prepare_optimize_weapon(db, weapon_id: str, params: OptimizeParams) -> Prepa
     return PreparedOptimizeContext(
         db, weapon_id, _prepared_input_key(params), candidates, (time.perf_counter() - started) * 1000
     )
+
+
+_RESKIN_SIGNATURE_FIELDS = (
+    "attachment_category",
+    "ergonomics_modifier",
+    "recoil_modifier",
+    "accuracy_modifier",
+    "weight",
+    "magazine_capacity",
+    "sighting_range",
+    "conflicting_item_ids",
+    "conflicting_slot_ids",
+    "category_ids",
+    "heat_factor",
+    "cooling_factor",
+    "durability_burn_factor",
+    "velocity_modifier",
+    "loudness",
+)
+
+
+def _drop_dominated_reskins(compat_map, mods, candidate_ids, prices, include, factory_ids):
+    """Some items are pure cosmetic reskins of each other - identical in every
+    stat and slot compatibility, just a different price (e.g. the AR-15
+    Strike Industries ARE tube's plain and Anodized Red colorways). Any single
+    solve can land on either one on a genuine tie in its own objective, so a
+    tiebreak/cleanup pass scoped to one particular solve path can miss it -
+    and did (see PRs around 2026-09-16's ARE-tube reports). Dropping the
+    strictly-dominated (pricier) twin here, before any model is built, fixes
+    it once for every solve path instead of chasing each one individually.
+
+    Skips include/factory items so an explicit lock or a free preset part is
+    never silently swapped out from under the user.
+    """
+    slots_by_item = {}
+    for slot_id, items in compat_map.slot_items.items():
+        for iid in items:
+            slots_by_item.setdefault(iid, set()).add(slot_id)
+
+    def owned_slots_signature(item_id):
+        # A reskin can still own child slots of its own (e.g. the ARE tube's
+        # sling-mount/endplate slots) - safe to dedupe as long as each of its
+        # own slots accepts exactly the same items as its twin's, so nothing
+        # reachable further down the tree actually differs between them.
+        parts = []
+        for slot_id in compat_map.item_to_slots.get(item_id, ()):
+            info = compat_map.slots_by_id.get(slot_id)
+            allowed = tuple(sorted(compat_map.slot_items.get(slot_id, ())))
+            parts.append((getattr(info, "required", None), allowed))
+        return tuple(sorted(parts))
+
+    def signature(item_id):
+        item = mods[item_id]
+        return (
+            tuple(getattr(item, field, None) for field in _RESKIN_SIGNATURE_FIELDS)
+            + (tuple(sorted(slots_by_item.get(item_id, ()))),)
+            + (owned_slots_signature(item_id),)
+        )
+
+    groups = {}
+    for item_id in candidate_ids:
+        if item_id in include:
+            continue
+        groups.setdefault(signature(item_id), []).append(item_id)
+
+    dominated = set()
+    for ids in groups.values():
+        if len(ids) < 2:
+            continue
+        # A factory twin ships free with the gun, so it always wins the group
+        # regardless of its own market price - but it's never itself dropped,
+        # even in the unlikely case two same-stat items are both factory parts.
+        ids.sort(key=lambda iid: (iid not in factory_ids, prices[iid]["price_rub"], iid))
+        dominated.update(iid for iid in ids[1:] if iid not in factory_ids)
+    return [iid for iid in candidate_ids if iid not in dominated] if dominated else candidate_ids
 
 
 def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
@@ -234,8 +323,10 @@ def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
     # selectable at price 0 even when no trader/flea sells them - they're genuinely
     # accessible, and a required slot may only be fillable by one of them.
     factory_ids = set(weapon.factory_attachment_ids.split(",")) if weapon.factory_attachment_ids else set()
+    admit_unpriced = _admits_unpriced(params)
     candidate_ids = []
     prices = {}
+    unpriced_ids = []
     for item_id in all_mod_ids:
         if item_id in exclude or item_id not in mods:
             continue
@@ -257,9 +348,15 @@ def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
             # never prices most of them at all. Dropping those would silently shrink the
             # min-mag-capacity slider's range and make the constraint infeasible for
             # capacities that are genuinely obtainable, just not through a priced offer.
-            if item_id not in include and item_id not in factory_ids and not mods[item_id].magazine_capacity:
+            exempt = item_id in include or item_id in factory_ids or mods[item_id].magazine_capacity
+            if not exempt and not admit_unpriced:
                 continue
             best = {"price": 0, "currency": "RUB", "price_rub": 0, "vendor": None}
+            if not exempt:
+                # Admitted only by allow_unpriced. Set its solver cost after the loop,
+                # once every priced candidate is known, so it's never the cheap pick.
+                best["unpriced"] = True
+                unpriced_ids.append(item_id)
             # Factory parts really do cost 0 - they ship with the gun. The include/
             # magazine-capacity carve-outs above don't actually know a price, so flag
             # them as such; the manifest UI reads this to show "-" instead of "0₽".
@@ -267,6 +364,18 @@ def _load_candidates_and_prices(db, weapon_id: str, params: OptimizeParams):
                 best["no_price"] = True
         candidate_ids.append(item_id)
         prices[item_id] = best
+
+    if unpriced_ids:
+        # Cost every admitted unpriced part one ruble above the priciest priced
+        # candidate. Price tiebreaks, reskin dedup and Explore's cheaper-part cleanup
+        # then always prefer a priced part with the same stats, so an unpriced part
+        # only lands in a build when its stats earn the spot. Reported totals strip
+        # this solver-only cost again (see _known_price_rub).
+        placeholder = max((p["price_rub"] for p in prices.values() if not p.get("unpriced")), default=0) + 1
+        for item_id in unpriced_ids:
+            prices[item_id] = {**prices[item_id], "price_rub": placeholder}
+
+    candidate_ids = _drop_dominated_reskins(compat_map, mods, candidate_ids, prices, include, factory_ids)
 
     pruning_started = time.perf_counter()
     available = set(candidate_ids)
@@ -367,13 +476,17 @@ def optimize_weapon(
     result["metrics"] = {**input_metrics, **result.get("metrics", {})}
 
     if result["status"] in ("optimal", "feasible"):
+        # Report only what the build is known to cost. Parts admitted by allow_unpriced
+        # carried a solver-only placeholder cost; list them instead of pricing them.
+        result["unpriced_items"] = [i for i in result["selected_items"] if prices[i].get("unpriced")]
+        result["total_price_rub"] = _known_price_rub(result["selected_items"], prices)
         final_stats = _compute_stats(
             weapon, result["selected_items"], mods, params.strength_level, params.equip_ergo_modifier
         )
         # Fills the solved build's magazine(s) with whatever ammo is currently selected in the
         # main builder, respecting its "assume full mag" toggle - same effect loading this
         # build into the builder would have, applied up front so the results panel already
-        # shows the ammo-adjusted weight/EED/overswing/arm_stamina instead of the bare-mod
+        # shows the ammo-adjusted weight/TrueErgo/overswing/arm_stamina instead of the bare-mod
         # numbers. items_map is scoped to only the selected items (not every reachable
         # candidate) since apply_full_mag_ammo scans every entry for magazine_capacity/caliber.
         selected_mods = {item_id: mods[item_id] for item_id in result["selected_items"]}
@@ -399,19 +512,22 @@ def optimize_weapon(
         # the solve (respects flea_available/trader_levels) - the manifest UI
         # renders from this instead of independently re-picking "cheapest overall"
         # client-side, which would ignore those same access filters.
-        result["item_prices"] = {item_id: prices[item_id] for item_id in result["selected_items"]}
-        # Per-item EvoErgo contribution, so the results-panel manifest can show the
-        # same EvoErgo column the attachment table does. Contribution is marginal -
-        # the build's EED minus the EED it would have without that one part - which is
+        result["item_prices"] = {
+            item_id: {**prices[item_id], "price_rub": 0} if prices[item_id].get("unpriced") else prices[item_id]
+            for item_id in result["selected_items"]
+        }
+        # Per-item TED contribution, so the results-panel manifest can show the
+        # same TED column the attachment table does. Contribution is marginal -
+        # the build's TED minus what it would have without that one part - which is
         # the meaningful "how much does this part add" figure for a finished build. Applies
         # the same ammo fill to the "without" side too (recomputed per-subset, since removing
         # the magazine itself removes the ammo weight it was carrying), so ammo weight's own
-        # effect on EED isn't misattributed entirely to whichever part happens to be diffed.
-        result["evo_contributions"] = _per_item_evo_contributions(
+        # effect on TED isn't misattributed entirely to whichever part happens to be diffed.
+        result["true_ergo_contributions"] = _per_item_true_ergo_contributions(
             weapon,
             result["selected_items"],
             mods,
-            final_stats["evo_ergo_delta"],
+            final_stats["true_ergo_delta"],
             params.strength_level,
             params.equip_ergo_modifier,
             ammo,
@@ -433,6 +549,10 @@ def optimize_weapon(
 
     result["metrics"]["processing_ms"] = round((time.perf_counter() - started) * 1000, 3)
     return result
+
+
+def _known_price_rub(selected_items, prices):
+    return sum(prices[i]["price_rub"] for i in selected_items if not prices[i].get("unpriced"))
 
 
 def _load_best_offer_price(db, item_id, params, *, prepared=None):
@@ -496,13 +616,13 @@ def _choose_base(db, weapon, params, selected_items, prices, mods_total_rub, *, 
     return base, round(grand_total)
 
 
-def _per_item_evo_contributions(
-    weapon, selected_ids, mods, full_eed, strength_level, equip_ergo_modifier, ammo=None, ubgl_grenade=None
+def _per_item_true_ergo_contributions(
+    weapon, selected_ids, mods, full_true_ergo, strength_level, equip_ergo_modifier, ammo=None, ubgl_grenade=None
 ):
-    """Marginal EvoErgo delta each selected part contributes to the build, keyed by
-    item id. Each value is full_eed - EED(build without that part). _compute_stats is
+    """Marginal TrueErgoDelta each selected part contributes to the build, keyed by
+    item id. Each value is full_true_ergo - TED(build without that part). _compute_stats is
     pure arithmetic over the pre-loaded items (no DB, no solve), so one pass per part
-    is cheap for the handful of attachments a build has. full_eed is expected to already
+    is cheap for the handful of attachments a build has. full_true_ergo is expected to already
     include apply_full_mag_ammo's adjustment (if any); ammo/ubgl_grenade re-applies the
     same fill to each "without" subset so a non-magazine part's contribution isn't
     polluted by the full build's ammo-weight delta (removing the magazine itself still
@@ -515,7 +635,7 @@ def _per_item_evo_contributions(
         if ammo is not None or ubgl_grenade is not None:
             subset_mods = {i: mods[i] for i in subset}
             apply_full_mag_ammo(stats_without, subset_mods, ammo, ubgl_grenade, strength_level, equip_ergo_modifier)
-        contributions[item_id] = round(full_eed - stats_without["evo_ergo_delta"], 2)
+        contributions[item_id] = round(full_true_ergo - stats_without["true_ergo_delta"], 2)
     return contributions
 
 
@@ -556,6 +676,7 @@ def get_moa_floor(db, weapon_id: str, params: OptimizeParams) -> dict:
     base_params = OptimizeParams(
         trader_levels=params.trader_levels,
         flea_available=params.flea_available,
+        allow_unpriced=params.allow_unpriced,
         player_level=params.player_level,
         game_mode=params.game_mode,
         ergo_weight=0.0,
@@ -579,6 +700,7 @@ def get_moa_floor(db, weapon_id: str, params: OptimizeParams) -> dict:
         trial_params = OptimizeParams(
             trader_levels=params.trader_levels,
             flea_available=params.flea_available,
+            allow_unpriced=params.allow_unpriced,
             player_level=params.player_level,
             game_mode=params.game_mode,
             ergo_weight=0.0,

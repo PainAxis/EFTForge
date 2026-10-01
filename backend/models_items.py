@@ -68,6 +68,11 @@ class Item(Base):
     penetration_chance = Column(Float, nullable=True)
     penetration_power_deviation = Column(Float, nullable=True)
 
+    # Ammo hidden stats - from SPT game files, no tarkov.dev equivalent
+    penetration_damage_mod = Column(Float, nullable=True)
+    malf_feed_chance = Column(Float, nullable=True)
+    misfire_chance = Column(Float, nullable=True)
+
     conflicting_item_ids = Column(Text)
     conflicting_slot_ids = Column(Text)
 
@@ -126,3 +131,7 @@ class Item(Base):
     # Muzzle velocity % modifier (barrels/muzzle devices). Not currently exposed by the
     # tarkov.dev API (no such field exists there as of writing) - stays null until it is.
     velocity_modifier = Column(Float, nullable=True)
+
+    # Loudness modifier (muzzle devices, suppressors, a few barrels). Plain integer from
+    # tarkov.dev's top-level Item.loudness: negative is quieter, positive is louder.
+    loudness = Column(Integer, nullable=True)

@@ -78,6 +78,42 @@ window._SLOT_PLACEHOLDER_MAP = _SLOT_PLACEHOLDER_MAP;
 // ============================================================
 
 window._AG_OVERRIDES = {
+    "648ae44056c6310a830fc293@648ae3e356c6310a830fc291": { col: 9, vrow: 2, flexible: true },
+    "6981d72ed009ad83920da445@6981d72ed009ad83920da43a": { col: 7, vrow: 1, flexible: true },
+    "6981f97f1d2e2070560b727c@6981f97f1d2e2070560b7277": { col: 5, vrow: 2, flexible: true },
+    "6a146c81f77fa1814701c173@6a146c81f77fa1814701c172": { col: 6, vrow: 2, flexible: true },
+    "6a146c81f77fa1814701c174@6a146c81f77fa1814701c172": { col: 8, vrow: 2, flexible: true },
+    "6a146c81f77fa1814701c175@6a146c81f77fa1814701c172": { col: 7, vrow: 3, flexible: true },
+    "6a146c81f77fa1814701c176@6a146c81f77fa1814701c172": { col: 7, vrow: -1 },
+    "6a158dd9060f61ca2c03e091@6a158dd9060f61ca2c03e08e": { col: 4, vrow: 1, flexible: true },
+    "6a158dd9060f61ca2c03e092@6a158dd9060f61ca2c03e08e": { col: 6, vrow: 1, flexible: true },
+    "6a182c0fae175e037a0be40d@6a182c0fae175e037a0be40c": { col: 5, vrow: 1, flexible: true },
+    "6a182c0fae175e037a0be40f@6a182c0fae175e037a0be40c": { col: 7, vrow: 1, flexible: true },
+    "6a6724709513419ca9ba109d@6a6721edecf09d43410cba5a": { col: 5, vrow: 2, flexible: true },
+    "6a6724bddfb2de5e320d4521@6a6724bddfb2de5e320d451d": { col: 5, vrow: 2, flexible: true },
+    "6a67250406a5419b2508f242@6a67250406a5419b2508f23e": { col: 5, vrow: 2, flexible: true },
+    "6a687e38e1ad1bac0101541a@6a687e38e1ad1bac01015418": { col: 5, vrow: 2, flexible: true },
+    "6a687e38e1ad1bac0101541b@6a687e38e1ad1bac01015418": { col: 7, vrow: 2, flexible: true },
+    "6a687e38e1ad1bac0101541d@6a687e38e1ad1bac01015418": { col: 5, vrow: -1, flexible: true },
+    "6a687f7e4230b63db57c3763@6a687e38e1ad1bac01015418": { col: 6, vrow: 3, flexible: true },
+    "6a687feedcdf410da9829dde@6a687e38e1ad1bac01015418": { col: 6, vrow: 2, flexible: true },
+    "69f9f1356b45e1d5210c6967@69f9f1356b45e1d5210c6961": { col: 4, vrow: -1 },
+    "69f9f1356b45e1d5210c6968@69f9f1356b45e1d5210c6961": { col: 5, vrow: 2, flexible: true },
+    "6a0b31b1ae7e4d778274f636@69f9f12c25db06fcf60a88f1": { col: 5, vrow: 2, flexible: true },
+    "6a157f5d8d059ca69c0a7867@6a157f5d8d059ca69c0a7864": { col: 5, vrow: 2 },
+    "6a157f5d8d059ca69c0a7869@6a157f5d8d059ca69c0a7864": { col: 4, vrow: -1 },
+    "6a157fa8af9c1c57b7007792@6a157fa8af9c1c57b700778f": { col: 5, vrow: 2 },
+    "6a157fa8af9c1c57b7007794@6a157fa8af9c1c57b700778f": { col: 4, vrow: -1 },
+    "6a15b13db507e45a68038dea@6a15b13db507e45a68038de8": { col: 4, vrow: -1 },
+    "6a15b13db507e45a68038ded@6a15b13db507e45a68038de8": { col: 4, vrow: 1 },
+    "6a15b13db507e45a68038dee@6a15b13db507e45a68038de8": { col: 6, vrow: 1 },
+    "6a688026daa5d47171082d6c@6a688026daa5d47171082d6b": { col: 5, vrow: 2, flexible: true },
+    "6a688026daa5d47171082d6d@6a688026daa5d47171082d6b": { col: 7, vrow: 2, flexible: true },
+    "6a688026daa5d47171082d6e@6a688026daa5d47171082d6b": { col: 5, vrow: -1 },
+    "6a68aff875c96a5e86894d74@6a6877f566f77e6757083db5": { col: 6, vrow: 1, flexible: true },
+    "6a78b7f8c2016eb33e0027ce@6a78b7f8c2016eb33e0027cd": { col: 6, vrow: 0, flexible: true },
+    "6a78b7f8c2016eb33e0027cf@6a78b7f8c2016eb33e0027cd": { col: 7, vrow: 1, flexible: true },
+    "6a78b7f8c2016eb33e0027d1@6a78b7f8c2016eb33e0027cd": { col: 7, vrow: -1, flexible: true },
     "648ae44056c6310a830fc293@648ae3e356c6310a830fc291": { col: 9, vrow: 3, flexible: true },
     "69f9ecc5df2c2358a9041860@69f9ecc5df2c2358a904185c": { col: 9, vrow: -1 },
     "6a15ae3e81a4baf60b09bc37@6a15ae3e81a4baf60b09bc33": { col: 9, vrow: -1 },
@@ -1480,6 +1516,7 @@ function _buildGridDOM(slotEntries, positions, gunRow, totalRows, container) {
     const gunName = EFTForge.state.currentGun?.short_name || EFTForge.state.currentGun?.name || "";
     gunCell.innerHTML = `
         ${gunSrc ? `<img src="${escapeHtml(gunSrc)}" alt="" />` : ""}
+        ${_bpWorkingLogoHtml()}
         <div class="ag-label ag-gun-label"><span class="marquee-text">${escapeHtml(gunName)}</span></div>
     `;
     grid.appendChild(gunCell);
@@ -1590,8 +1627,8 @@ async function renderAttachmentGrid(preserveScroll = true) {
                 ${t("tree.title")}
                 <span class="tree-swipe-hint">${t("tree.swipeHint")}</span>
                 <span class="tree-view-toggle">
-                    <button class="compare-toggle bp-imggen-toggle${_bpEnabled && !_bpGlobalDisabled ? ' active' : ''}${_bpGlobalDisabled ? ' bp-imggen-globally-disabled' : ''}" onclick="toggleImgGen()" ${_bpGlobalDisabled ? `data-tooltip="${_bpDisabledTip()}"` : ''} style="margin-right:6px;">
-                        ${t("ui.imgGen")}
+                    <button class="compare-toggle bp-imggen-toggle${_bpEnabled && !_bpGlobalDisabled ? ' active' : ''}${_bpGlobalDisabled ? ' bp-imggen-globally-disabled' : ''}" onclick="toggleImgGen()" ${_bpGlobalDisabled ? `data-tooltip="${_bpDisabledTip()}"` : ''} style="margin-right:6px;" aria-label="Kitbash! ${t("ui.imgGen")}">
+                        ${_bpToggleLogoHtml()}${t("ui.imgGen")}
                         <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
                     </button>
                     <button class="toggle-btn ag-export-img-btn" data-tooltip="${t("build.exportImg")}" onclick="exportBuildImage()" style="margin-right:4px;"><svg width="13" height="13" viewBox="0 0 13 13" fill="none" style="display:block"><polyline points="6.5,1 6.5,8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><polyline points="3.5,6 6.5,9 9.5,6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="1.5" y="10.5" width="10" height="1" rx="0.5" fill="currentColor"/></svg></button>
@@ -1702,7 +1739,7 @@ async function _exportBuildImage() {
             } catch { /* image will be omitted */ }
         }));
 
-        // Gun image: route through proxy (now allowlisted for both tarkov.dev and image-gen)
+        // Gun image: route through proxy (tarkov.dev and Gitee community cards are allowlisted)
         if (gunSrc?.startsWith("http")) {
             try {
                 const resp = await fetch(proxyBase + encodeURIComponent(gunSrc));
@@ -1718,7 +1755,8 @@ async function _exportBuildImage() {
             } catch { /* gun image omitted, cell will be empty */ }
         }
 
-        const resolveImg = (src) => (src ? (dataUrls.get(src) || null) : null);
+        // Locally rendered build images already arrive as data URLs.
+        const resolveImg = (src) => (src ? (dataUrls.get(src) || (src.startsWith("data:") ? src : null)) : null);
 
         // Effective grid height: only up to the last row that has any filled cell or the gun cell
         let maxFilledRow = gunCell?.style.gridRow ? parseInt(gunCell.style.gridRow) : 0;

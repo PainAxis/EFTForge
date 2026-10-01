@@ -7,8 +7,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![JavaScript](https://img.shields.io/badge/JavaScript-ES2022-F7DF1E?style=flat-square&logo=javascript&logoColor=black)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
-[![Data: tarkov.dev](https://img.shields.io/badge/Data-tarkov.dev-orange?style=flat-square)](https://tarkov.dev)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue?style=flat-square)](LICENSE)
 
 [English](README.md) · [中文](README_ZH.md)
 
@@ -18,11 +17,24 @@
 
 ## Overview
 
-EFTForge is a full-stack Escape from Tarkov weapon build simulator and community platform. It provides a dual-view visual workbench, real-time stat calculations, live composite build preview images, flea/trader price fetching, a combo calculator, attachment graphing, user profiles, build comments, and a community build publishing system with leaderboards. All item data is sourced from the [tarkov.dev](https://tarkov.dev) JSON API.
+EFTForge is a full-stack Escape from Tarkov weapon build simulator and community platform. It provides a 3D builder, a dual-view 2D workbench, real-time stat calculations, live composite build preview images, flea/trader price fetching, a combo calculator, attachment graphing, user profiles, build comments, and a community build publishing system with leaderboards. In-game data is sourced from [tarkov.dev](https://tarkov.dev) and [SP-Tushonka](https://github.com/SP-Tushonka).
 
 ---
 
 ## Features
+
+### 3D Builder
+- Build your weapon in 3D, now the default view; switch back to 2D anytime (mobile stays 2D)
+- Click a slot on the model to pick a part, right click to remove it
+- **Compact Picker** - pick parts from an in-game style dropdown
+- Stats and price panel you can drag anywhere
+- **Sight Picture** - look through your sights and try aiming down sights
+- **Range** - change the target distance, or swap the background for a green screen
+- **Hide UI** for recording
+- Try out lights and lasers
+- See the muzzle smoke and flash when firing
+- Magazines show the ammo you selected
+- A short tour the first time you open it
 
 ### Workbench
 - **Grid view** - attachment slots arranged spatially on a 2D canvas mirroring the physical weapon layout (barrel, stock, optics, grip, etc.), grouped into zones (Upper, Lower, Left, Right, Extras)
@@ -41,21 +53,25 @@ Constraint-based weapon build solver (MILP, HiGHS backend) that fills every atta
 - **Hard constraints** - budget limit, min ergonomics, min magazine capacity, min sighting range, max MOA, suppressor requirement, and prevent overswing
 - **Attachment Filtering** - force-include or ban specific mods, then re-optimize; results can also be locked or banned per part directly from the build manifest
 - **Weight presets** - save and reuse custom priority-slider setups, alongside built-in presets (Balanced, Min. operable, Performance, Recoil+, Ergo+)
+- **Use TrueErgo** - optimize for how far a build is from overswing, not just raw ergo
+- **Include unpriced parts** - also consider parts you can't buy from traders or the flea market; they never count as free
 - **Receiver vs. Factory Preset costing** - compares buying the base receiver against buying the weapon's factory preset, and prices the result off whichever is cheaper
 - Respects the same trader loyalty levels, flea market toggle, and player level filters as the rest of the app
 - See [Credits & Acknowledgements](#credits--acknowledgements) for the original creator of the optimizer feature
 
 ### Stat Calculation
 - Real-time stats: ergonomics, recoil, weight, arm stamina, sighting range, etc.
+- **TrueErgo** - how much ergo your build has left before it overswings, using the game's own rule
+- Arm stamina and aim sway match the game's own formulas
+- **Loudness** stat for muzzle devices and barrels
 - Full magazine ammo weight modeling
 - Real attachment conflict detection (`conflictingItems` + `conflictingSlotIds`)
 
 ### Live Build Preview
 - Composite gun image generated in real-time as attachments are added or removed
-- Powered by [image-gen.tarkov-changes.com](https://image-gen.tarkov-changes.com) via a backend Playwright proxy
-- Server-side result cache (up to 500 entries)
+- Drawn in-house by [Kitbash!](#kitbash), see its section below for how it works
 - Factory configs and bare guns use static tarkov.dev images directly
-- Preview toggle to disable generation when the service is slow or unavailable
+- **Kitbash! Image Generation** toggle to turn generation off
 
 ### Price System
 - Per-item cost breakdown for every attachment in the current build
@@ -69,7 +85,7 @@ Constraint-based weapon build solver (MILP, HiGHS backend) that fills every atta
 ### Stat Tracker
 - Surfaces item stat changes detected automatically during daily server data syncs
 - Each entry shows old/new values, percentage change, and the date detected
-- Covers a rolling 7-day window, grouped by date
+- Shows the last 7 days by default; pick any earlier day to see its changes
 - Panel header shows when the data was last synced
 
 ### User Profiles
@@ -103,15 +119,59 @@ Constraint-based weapon build solver (MILP, HiGHS backend) that fills every atta
 
 ---
 
+## Kitbash!
+
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="readme-assets/kitbash-for-eftforge-wordmark.png">
+  <img src="readme-assets/kitbash-for-eftforge-wordmark-dark-ink.png" alt="Kitbash! for EFTForge" width="306">
+</picture>
+
+*Custom Tarkov builds, rendered in milliseconds.*
+
+<sub>The rifle in the logo is a real build drawn by Kitbash! <a href="https://eftforge.com/?build=N4IgbiBcCMA0IHMogGwAYUFYAcB2ATJoQMyYDGmuAhtMQCz51kBmAJiPAA5QDaPqGHASKZSFarQZNmzDiEwBOVgCNiNVthTNcuBgoCmaTMrr6F%2BEAF1Y-dFjyES5SjXqNWaNHMWsU%2BAnSa2rooKNB0KMRBsta2gg4iYi6S7mjQcnZCVNjYCp6sZPisClSYxlgKVjYC9sJO4q5SHhbw5LgKxMzK5vr4%2BNAodHTMxNDKXYNVcbWOos4SbnQexBnxuMq%2BHhu4OBjQ61RkZFM1WTl5aAVFJWXKWMfwmXi4WvhkyviG%2BFQMh73KJye1HO%2BUKxVK5Uw7Ee8WwaDItCKS2gb2w0DY2FYVEBa2yuVB1whd0w%2Bm8yjIaBK0ExdFI0EMaFIfju2FJsXkZHanW6nz6AyGIzGExQGSIHVw8LoRlKzEw0FYzWIKmwONqL2Ybw%2BXx%2B3zIvWhqFokuIZBQEuwJLoJOY4Wl6XZQPVms%2BaG%2Bvz1n1WWAK2FcSNYKLIaIx%2BhWDth8MRrGRqPRGkMZIpJWIl1pcoZxDNXVwQdVODhCOI-sDwY0rFkrRzMjufitCh0kXwIwU0CoCkqDqNZFppvNluttswVBWrXLw9Y%2BGUl30%2BjGfWYmk%2BVFYbOsIGxkHkBiWSvwQR0dH2KGHfkwaGxAF8gA">Open it in EFTForge</a></sub>
+
+</div>
+
+Kitbash! is EFTForge's in-house rendering engine, made by [Morph1ne](https://github.com/SouthHorizons76), the creator of EFTForge. It has two parts:
+- **3D engine** - runs the [3D Builder](#3d-builder)
+- **2D sprite compositor** - draws every build image on the site: the live workbench preview, build tab hover previews, optimizer result previews, exported PNGs, community build cards, etc.
+
+Each version of Kitbash! has a codename:
+- **Kitbash! Sirius** - the first version, the 2D sprite compositor only
+- **Kitbash! Arcadia** - the current version, adding the full 3D engine
+
+Kitbash! is a separate standalone project. Its repository is private for now, and may be open-sourced in the future if there is enough demand!
+
+### How build images work
+- Every weapon and attachment is rendered once, offline, from the game's own models into a sprite with a depth map
+- At runtime a build is assembled by stacking those sprites at 2D offsets and depth testing them, so rendering needs no game client, GPU, or browser
+- This works because the game's inventory icon camera is orthographic: a part's silhouette never changes with position, and its place on screen follows directly from its 3D mount point
+- The compositor runs in process inside the FastAPI backend (Pillow) and outputs WebP at twice the game's inventory icon size
+
+### What build images show
+- **Full magazines** - with **Assume Full Magazine** on, magazines are drawn loaded with the selected ammo and underbarrel grenade launchers with their round, just like the game
+- **New weapons** - guns tarkov.dev has no image for yet are drawn by Kitbash! from their factory preset, or as a bare receiver
+- **Missing parts** - an attachment Kitbash! can't draw yet is left out of the image instead of failing the whole build, and a notice tells you some parts aren't shown
+- **Community build cards** - drawn once and stored permanently on Gitee; since a stored card sticks around, it waits until Kitbash! can draw every part in the build
+
+### Caching
+- Rendered images are cached per exact build tree and loaded ammo, so revisiting a build is instant
+- Decoded sprites are cached separately per worker process (`KITBASH_CACHE_MB`, 128 MB by default)
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
 | Backend | Python, FastAPI, SQLAlchemy, SQLite, Pydantic, Uvicorn |
 | Frontend | Vanilla JavaScript (ES2022), modular architecture |
-| Image Generation | Playwright / Patchright (headless browser proxy) |
+| 3D Builder | [Kitbash!](#kitbash) Arcadia (3D engine) |
+| Image Generation | [Kitbash!](#kitbash) Arcadia (2D sprite compositor, Pillow) |
 | Asset Hosting | Gitee (community build card images, profile avatars) |
-| Data Source | tarkov.dev JSON API |
+| Data Source | tarkov.dev JSON API, [SP-Tushonka](https://github.com/SP-Tushonka) (hidden weapon and ammo stats) |
 | Compression | LZ-String |
 | Markdown | marked.js |
 
@@ -123,6 +183,7 @@ EFTForge is also available as a downloadable Windows app - the same workbench an
 
 - **Download:** [GitHub Releases](https://github.com/SouthHorizons76/EFTForge/releases) - or the [Gitee mirror](https://gitee.com/morph1ne/eftforge-gitee-mirror/releases) if GitHub is slow or blocked for you
 - **Details:** see [desktop/README.md](desktop/README.md) for architecture, local development, and build instructions
+- The 3D builder needs **Connected to EFTForge.com** mode; **Fully local** mode uses 2D only
 
 ---
 
@@ -224,6 +285,8 @@ This single .bat file will:
 
 The site is usable as soon as the backend console shows **"Application startup complete"**. If the background sync finds new data, a toast prompts you to refresh; otherwise nothing changes and you keep working on the data you already had. That's it!
 
+> **3D builder:** locally, the 3D view needs the Kitbash! viewer running on `http://127.0.0.1:8765`. Without it, the builder uses 2D.
+
 > **Note:** `sync_tarkov_dev.py` is called automatically by launch.bat, which calls reset.py. Avoid running it directly during local development, it is only used on the live production server for manual out-of-cycle resyncs.
 
 ---
@@ -236,14 +299,14 @@ The backend runs at `http://127.0.0.1:8000` by default. Interactive docs are ava
 |---|---|
 | Items | `GET /guns`, `GET /ammo/{caliber}`, `GET /items/{id}/slots`, `GET /slots/{id}/allowed-items`, `GET /graph/searchable-items` |
 | Build | `POST /build/validate`, `POST /build/calculate`, `POST /build/batch-process`, `POST /build/combo-batch-process`, `POST /build/combo-full`, `GET /guns/{gun_id}/init` |
-| Optimizer | `POST /build/optimize`, `POST /build/stat-ranges`, `POST /build/moa-floor`, `GET /build/mods`, `GET /build/default-preset`, `GET /build/gunsmith-tasks`, `POST /build/gunsmith-solve` |
+| Optimizer | `POST /build/explore`, `POST /build/optimize`, `POST /build/stat-ranges`, `POST /build/moa-floor`, `GET /build/mods`, `GET /build/default-preset`, `GET /build/gunsmith-tasks`, `POST /build/gunsmith-solve` |
 | Image Gen | `POST /build-image` |
 | Ratings | `GET /ratings/attachments/bulk`, `POST /ratings/attachments/{id}/vote`, `DELETE /ratings/attachments/{id}/vote`, `GET /ratings/builds/bulk`, `POST /ratings/builds/{id}/vote` |
 | Community Builds | `POST /builds/publish`, `GET /builds/public`, `GET /builds/mine`, `POST /builds/{id}/load`, `DELETE /builds/{id}` |
 | Comments | `GET /builds/{id}/comments`, `POST /builds/{id}/comments`, `DELETE /builds/{id}/comments/{comment_id}` |
 | Profile | `POST /profile/avatar`, `POST /profile/update`, `POST /profile/transfer/preview`, `POST /profile/transfer` |
 | Notifications | `GET /builds/notifications`, `GET /announcements` |
-| Stat Tracker | `GET /stat-changelog` |
+| Stat Tracker | `GET /stat-changelog`, `GET /stat-changelog/dates` |
 | Health | `GET /health` |
 | Admin | Build management, comment moderation, author management, ban system, announcements, migration tools |
 
@@ -269,7 +332,7 @@ EFTForge will auto-load the build on page load and strip the parameter from the 
 
 ## Credits & Acknowledgements
 
-The EvoErgo concept was originally developed by **SpaceMonkey37**. EFTForge implements and expands upon this system in a live simulation environment. This project would not have been possible without SpaceMonkey37's foundational theory.
+EFTForge's TrueErgo grew out of the EvoErgo concept, originally developed by **SpaceMonkey37**. TrueErgo replaces EvoErgo's fitted curve with the exact overswing rule the game uses, but the idea of judging ergonomics together with weight started there. This project would not have been possible without SpaceMonkey37's foundational theory.
 
 The constraint-based build optimizer (MILP solver, priority weighting, budget/trader-level filtering) is a native reimplementation inspired by **AhaiMk01**'s [Tarkov Weapon Mod Optimizer](https://github.com/AhaiMk01/tarkov-weapon-optimizer).
 
@@ -283,10 +346,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local dev setup, lint/test commands, 
 
 ## License
 
-MIT - see [LICENSE](LICENSE) for details.
+EFTForge is licensed under the [GNU Affero General Public License v3.0 or later](LICENSE) (AGPL-3.0-or-later). If you distribute a modified version, or run one as a service that other people use over a network, you must release its complete source code under the same license and keep the attribution to EFTForge. See [NOTICE](NOTICE) for the attribution requirement and for contributions that remain under the MIT License.
+
+Versions released before the switch to the AGPL remain available under the MIT License.
 
 ---
 
 ## Disclaimer
 
-EFTForge is a fan-made project and is not affiliated with Battlestate Games. All game data is sourced from [tarkov.dev](https://tarkov.dev).
+EFTForge and Kitbash! are fan-made projects and are not affiliated with Battlestate Games. In-game data is sourced from [tarkov.dev](https://tarkov.dev) and [SP-Tushonka](https://github.com/SP-Tushonka).

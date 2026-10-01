@@ -38,16 +38,27 @@ async function fetchTraders() {
     return res.json();
 }
 
+// The backend points guns tarkov.dev has no image for yet at its own Kitbash!
+// render, relative to the API, so resolve those against our API base.
+function _absGunImages(gun) {
+    for (const key of ["image_512_link", "bare_image_512_link"]) {
+        if (gun[key]?.startsWith("/")) gun[key] = _base() + gun[key];
+    }
+    return gun;
+}
+
 async function fetchGuns() {
     const res = await fetch(`${_base()}/guns?lang=${_lang()}`);
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
-    return res.json();
+    return (await res.json()).map(_absGunImages);
 }
 
 async function fetchGraphSearchableItems() {
     const res = await fetch(`${_base()}/graph/searchable-items`);
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
-    return res.json();
+    const data = await res.json();
+    data.guns?.forEach(_absGunImages);
+    return data;
 }
 
 async function fetchAmmo(caliber) {
@@ -418,8 +429,17 @@ async function fetchLeaderboardAttachments(period, sort) {
     return res.json();
 }
 
-async function fetchStatChangelog() {
-    const res = await fetch(`${_base()}/stat-changelog`);
+// With no date the server sends the recent window; a YYYY-MM-DD date pulls that
+// UTC day out of the full history.
+async function fetchStatChangelog(date) {
+    const query = date ? `?date=${encodeURIComponent(date)}` : "";
+    const res = await fetch(`${_base()}/stat-changelog${query}`);
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    return res.json();
+}
+
+async function fetchStatChangelogDates() {
+    const res = await fetch(`${_base()}/stat-changelog/dates`);
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
     return res.json();
 }
@@ -428,6 +448,31 @@ async function fetchSyncStatus() {
     const res = await fetch(`${_base()}/sync-status`, { cache: "no-store" });
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
     return res.json();
+}
+
+// Page load and the About dialog both want /build-image/status, and what it reports
+// only changes when the server is redeployed, so we fetch it once per session and
+// share the promise. A failed fetch is not cached, so the next caller retries.
+let _buildImageStatusPromise = null;
+let _buildImageStatus = null;
+
+function fetchBuildImageStatus() {
+    if (!_buildImageStatusPromise) {
+        _buildImageStatusPromise = (async () => {
+            const res = await fetch(`${_base()}/build-image/status`);
+            if (!res.ok) throw new Error(`Server error: ${res.status}`);
+            _buildImageStatus = await res.json();
+            return _buildImageStatus;
+        })();
+        _buildImageStatusPromise.catch(() => { _buildImageStatusPromise = null; });
+    }
+    return _buildImageStatusPromise;
+}
+
+// The status if it already arrived, else null, so the About dialog can render it
+// straight away instead of flashing its loading line.
+function peekBuildImageStatus() {
+    return _buildImageStatus;
 }
 
 async function fetchBuildComments(buildId) {
@@ -550,4 +595,4 @@ async function fetchMyBuilds() {
     return res.json();
 }
 
-EFTForge.api = { fetchTraders, fetchGuns, fetchGunInit, fetchAmmo, fetchItemSlots, fetchSlotAllowedItems, fetchSlotAllowedItemsBatch, fetchItemSlotsBatch, calculateBuild, validateBuild, batchProcessCandidates, comboBatchProcess, comboFull, exploreStream, fetchFleaPrices, clearFleaPriceCache, fetchBulkRatings, postVote, deleteVote, fetchBulkBuildRatings, postBuildVote, deleteBuildVote, publishBuild, fetchPublicBuilds, fetchMyBuilds, recordBuildLoad, unlistBuild, fetchBanStatus, fetchNotifications, fetchAnnouncements, fetchStaticAnnouncements, fetchLeaderboardBuilds, fetchLeaderboardAttachments, fetchStatChangelog, fetchSyncStatus, fetchBuildComments, postBuildComment, deleteOwnComment, adminDeleteComment, uploadAvatar, updateUserProfile, transferPreview, transferAccount };
+EFTForge.api = { fetchTraders, fetchGuns, fetchGunInit, fetchAmmo, fetchItemSlots, fetchSlotAllowedItems, fetchSlotAllowedItemsBatch, fetchItemSlotsBatch, calculateBuild, validateBuild, batchProcessCandidates, comboBatchProcess, comboFull, exploreStream, fetchFleaPrices, clearFleaPriceCache, fetchBulkRatings, postVote, deleteVote, fetchBulkBuildRatings, postBuildVote, deleteBuildVote, publishBuild, fetchPublicBuilds, fetchMyBuilds, recordBuildLoad, unlistBuild, fetchBanStatus, fetchNotifications, fetchAnnouncements, fetchStaticAnnouncements, fetchLeaderboardBuilds, fetchLeaderboardAttachments, fetchStatChangelog, fetchStatChangelogDates, fetchSyncStatus, fetchBuildImageStatus, peekBuildImageStatus, fetchBuildComments, postBuildComment, deleteOwnComment, adminDeleteComment, uploadAvatar, updateUserProfile, transferPreview, transferAccount };

@@ -215,3 +215,61 @@ def test_cleanup_keeps_one_native_solve_and_rebuilds_parent_first_slots(model, m
     assert result["total_price_rub"] == 130000
     assert {iid for _slot, iid in result["slot_pairs"]} == set(result["selected_items"])
     assert result["grand_total_rub"] == 130100
+
+
+def test_min_true_ergo_path_also_runs_price_cleanup(model, monkeypatch):
+    """Explore's TrueErgo sweep solves via _solve_with_min_true_ergo instead of
+    _solve_once, so the cleanup call has to be wired in there too - otherwise
+    a stat-identical-but-pricier item (e.g. the AR-15 ARE tube's two
+    colorways) can survive an TrueErgo curve point untouched even with
+    local_price_cleanup on."""
+    source = {
+        "status": "optimal",
+        "selected_items": ["expensive_receiver", "old_stock", "expensive_handle", "lever"],
+        "metrics": {},
+    }
+    calls = []
+
+    def fake_min_true_ergo(*args, **kwargs):
+        calls.append(1)
+        return copy.deepcopy(source)
+
+    monkeypatch.setattr(milp, "_solve_with_min_true_ergo", fake_min_true_ergo)
+    from optimizer.solver import optimize_weapon, prepare_optimize_weapon
+
+    params = OptimizeParams(use_tchebycheff=False, min_true_ergo_delta=0)
+    prepared = prepare_optimize_weapon(model, "gun", params)
+    prepared.local_price_cleanup = True
+    result = optimize_weapon(model, "gun", params, objective_axis="recoil", prepared=prepared)
+    assert len(calls) == 1
+    assert result["total_price_rub"] == 130000
+    assert {iid for _slot, iid in result["slot_pairs"]} == set(result["selected_items"])
+
+
+def test_true_ergo_anchor_sweep_also_runs_price_cleanup(model, monkeypatch):
+    """The TrueErgo tangent-anchor branch (params.use_true_ergo=True - what
+    Explore's TrueErgo boundary point actually solves through) has its own
+    objective with no price term whatsoever, so it needs the same cleanup
+    pass wired in after it picks its best anchor candidate."""
+    source = {
+        "status": "optimal",
+        "selected_items": ["expensive_receiver", "old_stock", "expensive_handle", "lever"],
+        "metrics": {},
+    }
+    calls = []
+
+    def native(*args, **kwargs):
+        calls.append(1)
+        return copy.deepcopy(source)
+
+    monkeypatch.setattr(milp, "_solve_once", native)
+    from optimizer.solver import optimize_weapon, prepare_optimize_weapon
+
+    # Pin true_ergo_k so this solves exactly once instead of sweeping/refining.
+    params = OptimizeParams(use_tchebycheff=False, use_true_ergo=True, true_ergo_k=0.15)
+    prepared = prepare_optimize_weapon(model, "gun", params)
+    prepared.local_price_cleanup = True
+    result = optimize_weapon(model, "gun", params, prepared=prepared)
+    assert len(calls) == 1
+    assert result["total_price_rub"] == 130000
+    assert {iid for _slot, iid in result["slot_pairs"]} == set(result["selected_items"])

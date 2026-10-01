@@ -1,7 +1,8 @@
 window.EFTForge = window.EFTForge || {};
 
 /* exported handleVoteClick, openSlotSelector, changeSort, updateComboBalance, togglePurchasableOnly,
-   toggleCompareMode, setComboView -- called from other modules or index.html attributes */
+   toggleCompareMode, setComboView, _loadSlotCandidates, _showHoverDeltas, _clearHoverDeltas, _itemAvailability
+   -- called from other modules or index.html attributes */
 
 // ---------------------------------------------------
 // Price helpers for the attachment table
@@ -17,6 +18,17 @@ function _getPriceRub(item) {
     const fleaPrice = fleaCache?.[item.id] ?? null;
     if (traderAvail && (fleaPrice === null || item.trader_price_rub <= fleaPrice)) return item.trader_price_rub;
     return fleaPrice;
+}
+
+// Where a part can be bought, by the same rules as the price column: "trader" at the
+// user's trader levels, else "flea" when it has a flea price, else "none".
+function _itemAvailability(item) {
+    const hasTrader = item.trader_vendor && item.trader_price_rub != null;
+    if (hasTrader && (EFTForge.state.traderLevels[item.trader_vendor] ?? 4) >= (item.trader_min_level ?? 1)) return "trader";
+    const fleaCache = EFTForge.state.priceMode === "pve" ? EFTForge.state.fleaCachePve
+        : EFTForge.state.priceMode === "pvpSeason" ? EFTForge.state.fleaCacheSeasonal
+        : EFTForge.state.fleaCachePvp;
+    return fleaCache?.[item.id] != null ? "flea" : "none";
 }
 
 function _attPriceCellContent(item) {
@@ -178,19 +190,52 @@ function _cacheStatBarEls() {
         accFill:      rows[3]?.querySelector(".stat-bar-fill"),
         accVal:       rows[3]?.querySelector(".stat-bar-track .stat-bar-value"),
         weightVal:    document.querySelector(".stat-row-weight span:last-child"),
-        eedVal:       document.getElementById("eed-value-span"),
+        trueErgoVal:  document.getElementById("true-ergo-value-span"),
         sectionTitle: document.querySelector(".section-title"),
     };
 }
 
-function _setExtraStats(weight, eed) {
+function _setExtraStats(weight, trueErgo) {
     if (!_statBarEls) return;
-    const { weightVal, eedVal } = _statBarEls;
+    const { weightVal, trueErgoVal } = _statBarEls;
     if (weightVal) weightVal.textContent = weight.toFixed(3) + " kg";
-    if (eedVal) {
-        eedVal.className = eed >= 0 ? "positive" : "negative";
-        eedVal.textContent = (eed > 0 ? "+" : "") + eed.toFixed(1);
+    if (trueErgoVal) {
+        trueErgoVal.className = trueErgo >= 0 ? "positive" : "negative";
+        trueErgoVal.textContent = fmtTrueErgo(trueErgo);
     }
+}
+
+// A part counts as moving TED past this much.
+const TRUE_ERGO_VISIBLE = 0.05;
+
+// TED isn't linear in weight (above 3 kg each kilogram costs 300 / W^2 points), so the
+// batch simulations, which carry no ammo, can't simply be diffed: every TED in the
+// attachment and combo tables is recomputed from the simulated ergo and weight plus the
+// ammo the build would actually carry, the same way the stats panel shows the build.
+// emptiedWeight: the no-ammo weight of the build with this slot emptied.
+function _tedContext(emptiedWeight, parentNode = EFTForge.state.lastParentNode, slot = EFTForge.state.lastSlot) {
+    const installed = parentNode?.children?.[slot?.id] ?? null;
+    let removedWeight = 0, removedCap = 0;
+    (function walk(node) {
+        if (!node) return;
+        removedWeight += node.item.weight ?? 0;
+        if (node.item.magazine_capacity > 0) removedCap += node.item.magazine_capacity;
+        for (const sid in node.children) walk(node.children[sid]);
+    })(installed);
+    const ammoId = globalThis.document?.getElementById("ammo-select")?.value;
+    const perRound = EFTForge.state.assumeFullMag ? (EFTForge.state.ammoWeightMap?.[ammoId] ?? 0) : 0;
+    // Everything the loaded build weighs beyond its parts is ammo; what the installed
+    // subtree's magazines held leaves with them, the rest (other magazines, a UBGL
+    // round) stays whatever goes in this slot.
+    const loaded = Math.max(0, (EFTForge.state.lastTotalWeight ?? 0) - (emptiedWeight + removedWeight));
+    const staying = Math.max(0, loaded - removedCap * perRound);
+    const b = EFTForge.state.currentEquipErgoModifier ?? 0;
+    const magAmmo = items => items.reduce((sum, it) => sum + (it?.magazine_capacity > 0 ? it.magazine_capacity * perRound : 0), 0);
+    return {
+        base: (ergo, weight) => calcTrueErgoDelta(ergo, weight + staying, b),
+        sim: (ergo, weight, items) => calcTrueErgoDelta(ergo, weight + staying + magAmmo(items), b),
+        key: `${perRound}|${staying.toFixed(3)}|${b}`,
+    };
 }
 
 // Restores all stat bars and extra stats to the current build's actual values.
@@ -208,7 +253,7 @@ function _restoreStatBarsToCurrent() {
     const moa = EFTForge.state.lastAccuracyMoa ?? null;
     if (accFill)  accFill.style.width  = moa !== null ? Math.min(moa / 10, 1) * 100 + "%" : "0%";
     if (accVal)   accVal.textContent   = moa !== null ? moa.toFixed(2) + " MOA" : "-";
-    _setExtraStats(EFTForge.state.lastTotalWeight, EFTForge.state.lastEED);
+    _setExtraStats(EFTForge.state.lastTotalWeight, EFTForge.state.lastTrueErgo);
 }
 
 // Returns the slot-ID path from root down to targetSlotId, or null if not found.
@@ -239,7 +284,7 @@ function _buildHeaderImgHtml(parentNode, slot, gunImg) {
     // In list view, prefer the generated composite image if one exists
     const listSrc     = window._bpGetLastImageUrl?.() || gunImg;
     const listOpacity = window._bpIsInflight?.() ? ' style="opacity:0.35"' : '';
-    return listSrc ? `<div class="bp-gun-img-wrap"><img class="att-table-gun-img" src="${escapeHtml(listSrc)}"${listOpacity} alt="" /></div>` : "";
+    return listSrc ? `<div class="bp-gun-img-wrap"><img class="att-table-gun-img" src="${escapeHtml(listSrc)}"${listOpacity} alt="" />${_bpWorkingLogoHtml()}</div>` : "";
 }
 
 function updateAttTableHeaderImg() {
@@ -254,7 +299,7 @@ function updateAttTableHeaderImg() {
     const gunImg = gun?.image_512_link || gun?.icon_link || "";
     const newHtml = _buildHeaderImgHtml(parentNode, slot, gunImg);
 
-    // Also match .bp-gun-img-wrap so the whole wrapper (including any queue overlay) is replaced
+    // Also match .bp-gun-img-wrap so the whole wrapper is replaced
     const existing = header.querySelector(".att-table-icon-preview") ?? header.querySelector(".bp-gun-img-wrap") ?? header.querySelector(".att-table-gun-img");
     if (newHtml) {
         const tmp = document.createElement("div");
@@ -270,6 +315,144 @@ function updateAttTableHeaderImg() {
     }
 }
 window.updateAttTableHeaderImg = updateAttTableHeaderImg;
+
+// Load and score every part a slot accepts against the current build: the allowed
+// items, then one batch request for validity and simulated stats. The attachment table
+// and the 3D view's native part menu both list what this returns. Null on a network
+// error (after a toast) or when stale() says a newer request took over.
+async function _loadSlotCandidates(parentNode, slot, { stale = () => false, ratings = false } = {}) {
+  const { t } = EFTForge.lang;
+  let items;
+  if (EFTForge.state.allowedCache[slot.id]) {
+      items = EFTForge.state.allowedCache[slot.id];
+  } else {
+      try {
+          items = await withTimeout(fetchSlotAllowedItems(slot.id));
+          cacheSet(EFTForge.state.allowedCache, slot.id, items);
+      } catch (err) {
+          console.error("Failed to load allowed items:", err);
+          showToast(t("toast.connectionError"), t("toast.attachListFailed") + " " + (EFTForge.config.IS_LOCAL_DEV ? t("toast.networkHintDev") : t("toast.networkHintProd")), 5000);
+          return null;
+      }
+      if (stale()) return null;
+  }
+
+  // Non-blocking: fetch ratings in the background; update cells when ready.
+  // Desktop local mode: ratings are a community feature - skip entirely.
+  if (ratings && !EFTForge.config.COMMUNITY_DISABLED) {
+      EFTForge.api.fetchBulkRatings(items.map(i => i.id)).then(fetched => {
+          Object.assign(EFTForge.state.ratingsCache, fetched);
+          _refreshRatingCells();
+      }).catch(() => {});
+  }
+
+  const baseAttachmentIds = collectAttachmentIds(EFTForge.state.buildTree);
+
+  // Build the slot-emptied ID list: current build minus the replaced subtree - O(n) with filter
+  let slotEmptiedIds;
+  if (parentNode.children[slot.id]) {
+      const installedNode = parentNode.children[slot.id];
+      const idsToRemove = new Set([
+          installedNode.item.id,
+          ...collectAttachmentIds(installedNode)
+      ]);
+      slotEmptiedIds = baseAttachmentIds.filter(id => !idsToRemove.has(id));
+  } else {
+      slotEmptiedIds = baseAttachmentIds;
+  }
+
+  // Cache key: slot ID + current build state so cache invalidates when build changes
+  // The ammo carried and the equipment modifier change TED, so they're part of the key
+  const cacheKey = `${slot.id}__${slotEmptiedIds.slice().sort().join(",")}__${EFTForge.state.assumeFullMag ? 1 : 0}|${globalThis.document?.getElementById("ammo-select")?.value ?? ""}|${EFTForge.state.lastTotalWeight ?? ""}|${EFTForge.state.currentEquipErgoModifier ?? 0}`;
+
+  if (EFTForge.state.processedCache[cacheKey]) {
+      return { items, processedItems: EFTForge.state.processedCache[cacheKey], fromCache: true };
+  }
+
+  // Sum weights of the installed subtree being replaced
+  let removedSubtreeWeight = 0;
+  if (parentNode.children[slot.id]) {
+      const removedNode = parentNode.children[slot.id];
+      const collectWeights = (node) => {
+          removedSubtreeWeight += node.item.weight ?? 0;
+          for (const sid in node.children) collectWeights(node.children[sid]);
+      };
+      collectWeights(removedNode);
+  }
+
+  // Single batch request: baseline + all candidate validation + calculation
+  let batchResult;
+  try {
+      batchResult = await withTimeout(batchProcessCandidates({
+          base_item_id: EFTForge.state.currentGun.id,
+          installed_ids: slotEmptiedIds,
+          slot_id: slot.id,
+          candidate_ids: items.map(i => i.id),
+          lang: _lang(),
+          strength_level: EFTForge.state.currentStrengthLevel ?? 10,
+          equip_ergo_modifier: EFTForge.state.currentEquipErgoModifier ?? 0,
+      }), 30000);
+  } catch (err) {
+      console.error("Failed to process attachments:", err);
+      showToast(t("toast.connectionError"), t("toast.attachDataFailed") + " " + (EFTForge.config.IS_LOCAL_DEV ? t("toast.networkHintDev") : t("toast.networkHintProd")), 5000);
+      return null;
+  }
+  if (stale()) return null;
+
+  window._devLastBatchResult = { slotId: slot.id, slotName: slot.slot_name, gunId: EFTForge.state.currentGun?.id, result: batchResult };
+
+  const baseData = batchResult.base;
+  const baseRecoilV = baseData.recoil_vertical ?? null;
+  const baseRecoilH = baseData.recoil_horizontal ?? null;
+  const baseErgo = parseFloat(baseData.total_ergo ?? 0);
+  const baseAccuracyMoa = baseData.accuracy_moa ?? null;
+  const currentBuildBaseWeight = parseFloat(baseData.total_weight ?? 0) + removedSubtreeWeight;
+  const ted = _tedContext(parseFloat(baseData.total_weight ?? 0), parentNode, slot);
+  const baseTrueErgo = ted.base(baseErgo, parseFloat(baseData.total_weight ?? 0));
+
+  // Map candidate results by item_id for O(1) lookup
+  const candidateResultMap = new Map(batchResult.candidates.map(r => [r.item_id, r]));
+
+  const processedItems = items.map(item => {
+      const r = candidateResultMap.get(item.id);
+      if (!r) return null;
+
+      const hasConflict = !r.valid;
+      const conflictName = r.reason_key
+          ? t(r.reason_key) + (r.reason_name ?? "")
+          : null;
+      const simTrueErgo = ted.sim(parseFloat(r.total_ergo ?? 0), parseFloat(r.total_weight ?? 0), [item]);
+      const contribution = simTrueErgo - baseTrueErgo;
+      const recoilPercent = parseFloat(item.recoil_modifier ?? 0) * 100;
+
+      return {
+          item,
+          sortName: item.name.toLowerCase(),
+          contribution,
+          recoilPercent,
+          ergoModifier: parseFloat(item.ergonomics_modifier ?? 0),
+          hasConflict,
+          conflictName,
+          conflictingItemId: r.conflicting_item_id ?? null,
+          conflictingSlotId: r.conflicting_slot_id ?? null,
+          simErgo: parseFloat(r.total_ergo ?? 0),
+          simRecoilV: r.recoil_vertical ?? null,
+          simRecoilH: r.recoil_horizontal ?? null,
+          simAccuracyMoa: r.accuracy_moa ?? null,
+          simWeight: parseFloat(r.total_weight ?? 0),
+          simTrueErgo,
+          baseErgo,
+          baseRecoilV,
+          baseRecoilH,
+          baseAccuracyMoa,
+          baseWeight: currentBuildBaseWeight,
+          baseTrueErgo,
+      };
+  }).filter(Boolean);
+
+  cacheSet(EFTForge.state.processedCache, cacheKey, processedItems);
+  return { items, processedItems, fromCache: false };
+}
 
 async function openSlotSelector(parentNode, slot) {
     const seq = ++_slotLoadSeq;
@@ -409,7 +592,7 @@ async function openSlotSelector(parentNode, slot) {
                         ${t("th.ergo")} <span class="sort-indicator"></span>
                     </th>
                     <th id="th-evo" onclick="changeSort('evo')">
-                        ${t("th.evoErgo")} <span class="sort-indicator"></span>
+                        ${t("th.trueErgo")} <span class="sort-indicator"></span>
                     </th>
                     <th id="th-balance" onclick="changeSort('balance')" data-tooltip="${escapeHtml(t('th.balanceTooltip'))}">
                         ${t("th.balance")} <span class="sort-indicator"></span>
@@ -419,6 +602,9 @@ async function openSlotSelector(parentNode, slot) {
                     </th>
                     <th id="th-vel" onclick="changeSort('vel')">
                         ${t("th.muzzleVelocity")} <span class="sort-indicator"></span>
+                    </th>
+                    <th id="th-loud" onclick="changeSort('loud')">
+                        ${t("th.loudness")} <span class="sort-indicator"></span>
                     </th>
                 </tr>
             </thead>
@@ -447,51 +633,12 @@ async function openSlotSelector(parentNode, slot) {
 
   const slotOverlay = startPanelLoading(document.querySelector(".right-panel"), 1000);
 
-  let items;
-  if (EFTForge.state.allowedCache[slot.id]) {
-      items = EFTForge.state.allowedCache[slot.id];
-  } else {
-      try {
-          items = await withTimeout(fetchSlotAllowedItems(slot.id));
-          cacheSet(EFTForge.state.allowedCache, slot.id, items);
-      } catch (err) {
-          stopPanelLoading(slotOverlay);
-          console.error("Failed to load allowed items:", err);
-          showToast(t("toast.connectionError"), t("toast.attachListFailed") + " " + (EFTForge.config.IS_LOCAL_DEV ? t("toast.networkHintDev") : t("toast.networkHintProd")), 5000);
-          return;
-      }
-      if (_stale()) { stopPanelLoading(slotOverlay); return; }
-  }
+  const loaded = await _loadSlotCandidates(parentNode, slot, { stale: _stale, ratings: true });
+  if (!loaded) { stopPanelLoading(slotOverlay); return; }
+  const { items, processedItems, fromCache } = loaded;
 
-  // Non-blocking: fetch ratings in the background; update cells when ready.
-  // Desktop local mode: ratings are a community feature - skip entirely.
-  if (!EFTForge.config.COMMUNITY_DISABLED) {
-      EFTForge.api.fetchBulkRatings(items.map(i => i.id)).then(ratings => {
-          Object.assign(EFTForge.state.ratingsCache, ratings);
-          _refreshRatingCells();
-      }).catch(() => {});
-  }
-
-  const baseAttachmentIds = collectAttachmentIds(EFTForge.state.buildTree);
-
-  // Build the slot-emptied ID list: current build minus the replaced subtree - O(n) with filter
-  let slotEmptiedIds;
-  if (parentNode.children[slot.id]) {
-      const installedNode = parentNode.children[slot.id];
-      const idsToRemove = new Set([
-          installedNode.item.id,
-          ...collectAttachmentIds(installedNode)
-      ]);
-      slotEmptiedIds = baseAttachmentIds.filter(id => !idsToRemove.has(id));
-  } else {
-      slotEmptiedIds = baseAttachmentIds;
-  }
-
-  // Cache key: slot ID + current build state so cache invalidates when build changes
-  const cacheKey = `${slot.id}__${slotEmptiedIds.slice().sort().join(",")}`;
-
-  if (EFTForge.state.processedCache[cacheKey]) {
-      EFTForge.state.lastProcessedItems = EFTForge.state.processedCache[cacheKey];
+  if (fromCache) {
+      EFTForge.state.lastProcessedItems = processedItems;
       EFTForge.state.lastParentNode = parentNode;
       EFTForge.state.lastSlot = slot;
       applyAttachmentSort();
@@ -501,87 +648,6 @@ async function openSlotSelector(parentNode, slot) {
       return;
   }
 
-  // Sum weights of the installed subtree being replaced
-  let removedSubtreeWeight = 0;
-  if (parentNode.children[slot.id]) {
-      const removedNode = parentNode.children[slot.id];
-      const collectWeights = (node) => {
-          removedSubtreeWeight += node.item.weight ?? 0;
-          for (const sid in node.children) collectWeights(node.children[sid]);
-      };
-      collectWeights(removedNode);
-  }
-
-  // Single batch request: baseline + all candidate validation + calculation
-  let batchResult;
-  try {
-      batchResult = await withTimeout(batchProcessCandidates({
-          base_item_id: EFTForge.state.currentGun.id,
-          installed_ids: slotEmptiedIds,
-          slot_id: slot.id,
-          candidate_ids: items.map(i => i.id),
-          lang: _lang(),
-          strength_level: EFTForge.state.currentStrengthLevel ?? 10,
-          equip_ergo_modifier: EFTForge.state.currentEquipErgoModifier ?? 0,
-      }), 30000);
-  } catch (err) {
-      stopPanelLoading(slotOverlay);
-      console.error("Failed to process attachments:", err);
-      showToast(t("toast.connectionError"), t("toast.attachDataFailed") + " " + (EFTForge.config.IS_LOCAL_DEV ? t("toast.networkHintDev") : t("toast.networkHintProd")), 5000);
-      return;
-  }
-  if (_stale()) { stopPanelLoading(slotOverlay); return; }
-
-  window._devLastBatchResult = { slotId: slot.id, slotName: slot.slot_name, gunId: EFTForge.state.currentGun?.id, result: batchResult };
-
-  const baseData = batchResult.base;
-  const baseEED = parseFloat(baseData.evo_ergo_delta ?? 0);
-  const baseRecoilV = baseData.recoil_vertical ?? null;
-  const baseRecoilH = baseData.recoil_horizontal ?? null;
-  const baseErgo = parseFloat(baseData.total_ergo ?? 0);
-  const baseAccuracyMoa = baseData.accuracy_moa ?? null;
-  const currentBuildBaseWeight = parseFloat(baseData.total_weight ?? 0) + removedSubtreeWeight;
-
-  // Map candidate results by item_id for O(1) lookup
-  const candidateResultMap = new Map(batchResult.candidates.map(r => [r.item_id, r]));
-
-  const processedItems = items.map(item => {
-      const r = candidateResultMap.get(item.id);
-      if (!r) return null;
-
-      const hasConflict = !r.valid;
-      const conflictName = r.reason_key
-          ? t(r.reason_key) + (r.reason_name ?? "")
-          : null;
-      const contribution = parseFloat(r.evo_ergo_delta ?? 0) - baseEED;
-      const recoilPercent = parseFloat(item.recoil_modifier ?? 0) * 100;
-
-      return {
-          item,
-          sortName: item.name.toLowerCase(),
-          contribution,
-          recoilPercent,
-          ergoModifier: parseFloat(item.ergonomics_modifier ?? 0),
-          hasConflict,
-          conflictName,
-          conflictingItemId: r.conflicting_item_id ?? null,
-          conflictingSlotId: r.conflicting_slot_id ?? null,
-          simErgo: parseFloat(r.total_ergo ?? 0),
-          simRecoilV: r.recoil_vertical ?? null,
-          simRecoilH: r.recoil_horizontal ?? null,
-          simAccuracyMoa: r.accuracy_moa ?? null,
-          simWeight: parseFloat(r.total_weight ?? 0),
-          simEED: parseFloat(r.evo_ergo_delta ?? 0),
-          baseErgo,
-          baseRecoilV,
-          baseRecoilH,
-          baseAccuracyMoa,
-          baseWeight: currentBuildBaseWeight,
-          baseEED,
-      };
-  }).filter(Boolean);
-
-  cacheSet(EFTForge.state.processedCache, cacheKey, processedItems);
   EFTForge.state.lastProcessedItems = processedItems;
 
   const searchInput = document.getElementById("attachment-search");
@@ -609,7 +675,7 @@ async function openSlotSelector(parentNode, slot) {
 // Silently refetches candidate stats for the slot currently open in the attachment
 // table, without tearing down the DOM (search text, scroll position, etc. survive).
 // Needed after the build changes elsewhere while the table stays open: a candidate's
-// simErgo/simRecoilV/simRecoilH/simWeight/simEED were computed against the installed-ids
+// simErgo/simRecoilV/simRecoilH/simWeight/simTrueErgo were computed against the installed-ids
 // snapshot at fetch time, so removing an attachment elsewhere (e.g. resolving a conflict)
 // leaves those simulated values stale even after the conflict flag itself is cleared.
 let _reprocessOpenSlotGen = 0;
@@ -635,7 +701,8 @@ async function _reprocessOpenSlot() {
         slotEmptiedIds = baseAttachmentIds;
     }
 
-    const cacheKey = `${slot.id}__${slotEmptiedIds.slice().sort().join(",")}`;
+    // The ammo carried and the equipment modifier change TED, so they're part of the key
+    const cacheKey = `${slot.id}__${slotEmptiedIds.slice().sort().join(",")}__${EFTForge.state.assumeFullMag ? 1 : 0}|${globalThis.document?.getElementById("ammo-select")?.value ?? ""}|${EFTForge.state.lastTotalWeight ?? ""}|${EFTForge.state.currentEquipErgoModifier ?? 0}`;
 
     if (EFTForge.state.processedCache[cacheKey]) {
         if (myGen !== _reprocessOpenSlotGen) return;
@@ -677,12 +744,13 @@ async function _reprocessOpenSlot() {
     if (myGen !== _reprocessOpenSlotGen) return;
 
     const baseData = batchResult.base;
-    const baseEED = parseFloat(baseData.evo_ergo_delta ?? 0);
     const baseRecoilV = baseData.recoil_vertical ?? null;
     const baseRecoilH = baseData.recoil_horizontal ?? null;
     const baseErgo = parseFloat(baseData.total_ergo ?? 0);
     const baseAccuracyMoa = baseData.accuracy_moa ?? null;
     const currentBuildBaseWeight = parseFloat(baseData.total_weight ?? 0) + removedSubtreeWeight;
+    const ted = _tedContext(parseFloat(baseData.total_weight ?? 0), parentNode, slot);
+    const baseTrueErgo = ted.base(baseErgo, parseFloat(baseData.total_weight ?? 0));
 
     const candidateResultMap = new Map(batchResult.candidates.map(r => [r.item_id, r]));
 
@@ -694,7 +762,8 @@ async function _reprocessOpenSlot() {
         const conflictName = r.reason_key
             ? t(r.reason_key) + (r.reason_name ?? "")
             : null;
-        const contribution = parseFloat(r.evo_ergo_delta ?? 0) - baseEED;
+        const simTrueErgo = ted.sim(parseFloat(r.total_ergo ?? 0), parseFloat(r.total_weight ?? 0), [item]);
+        const contribution = simTrueErgo - baseTrueErgo;
         const recoilPercent = parseFloat(item.recoil_modifier ?? 0) * 100;
 
         return {
@@ -712,13 +781,13 @@ async function _reprocessOpenSlot() {
             simRecoilH: r.recoil_horizontal ?? null,
             simAccuracyMoa: r.accuracy_moa ?? null,
             simWeight: parseFloat(r.total_weight ?? 0),
-            simEED: parseFloat(r.evo_ergo_delta ?? 0),
+            simTrueErgo,
             baseErgo,
             baseRecoilV,
             baseRecoilH,
             baseAccuracyMoa,
             baseWeight: currentBuildBaseWeight,
-            baseEED,
+            baseTrueErgo,
         };
     }).filter(Boolean);
 
@@ -734,6 +803,8 @@ function applyAttachmentSearch(query) {
 }
 
 function applyAttachmentSort() {
+  // No table open (a part installed from the 3D view's compact picker): nothing to redraw.
+  if (!document.getElementById("attachment-table-container")?.firstElementChild) return;
   if (EFTForge.state.comboMode) {
       applyComboSort();
       return;
@@ -829,6 +900,10 @@ function applyAttachmentSort() {
             primary = (a.item.velocity_modifier ?? 0) - (b.item.velocity_modifier ?? 0);
             break;
 
+        case "loud":
+            primary = (a.item.loudness ?? 0) - (b.item.loudness ?? 0);
+            break;
+
         default:
             primary = 0;
     }
@@ -863,12 +938,13 @@ function _updateColumnVisibility(items) {
         (e.item.accuracy_modifier != null && e.item.accuracy_modifier !== 0)
     );
     const hasErgo    = items.some(e => e.item.ergonomics_modifier != null && e.item.ergonomics_modifier !== 0);
-    const hasEvo     = hasErgo && items.some(e => Math.abs(e.contribution) > 0.05);
+    const hasEvo     = hasErgo && items.some(e => Math.abs(e.contribution) > TRUE_ERGO_VISIBLE);
     const hasPrice   = items.some(e => _getPriceRub(e.item) !== null);
     const hasHeat    = items.some(e =>
         e.item.heat_factor != null || e.item.cooling_factor != null || e.item.durability_burn_factor != null
     );
     const hasVel     = items.some(e => e.item.velocity_modifier != null && e.item.velocity_modifier !== 0);
+    const hasLoud    = items.some(e => e.item.loudness != null && e.item.loudness !== 0);
 
     table.classList.toggle("hide-col-weight", !hasWeight);
     table.classList.toggle("hide-col-recoil", !hasRecoil);
@@ -878,6 +954,7 @@ function _updateColumnVisibility(items) {
     table.classList.toggle("hide-col-price",  !hasPrice);
     table.classList.toggle("hide-col-heat",   !hasHeat);
     table.classList.toggle("hide-col-vel",    !hasVel);
+    table.classList.toggle("hide-col-loud",   !hasLoud);
     // Combo-only columns - always hidden in list mode
     table.classList.add("hide-col-rub-recoil", "hide-col-balance");
 }
@@ -919,7 +996,7 @@ function updateSortIndicators() {
       ? EFTForge.state.comboSort
       : EFTForge.state.attachmentSort;
 
-  const headers = ["name", "weight", "recoil", "ergo", "acc", "evo", "rub-recoil", "price", "balance", "heat", "vel"];
+  const headers = ["name", "weight", "recoil", "ergo", "acc", "evo", "rub-recoil", "price", "balance", "heat", "vel", "loud"];
   headers.forEach(key => {
     const th = document.getElementById(`th-${key}`);
     if (!th) return;
@@ -1057,6 +1134,301 @@ function _velCellHtml(item) {
     return `<td class="vel-cell"><span class="${cls}">${v > 0 ? "+" : ""}${v.toFixed(1)}%</span></td>`;
 }
 
+// Loudness is a plain integer where lower is quieter, so a negative value gets the good color.
+// Like velocity, 0 means the mod doesn't touch it and shows as "-".
+function _loudCellHtml(item) {
+    const v = item.loudness ?? null;
+    if (v == null || v === 0) return `<td class="loud-cell">-</td>`;
+    const cls = v < 0 ? "positive" : "negative";
+    return `<td class="loud-cell"><span class="${cls}">${v > 0 ? "+" : ""}${v}</span></td>`;
+}
+
+// Preview a candidate in the current build panel: delta bars and value deltas against
+// the current build (or the compare baseline). ctx names the slot the candidate is for;
+// by default the attachment table's open slot. The 3D view's native part menu passes its
+// own slot and no baseline.
+function _showHoverDeltas(entry, ctx = {}) {
+    const parentNode = ctx.parentNode ?? EFTForge.state.lastParentNode;
+    const slot       = ctx.slot ?? EFTForge.state.lastSlot;
+    const items      = ctx.items ?? EFTForge.state.lastProcessedItems;
+    const compare    = (ctx.compare ?? true) && EFTForge.state.compareMode && !!EFTForge.state.compareBaselineId;
+    // Re-cache if the stats panel was rebuilt (e.g. after an install)
+    if (!_statBarEls || !_statBarEls.ergoFill?.isConnected) _cacheStatBarEls();
+    if (!_statBarEls) return;
+
+    // In compare mode with a baseline: use baseline stats as reference
+    // Otherwise: use the current build's stats
+    let refErgo, refRecoilV, refRecoilH, refAccuracyMoa, refWeight, refTrueErgo;
+    if (compare) {
+        const bl = items.find(
+            e => String(e.item.id) === EFTForge.state.compareBaselineId
+        ) || EFTForge.state.compareBaselineEntry;
+        if (bl) {
+            refErgo        = bl.simErgo;
+            refRecoilV     = bl.simRecoilV;
+            refRecoilH     = bl.simRecoilH;
+            refAccuracyMoa = bl.simAccuracyMoa ?? null;
+            refWeight      = bl.simWeight;
+            refTrueErgo    = bl.simTrueErgo;
+        } else {
+            refErgo        = EFTForge.state.lastTotalErgo;
+            refRecoilV     = EFTForge.state.lastRecoilV;
+            refRecoilH     = EFTForge.state.lastRecoilH;
+            refAccuracyMoa = EFTForge.state.lastAccuracyMoa ?? null;
+            refWeight      = EFTForge.state.lastTotalWeight;
+            refTrueErgo    = EFTForge.state.lastTrueErgo;
+        }
+    } else {
+        refErgo        = EFTForge.state.lastTotalErgo;
+        refRecoilV     = EFTForge.state.lastRecoilV;
+        refRecoilH     = EFTForge.state.lastRecoilH;
+        refAccuracyMoa = EFTForge.state.lastAccuracyMoa ?? null;
+        refWeight      = EFTForge.state.lastTotalWeight;
+        refTrueErgo    = EFTForge.state.lastTrueErgo;
+    }
+
+    const { ergoFill, ergoVal, rvFill, rvVal, rhFill, rhVal, accFill, accVal } = _statBarEls;
+
+    // Ergo bar
+    const ergoDelta    = entry.simErgo - refErgo;
+    const ergoBaseWidth = Math.min(refErgo, 100);
+    const ergoSimWidth  = Math.min(refErgo + ergoDelta, 100);
+
+    if (ergoFill) {
+        ergoFill.style.width = ergoBaseWidth + "%";
+        let deltaEl = ergoFill.parentElement.querySelector(".delta-bar");
+        if (!deltaEl) {
+            deltaEl = document.createElement("div");
+            deltaEl.className = "delta-bar";
+            ergoFill.parentElement.appendChild(deltaEl);
+        }
+        if (ergoDelta !== 0) {
+            deltaEl.style.left = Math.min(ergoBaseWidth, ergoSimWidth) + "%";
+            deltaEl.style.width = Math.abs(ergoSimWidth - ergoBaseWidth) + "%";
+            deltaEl.style.background = ergoDelta >= 0 ? "#4CAF50" : "#f44336";
+            deltaEl.style.borderRadius = ergoDelta >= 0 ? "0 3px 3px 0" : "3px";
+            deltaEl.style.transformOrigin = ergoDelta >= 0 ? "left" : "right";
+            deltaEl.style.display = "";
+            _animateDeltaBarIn(deltaEl);
+        } else {
+            _animateDeltaBarOut(deltaEl);
+        }
+    }
+    if (ergoVal) {
+        const deltaText = ergoDelta !== 0
+            ? ` <span style="color:${ergoDelta >= 0 ? "#4CAF50" : "#f44336"}">(${ergoDelta > 0 ? "+" : ""}${formatStat(ergoDelta)})</span>`
+            : "";
+        ergoVal.innerHTML = `<span style="color:#eee">${formatStat(refErgo)}</span>${deltaText}`;
+    }
+
+    // Ver. Recoil bar
+    if (entry.simRecoilV !== null && refRecoilV !== null && rvFill) {
+        const rvBase  = Math.min(refRecoilV, 500) / 5;
+        const rvDelta = entry.simRecoilV - refRecoilV;
+        const rvSim   = Math.min(Math.max(refRecoilV + rvDelta, 0), 500) / 5;
+        rvFill.style.width = rvBase + "%";
+        let deltaEl = rvFill.parentElement.querySelector(".delta-bar");
+        if (!deltaEl) {
+            deltaEl = document.createElement("div");
+            deltaEl.className = "delta-bar";
+            rvFill.parentElement.appendChild(deltaEl);
+        }
+        if (rvDelta !== 0) {
+            deltaEl.style.left = Math.min(rvBase, rvSim) + "%";
+            deltaEl.style.width = Math.abs(rvSim - rvBase) + "%";
+            deltaEl.style.background = rvDelta <= 0 ? "#4CAF50" : "#f44336";
+            deltaEl.style.borderRadius = rvDelta > 0 ? "0 3px 3px 0" : "3px";
+            deltaEl.style.transformOrigin = rvDelta > 0 ? "left" : "right";
+            deltaEl.style.display = "";
+            _animateDeltaBarIn(deltaEl);
+        } else {
+            _animateDeltaBarOut(deltaEl);
+        }
+        if (rvVal) {
+            const deltaText = rvDelta !== 0
+                ? ` <span style="color:${rvDelta <= 0 ? "#4CAF50" : "#f44336"}">(${rvDelta > 0 ? "+" : ""}${Math.round(rvDelta)})</span>`
+                : "";
+            rvVal.innerHTML = `<span style="color:#eee">${Math.round(refRecoilV)}</span>${deltaText}`;
+        }
+    }
+
+    // Hor. Recoil bar
+    if (entry.simRecoilH !== null && refRecoilH !== null && rhFill) {
+        const rhBase  = Math.min(refRecoilH, 500) / 5;
+        const rhDelta = entry.simRecoilH - refRecoilH;
+        const rhSim   = Math.min(Math.max(refRecoilH + rhDelta, 0), 500) / 5;
+        rhFill.style.width = rhBase + "%";
+        let deltaEl = rhFill.parentElement.querySelector(".delta-bar");
+        if (!deltaEl) {
+            deltaEl = document.createElement("div");
+            deltaEl.className = "delta-bar";
+            rhFill.parentElement.appendChild(deltaEl);
+        }
+        if (rhDelta !== 0) {
+            deltaEl.style.left = Math.min(rhBase, rhSim) + "%";
+            deltaEl.style.width = Math.abs(rhSim - rhBase) + "%";
+            deltaEl.style.background = rhDelta <= 0 ? "#4CAF50" : "#f44336";
+            deltaEl.style.borderRadius = rhDelta > 0 ? "0 3px 3px 0" : "3px";
+            deltaEl.style.transformOrigin = rhDelta > 0 ? "left" : "right";
+            deltaEl.style.display = "";
+            _animateDeltaBarIn(deltaEl);
+        } else {
+            _animateDeltaBarOut(deltaEl);
+        }
+        if (rhVal) {
+            const deltaText = rhDelta !== 0
+                ? ` <span style="color:${rhDelta <= 0 ? "#4CAF50" : "#f44336"}">(${rhDelta > 0 ? "+" : ""}${Math.round(rhDelta)})</span>`
+                : "";
+            rhVal.innerHTML = `<span style="color:#eee">${Math.round(refRecoilH)}</span>${deltaText}`;
+        }
+    }
+
+    // Accuracy bar (lower MOA = better = more fill, cap at 3 MOA)
+    if (entry.simAccuracyMoa !== null && refAccuracyMoa !== null && accFill) {
+        const accBase  = Math.min(refAccuracyMoa / 10, 1) * 100;
+        const accDelta = entry.simAccuracyMoa - refAccuracyMoa;
+        const accSim   = Math.min((refAccuracyMoa + accDelta) / 10, 1) * 100;
+        accFill.style.width = accBase + "%";
+        let deltaEl = accFill.parentElement.querySelector(".delta-bar");
+        if (!deltaEl) {
+            deltaEl = document.createElement("div");
+            deltaEl.className = "delta-bar";
+            accFill.parentElement.appendChild(deltaEl);
+        }
+        if (accDelta !== 0) {
+            deltaEl.style.left = Math.min(accBase, accSim) + "%";
+            deltaEl.style.width = Math.abs(accSim - accBase) + "%";
+            deltaEl.style.background = accDelta <= 0 ? "#4CAF50" : "#f44336";
+            // Delta bar tracks MOA value direction: MOA up (worse) extends right, MOA down (better) shrinks from right
+            deltaEl.style.borderRadius = accDelta > 0 ? "0 3px 3px 0" : "3px";
+            deltaEl.style.transformOrigin = accDelta > 0 ? "left" : "right";
+            deltaEl.style.display = "";
+            _animateDeltaBarIn(deltaEl);
+        } else {
+            _animateDeltaBarOut(deltaEl);
+        }
+        if (accVal) {
+            const deltaText = accDelta !== 0
+                ? ` <span style="color:${accDelta <= 0 ? "#4CAF50" : "#f44336"}">(${accDelta > 0 ? "+" : ""}${accDelta.toFixed(2)})</span>`
+                : "";
+            accVal.innerHTML = `<span style="color:#eee">${refAccuracyMoa.toFixed(2)} MOA</span>${deltaText}`;
+        }
+    }
+
+    // Weight deltas must be computed against a "no-ammo" reference so the
+    // ammo weight (present in lastTotalWeight/lastTrueErgo but absent from batch simWeight/simTrueErgo)
+    // cancels out. In compare mode the baseline is already no-ammo so use it directly.
+    // In normal mode, find the currently installed item's batch simWeight/simTrueErgo (also no-ammo).
+    //
+    // For magazines with different capacities the ammo does NOT cancel: hovering a
+    // 50-round drum vs an installed 10-round mag means 40 extra rounds of ammo when
+    // assumeFullMag is on. We correct for this with the capacity delta * ammo weight.
+    const { weightVal, trueErgoVal } = _statBarEls;
+    let refWeightForDelta;
+    let installedMagCap = null;
+    if (compare) {
+        refWeightForDelta = refWeight;
+    } else {
+        const installedItemId = String(
+            parentNode?.children?.[slot?.id]?.item?.id ?? ""
+        );
+        const installedEntry = installedItemId
+            ? items?.find(e => String(e.item.id) === installedItemId)
+            : null;
+        refWeightForDelta = installedEntry?.simWeight ?? entry.baseWeight;
+        installedMagCap   = installedEntry?.item?.magazine_capacity ?? null;
+    }
+
+    // Ammo capacity correction: only when assumeFullMag is on, both items are mags, and ammo is selected
+    let magCapWeightCorrection = 0;
+    const candidateMagCap = entry.item?.magazine_capacity ?? null;
+    if (EFTForge.state.assumeFullMag && candidateMagCap != null && installedMagCap != null) {
+        const ammoSelect = document.getElementById("ammo-select");
+        const ammoWeightPerRound = EFTForge.state.ammoWeightMap?.[ammoSelect?.value] ?? 0;
+        const capDiff = candidateMagCap - installedMagCap;
+        magCapWeightCorrection = ammoWeightPerRound * capDiff;
+    }
+
+    if (weightVal) {
+        const weightDelta = (entry.simWeight - refWeightForDelta) + magCapWeightCorrection;
+        const deltaText = weightDelta !== 0
+            ? ` <span style="color:${weightDelta <= 0 ? "#4CAF50" : "#f44336"}">(${weightDelta > 0 ? "+" : ""}${weightDelta.toFixed(3)} kg)</span>`
+            : "";
+        weightVal.innerHTML = `<span style="color:#eee">${refWeight.toFixed(3)} kg</span>${deltaText}`;
+    }
+    if (trueErgoVal) {
+        // simTrueErgo already counts the loaded ammo (see _tedContext), like the panel
+        const teDelta = entry.simTrueErgo - refTrueErgo;
+        const deltaText = Math.abs(teDelta) >= 0.05
+            ? ` <span style="color:${teDelta >= 0 ? "#4CAF50" : "#f44336"}">(${teDelta > 0 ? "+" : ""}${teDelta.toFixed(1)})</span>`
+            : "";
+        trueErgoVal.className = refTrueErgo >= 0 ? "positive" : "negative";
+        trueErgoVal.innerHTML = `${fmtTrueErgo(refTrueErgo)}${deltaText}`;
+    }
+}
+
+// Put the current build panel back after a hover preview.
+function _clearHoverDeltas(ctx = {}) {
+    const items   = ctx.items ?? EFTForge.state.lastProcessedItems;
+    const compare = (ctx.compare ?? true) && EFTForge.state.compareMode && !!EFTForge.state.compareBaselineId;
+    if (!_statBarEls) return;
+
+    const { ergoFill, ergoVal, rvFill, rvVal, rhFill, rhVal, accFill, accVal } = _statBarEls;
+
+    // Animate delta bars out
+    [ergoFill, rvFill, rhFill, accFill].forEach(fill => {
+        if (!fill) return;
+        const deltaEl = fill.parentElement.querySelector(".delta-bar");
+        if (deltaEl) _animateDeltaBarOut(deltaEl);
+    });
+
+    // In compare mode with a baseline: restore to baseline stats; otherwise current build
+    let displayErgo, displayRv, displayRh, displayAcc;
+    if (compare) {
+        const bl = items.find(
+            e => String(e.item.id) === EFTForge.state.compareBaselineId
+        ) || EFTForge.state.compareBaselineEntry;
+        if (bl) {
+            displayErgo = bl.simErgo;
+            displayRv   = bl.simRecoilV;
+            displayRh   = bl.simRecoilH;
+            displayAcc  = bl.simAccuracyMoa ?? null;
+        } else {
+            displayErgo = EFTForge.state.lastTotalErgo;
+            displayRv   = EFTForge.state.lastRecoilV;
+            displayRh   = EFTForge.state.lastRecoilH;
+            displayAcc  = EFTForge.state.lastAccuracyMoa ?? null;
+        }
+    } else {
+        displayErgo = EFTForge.state.lastTotalErgo;
+        displayRv   = EFTForge.state.lastRecoilV;
+        displayRh   = EFTForge.state.lastRecoilH;
+        displayAcc  = EFTForge.state.lastAccuracyMoa ?? null;
+    }
+
+    if (ergoFill) ergoFill.style.width = Math.min(displayErgo, 100) + "%";
+    if (ergoVal)  ergoVal.textContent  = formatStat(displayErgo);
+    if (rvFill)   rvFill.style.width   = displayRv !== null ? Math.min(Math.round(displayRv), 500) / 5 + "%" : "0%";
+    if (rvVal)    rvVal.textContent    = displayRv !== null ? Math.round(displayRv) : "-";
+    if (rhFill)   rhFill.style.width   = displayRh !== null ? Math.min(Math.round(displayRh), 500) / 5 + "%" : "0%";
+    if (rhVal)    rhVal.textContent    = displayRh !== null ? Math.round(displayRh) : "-";
+    if (accFill)  accFill.style.width  = displayAcc !== null ? Math.min(displayAcc / 10, 1) * 100 + "%" : "0%";
+    if (accVal)   accVal.textContent   = displayAcc !== null ? displayAcc.toFixed(2) + " MOA" : "-";
+
+    // Restore weight and TrueErgo to baseline stats (if set) or current build
+    if (compare) {
+        const bl = items.find(
+            e => String(e.item.id) === EFTForge.state.compareBaselineId
+        ) || EFTForge.state.compareBaselineEntry;
+        _setExtraStats(
+            bl ? bl.simWeight : EFTForge.state.lastTotalWeight,
+            bl ? bl.simTrueErgo    : EFTForge.state.lastTrueErgo
+        );
+    } else {
+        _setExtraStats(EFTForge.state.lastTotalWeight, EFTForge.state.lastTrueErgo);
+    }
+}
+
 function renderAttachmentRows(items) {
 
   _clearMarqueeTimers();
@@ -1102,7 +1474,7 @@ function renderAttachmentRows(items) {
       ghostStats = {
           weight:    bl.simWeight - pb.baseWeight,
           ergo:      bl.simErgo   - pb.baseErgo,
-          contrib:   bl.simEED    - pb.baseEED,
+          contrib:   bl.simTrueErgo    - pb.baseTrueErgo,
           recoilPct: (pb.baseRecoilV && bl.simRecoilV !== null)
               ? (bl.simRecoilV / pb.baseRecoilV - 1) * 100
               : bl.recoilPercent,
@@ -1176,6 +1548,7 @@ function renderAttachmentRows(items) {
           <td class="col-combo-only"></td>
           ${_heatCoolBurnCellHtml(blItem)}
           ${_velCellHtml(blItem)}
+          ${_loudCellHtml(blItem)}
       `;
 
       ghostRow.addEventListener("mouseenter", () => {
@@ -1268,7 +1641,7 @@ function renderAttachmentRows(items) {
             wD  = entry.simWeight - baselineEntry.simWeight;
             rD  = entry.recoilPercent - ghostStats.recoilPct;
             eD  = entry.simErgo   - baselineEntry.simErgo;
-            evD = entry.simEED    - baselineEntry.simEED;
+            evD = entry.simTrueErgo    - baselineEntry.simTrueErgo;
         } else {
             wD  = parseFloat(item.weight ?? 0) - parseFloat(baselineEntry.item.weight ?? 0);
             rD  = entry.recoilPercent - baselineEntry.recoilPercent;
@@ -1349,286 +1722,19 @@ function renderAttachmentRows(items) {
         <td class="col-combo-only"></td>
         ${_heatCoolBurnCellHtml(item)}
         ${_velCellHtml(item)}
+        ${_loudCellHtml(item)}
     `;
 
     row.addEventListener("mouseenter", () => {
+        // Start loading its model so a pick draws at once in the 3D view.
+        EFTForge.builder3d?.prefetch(item.id);
         if (entry.hasConflict) return;
-        // Re-cache if the stats panel was rebuilt (e.g. after an install)
-        if (!_statBarEls || !_statBarEls.ergoFill?.isConnected) _cacheStatBarEls();
-        if (!_statBarEls) return;
-
-        // In compare mode with a baseline: use baseline stats as reference
-        // Otherwise: use the current build's stats
-        let refErgo, refRecoilV, refRecoilH, refAccuracyMoa, refWeight, refEED;
-        if (EFTForge.state.compareMode && EFTForge.state.compareBaselineId) {
-            const bl = EFTForge.state.lastProcessedItems.find(
-                e => String(e.item.id) === EFTForge.state.compareBaselineId
-            ) || EFTForge.state.compareBaselineEntry;
-            if (bl) {
-                refErgo        = bl.simErgo;
-                refRecoilV     = bl.simRecoilV;
-                refRecoilH     = bl.simRecoilH;
-                refAccuracyMoa = bl.simAccuracyMoa ?? null;
-                refWeight      = bl.simWeight;
-                refEED         = bl.simEED;
-            } else {
-                refErgo        = EFTForge.state.lastTotalErgo;
-                refRecoilV     = EFTForge.state.lastRecoilV;
-                refRecoilH     = EFTForge.state.lastRecoilH;
-                refAccuracyMoa = EFTForge.state.lastAccuracyMoa ?? null;
-                refWeight      = EFTForge.state.lastTotalWeight;
-                refEED         = EFTForge.state.lastEED;
-            }
-        } else {
-            refErgo        = EFTForge.state.lastTotalErgo;
-            refRecoilV     = EFTForge.state.lastRecoilV;
-            refRecoilH     = EFTForge.state.lastRecoilH;
-            refAccuracyMoa = EFTForge.state.lastAccuracyMoa ?? null;
-            refWeight      = EFTForge.state.lastTotalWeight;
-            refEED         = EFTForge.state.lastEED;
-        }
-
-        const { ergoFill, ergoVal, rvFill, rvVal, rhFill, rhVal, accFill, accVal } = _statBarEls;
-
-        // Ergo bar
-        const ergoDelta    = entry.simErgo - refErgo;
-        const ergoBaseWidth = Math.min(refErgo, 100);
-        const ergoSimWidth  = Math.min(refErgo + ergoDelta, 100);
-
-        if (ergoFill) {
-            ergoFill.style.width = ergoBaseWidth + "%";
-            let deltaEl = ergoFill.parentElement.querySelector(".delta-bar");
-            if (!deltaEl) {
-                deltaEl = document.createElement("div");
-                deltaEl.className = "delta-bar";
-                ergoFill.parentElement.appendChild(deltaEl);
-            }
-            if (ergoDelta !== 0) {
-                deltaEl.style.left = Math.min(ergoBaseWidth, ergoSimWidth) + "%";
-                deltaEl.style.width = Math.abs(ergoSimWidth - ergoBaseWidth) + "%";
-                deltaEl.style.background = ergoDelta >= 0 ? "#4CAF50" : "#f44336";
-                deltaEl.style.borderRadius = ergoDelta >= 0 ? "0 3px 3px 0" : "3px";
-                deltaEl.style.transformOrigin = ergoDelta >= 0 ? "left" : "right";
-                deltaEl.style.display = "";
-                _animateDeltaBarIn(deltaEl);
-            } else {
-                _animateDeltaBarOut(deltaEl);
-            }
-        }
-        if (ergoVal) {
-            const deltaText = ergoDelta !== 0
-                ? ` <span style="color:${ergoDelta >= 0 ? "#4CAF50" : "#f44336"}">(${ergoDelta > 0 ? "+" : ""}${formatStat(ergoDelta)})</span>`
-                : "";
-            ergoVal.innerHTML = `<span style="color:#eee">${formatStat(refErgo)}</span>${deltaText}`;
-        }
-
-        // Ver. Recoil bar
-        if (entry.simRecoilV !== null && refRecoilV !== null && rvFill) {
-            const rvBase  = Math.min(refRecoilV, 500) / 5;
-            const rvDelta = entry.simRecoilV - refRecoilV;
-            const rvSim   = Math.min(Math.max(refRecoilV + rvDelta, 0), 500) / 5;
-            rvFill.style.width = rvBase + "%";
-            let deltaEl = rvFill.parentElement.querySelector(".delta-bar");
-            if (!deltaEl) {
-                deltaEl = document.createElement("div");
-                deltaEl.className = "delta-bar";
-                rvFill.parentElement.appendChild(deltaEl);
-            }
-            if (rvDelta !== 0) {
-                deltaEl.style.left = Math.min(rvBase, rvSim) + "%";
-                deltaEl.style.width = Math.abs(rvSim - rvBase) + "%";
-                deltaEl.style.background = rvDelta <= 0 ? "#4CAF50" : "#f44336";
-                deltaEl.style.borderRadius = rvDelta > 0 ? "0 3px 3px 0" : "3px";
-                deltaEl.style.transformOrigin = rvDelta > 0 ? "left" : "right";
-                deltaEl.style.display = "";
-                _animateDeltaBarIn(deltaEl);
-            } else {
-                _animateDeltaBarOut(deltaEl);
-            }
-            if (rvVal) {
-                const deltaText = rvDelta !== 0
-                    ? ` <span style="color:${rvDelta <= 0 ? "#4CAF50" : "#f44336"}">(${rvDelta > 0 ? "+" : ""}${Math.round(rvDelta)})</span>`
-                    : "";
-                rvVal.innerHTML = `<span style="color:#eee">${Math.round(refRecoilV)}</span>${deltaText}`;
-            }
-        }
-
-        // Hor. Recoil bar
-        if (entry.simRecoilH !== null && refRecoilH !== null && rhFill) {
-            const rhBase  = Math.min(refRecoilH, 500) / 5;
-            const rhDelta = entry.simRecoilH - refRecoilH;
-            const rhSim   = Math.min(Math.max(refRecoilH + rhDelta, 0), 500) / 5;
-            rhFill.style.width = rhBase + "%";
-            let deltaEl = rhFill.parentElement.querySelector(".delta-bar");
-            if (!deltaEl) {
-                deltaEl = document.createElement("div");
-                deltaEl.className = "delta-bar";
-                rhFill.parentElement.appendChild(deltaEl);
-            }
-            if (rhDelta !== 0) {
-                deltaEl.style.left = Math.min(rhBase, rhSim) + "%";
-                deltaEl.style.width = Math.abs(rhSim - rhBase) + "%";
-                deltaEl.style.background = rhDelta <= 0 ? "#4CAF50" : "#f44336";
-                deltaEl.style.borderRadius = rhDelta > 0 ? "0 3px 3px 0" : "3px";
-                deltaEl.style.transformOrigin = rhDelta > 0 ? "left" : "right";
-                deltaEl.style.display = "";
-                _animateDeltaBarIn(deltaEl);
-            } else {
-                _animateDeltaBarOut(deltaEl);
-            }
-            if (rhVal) {
-                const deltaText = rhDelta !== 0
-                    ? ` <span style="color:${rhDelta <= 0 ? "#4CAF50" : "#f44336"}">(${rhDelta > 0 ? "+" : ""}${Math.round(rhDelta)})</span>`
-                    : "";
-                rhVal.innerHTML = `<span style="color:#eee">${Math.round(refRecoilH)}</span>${deltaText}`;
-            }
-        }
-
-        // Accuracy bar (lower MOA = better = more fill, cap at 3 MOA)
-        if (entry.simAccuracyMoa !== null && refAccuracyMoa !== null && accFill) {
-            const accBase  = Math.min(refAccuracyMoa / 10, 1) * 100;
-            const accDelta = entry.simAccuracyMoa - refAccuracyMoa;
-            const accSim   = Math.min((refAccuracyMoa + accDelta) / 10, 1) * 100;
-            accFill.style.width = accBase + "%";
-            let deltaEl = accFill.parentElement.querySelector(".delta-bar");
-            if (!deltaEl) {
-                deltaEl = document.createElement("div");
-                deltaEl.className = "delta-bar";
-                accFill.parentElement.appendChild(deltaEl);
-            }
-            if (accDelta !== 0) {
-                deltaEl.style.left = Math.min(accBase, accSim) + "%";
-                deltaEl.style.width = Math.abs(accSim - accBase) + "%";
-                deltaEl.style.background = accDelta <= 0 ? "#4CAF50" : "#f44336";
-                // Delta bar tracks MOA value direction: MOA up (worse) extends right, MOA down (better) shrinks from right
-                deltaEl.style.borderRadius = accDelta > 0 ? "0 3px 3px 0" : "3px";
-                deltaEl.style.transformOrigin = accDelta > 0 ? "left" : "right";
-                deltaEl.style.display = "";
-                _animateDeltaBarIn(deltaEl);
-            } else {
-                _animateDeltaBarOut(deltaEl);
-            }
-            if (accVal) {
-                const deltaText = accDelta !== 0
-                    ? ` <span style="color:${accDelta <= 0 ? "#4CAF50" : "#f44336"}">(${accDelta > 0 ? "+" : ""}${accDelta.toFixed(2)})</span>`
-                    : "";
-                accVal.innerHTML = `<span style="color:#eee">${refAccuracyMoa.toFixed(2)} MOA</span>${deltaText}`;
-            }
-        }
-
-        // Weight and EED deltas must be computed against a "no-ammo" reference so the
-        // ammo weight (present in lastTotalWeight/lastEED but absent from batch simWeight/simEED)
-        // cancels out. In compare mode the baseline is already no-ammo so use it directly.
-        // In normal mode, find the currently installed item's batch simWeight/simEED (also no-ammo).
-        //
-        // For magazines with different capacities the ammo does NOT cancel: hovering a
-        // 50-round drum vs an installed 10-round mag means 40 extra rounds of ammo when
-        // assumeFullMag is on. We correct for this with the capacity delta * ammo weight.
-        const { weightVal, eedVal } = _statBarEls;
-        let refWeightForDelta, refEEDForDelta;
-        let installedMagCap = null;
-        if (EFTForge.state.compareMode && EFTForge.state.compareBaselineId) {
-            refWeightForDelta = refWeight;
-            refEEDForDelta    = refEED;
-        } else {
-            const installedItemId = String(
-                EFTForge.state.lastParentNode?.children?.[EFTForge.state.lastSlot?.id]?.item?.id ?? ""
-            );
-            const installedEntry = installedItemId
-                ? EFTForge.state.lastProcessedItems?.find(e => String(e.item.id) === installedItemId)
-                : null;
-            refWeightForDelta = installedEntry?.simWeight ?? entry.baseWeight;
-            refEEDForDelta    = installedEntry?.simEED    ?? entry.baseEED;
-            installedMagCap   = installedEntry?.item?.magazine_capacity ?? null;
-        }
-
-        // Ammo capacity correction: only when assumeFullMag is on, both items are mags, and ammo is selected
-        let magCapWeightCorrection = 0;
-        let magCapEEDCorrection    = 0;
-        const candidateMagCap = entry.item?.magazine_capacity ?? null;
-        if (EFTForge.state.assumeFullMag && candidateMagCap != null && installedMagCap != null) {
-            const ammoSelect = document.getElementById("ammo-select");
-            const ammoWeightPerRound = EFTForge.state.ammoWeightMap?.[ammoSelect?.value] ?? 0;
-            const capDiff = candidateMagCap - installedMagCap;
-            magCapWeightCorrection = ammoWeightPerRound * capDiff;
-            // EED = -15 * (weight - KG), so adding ammo weight reduces EED by 15 * weight
-            magCapEEDCorrection    = -15 * ammoWeightPerRound * capDiff;
-        }
-
-        if (weightVal) {
-            const weightDelta = (entry.simWeight - refWeightForDelta) + magCapWeightCorrection;
-            const deltaText = weightDelta !== 0
-                ? ` <span style="color:${weightDelta <= 0 ? "#4CAF50" : "#f44336"}">(${weightDelta > 0 ? "+" : ""}${weightDelta.toFixed(3)} kg)</span>`
-                : "";
-            weightVal.innerHTML = `<span style="color:#eee">${refWeight.toFixed(3)} kg</span>${deltaText}`;
-        }
-        if (eedVal) {
-            const eedDelta = (entry.simEED - refEEDForDelta) + magCapEEDCorrection;
-            const deltaText = eedDelta !== 0
-                ? ` <span style="color:${eedDelta >= 0 ? "#4CAF50" : "#f44336"}">(${eedDelta > 0 ? "+" : ""}${eedDelta.toFixed(1)})</span>`
-                : "";
-            eedVal.className = refEED >= 0 ? "positive" : "negative";
-            eedVal.innerHTML = `${refEED > 0 ? "+" : ""}${refEED.toFixed(1)}${deltaText}`;
-        }
+        _showHoverDeltas(entry);
     });
 
     row.addEventListener("mouseleave", () => {
-        if (!_statBarEls) return;
-
-        const { ergoFill, ergoVal, rvFill, rvVal, rhFill, rhVal, accFill, accVal } = _statBarEls;
-
-        // Animate delta bars out
-        [ergoFill, rvFill, rhFill, accFill].forEach(fill => {
-            if (!fill) return;
-            const deltaEl = fill.parentElement.querySelector(".delta-bar");
-            if (deltaEl) _animateDeltaBarOut(deltaEl);
-        });
-
-        // In compare mode with a baseline: restore to baseline stats; otherwise current build
-        let displayErgo, displayRv, displayRh, displayAcc;
-        if (EFTForge.state.compareMode && EFTForge.state.compareBaselineId) {
-            const bl = EFTForge.state.lastProcessedItems.find(
-                e => String(e.item.id) === EFTForge.state.compareBaselineId
-            ) || EFTForge.state.compareBaselineEntry;
-            if (bl) {
-                displayErgo = bl.simErgo;
-                displayRv   = bl.simRecoilV;
-                displayRh   = bl.simRecoilH;
-                displayAcc  = bl.simAccuracyMoa ?? null;
-            } else {
-                displayErgo = EFTForge.state.lastTotalErgo;
-                displayRv   = EFTForge.state.lastRecoilV;
-                displayRh   = EFTForge.state.lastRecoilH;
-                displayAcc  = EFTForge.state.lastAccuracyMoa ?? null;
-            }
-        } else {
-            displayErgo = EFTForge.state.lastTotalErgo;
-            displayRv   = EFTForge.state.lastRecoilV;
-            displayRh   = EFTForge.state.lastRecoilH;
-            displayAcc  = EFTForge.state.lastAccuracyMoa ?? null;
-        }
-
-        if (ergoFill) ergoFill.style.width = Math.min(displayErgo, 100) + "%";
-        if (ergoVal)  ergoVal.textContent  = formatStat(displayErgo);
-        if (rvFill)   rvFill.style.width   = displayRv !== null ? Math.min(Math.round(displayRv), 500) / 5 + "%" : "0%";
-        if (rvVal)    rvVal.textContent    = displayRv !== null ? Math.round(displayRv) : "-";
-        if (rhFill)   rhFill.style.width   = displayRh !== null ? Math.min(Math.round(displayRh), 500) / 5 + "%" : "0%";
-        if (rhVal)    rhVal.textContent    = displayRh !== null ? Math.round(displayRh) : "-";
-        if (accFill)  accFill.style.width  = displayAcc !== null ? Math.min(displayAcc / 10, 1) * 100 + "%" : "0%";
-        if (accVal)   accVal.textContent   = displayAcc !== null ? displayAcc.toFixed(2) + " MOA" : "-";
-
-        // Restore weight and EED to baseline stats (if set) or current build
-        if (EFTForge.state.compareMode && EFTForge.state.compareBaselineId) {
-            const bl = EFTForge.state.lastProcessedItems.find(
-                e => String(e.item.id) === EFTForge.state.compareBaselineId
-            ) || EFTForge.state.compareBaselineEntry;
-            _setExtraStats(
-                bl ? bl.simWeight : EFTForge.state.lastTotalWeight,
-                bl ? bl.simEED    : EFTForge.state.lastEED
-            );
-        } else {
-            _setExtraStats(EFTForge.state.lastTotalWeight, EFTForge.state.lastEED);
-        }
+        EFTForge.builder3d?.prefetch(null);
+        _clearHoverDeltas();
     });
 
     // Swipe-left to remove (touch devices - auto-registered by MutationObserver in app.js)
@@ -1654,9 +1760,9 @@ function renderAttachmentRows(items) {
                 ? _findSlotPath(EFTForge.state.buildTree, EFTForge.state.lastParentNode, EFTForge.state.lastSlot.id)
                 : null;
             applyAttachmentSort();
-            // Update weight and EED immediately to reflect the new baseline
+            // Update weight and TrueErgo immediately to reflect the new baseline
             if (!_statBarEls || !_statBarEls.weightVal?.isConnected) _cacheStatBarEls();
-            _setExtraStats(entry.simWeight, entry.simEED);
+            _setExtraStats(entry.simWeight, entry.simTrueErgo);
             return;
         }
 
@@ -1667,7 +1773,10 @@ function renderAttachmentRows(items) {
                 `${item.name}\n${entry.conflictName}`
             );
 
-            if (EFTForge.state.gridView) {
+            if (EFTForge.builder3d?.isActive()) {
+                // The workbench is hidden: flash the conflict on the 3D view instead.
+                EFTForge.builder3d.flashConflict(entry.conflictingItemId, entry.conflictingSlotId);
+            } else if (EFTForge.state.gridView) {
                 const conflictsWithGun = entry.conflictingItemId && entry.conflictingItemId === EFTForge.state.currentGun?.id;
                 if (conflictsWithGun) {
                     flashGunCellInGrid();
@@ -2122,20 +2231,21 @@ function _prepareComboItems(result) {
     };
 
     const base       = result.base;
-    const baseEED     = parseFloat(base.evo_ergo_delta ?? 0);
     const baseRecoilV = base.recoil_vertical ?? null;
     const baseErgo    = parseFloat(base.total_ergo ?? 0);
     const baseWeight  = parseFloat(base.total_weight ?? 0);
+    const ted = _tedContext(baseWeight);
+    const baseTrueErgo = ted.base(baseErgo, baseWeight);
 
     return result.combos.map(combo => {
         const parent = compact ? resolveItem(combo.parent_item_id) : combo.parent_item;
         const children = compact ? combo.child_item_ids.map(resolveItem) : combo.child_items;
-        const simEED     = parseFloat(combo.evo_ergo_delta ?? 0);
         const simErgo    = parseFloat(combo.total_ergo ?? 0);
         const simWeight  = parseFloat(combo.total_weight ?? 0);
+        const simTrueErgo = ted.sim(simErgo, simWeight, [parent, ...children]);
         const simRecoilV = combo.recoil_vertical ?? null;
         const simRecoilH = combo.recoil_horizontal ?? null;
-        const comboEEDDelta    = simEED - baseEED;
+        const comboTrueErgoDelta    = simTrueErgo - baseTrueErgo;
         const comboErgoDelta   = simErgo - baseErgo;
         const comboWeightDelta = simWeight - baseWeight;
         const comboRecoilPct   = parseFloat(parent.recoil_modifier ?? 0) * 100
@@ -2165,8 +2275,8 @@ function _prepareComboItems(result) {
             allChildSlotIds:            combo.all_child_slot_ids,
             allNestedSlotIds:           combo.all_nested_slot_ids ?? combo.all_child_slot_ids,
             conflict:                   combo.conflict || null,
-            sortName, simEED, simErgo, simWeight, simRecoilV, simRecoilH,
-            comboEEDDelta, comboErgoDelta, comboWeightDelta, comboRecoilPct,
+            sortName, simTrueErgo, simErgo, simWeight, simRecoilV, simRecoilH,
+            comboTrueErgoDelta, comboErgoDelta, comboWeightDelta, comboRecoilPct,
             totalPrice: finalPrice,
             comboRublePerRecoil,
         };
@@ -2202,7 +2312,7 @@ function applyComboSort() {
             case "name":    primary = a.sortName < b.sortName ? -1 : a.sortName > b.sortName ? 1 : 0; break;
             case "recoil":  primary = a.comboRecoilPct - b.comboRecoilPct; break;
             case "ergo":    primary = a.comboErgoDelta - b.comboErgoDelta; break;
-            case "evo":     primary = a.comboEEDDelta  - b.comboEEDDelta;  break;
+            case "evo":     primary = a.comboTrueErgoDelta  - b.comboTrueErgoDelta;  break;
             case "weight":  primary = a.comboWeightDelta - b.comboWeightDelta; break;
             case "price": {
                 const ap = a.totalPrice; const bp = b.totalPrice;
@@ -2245,9 +2355,9 @@ function _updateComboColumnVisibility(items) {
     const table = document.querySelector(".attachment-table");
     if (!table) return;
 
-    let hasWeight = false, hasRecoil = false, hasErgo = false, hasEED = false, hasPrice = false;
+    let hasWeight = false, hasRecoil = false, hasErgo = false, hasTrueErgo = false, hasPrice = false;
     for (const entry of items) {
-        hasEED ||= Math.abs(entry.comboEEDDelta) > 0.05;
+        hasTrueErgo ||= Math.abs(entry.comboTrueErgoDelta) > TRUE_ERGO_VISIBLE;
         hasPrice ||= entry.totalPrice !== null;
         if (!hasWeight || !hasRecoil || !hasErgo) {
             for (const item of [entry.parentEntry.item, ...entry.childItems]) {
@@ -2257,9 +2367,9 @@ function _updateComboColumnVisibility(items) {
                 if (hasWeight && hasRecoil && hasErgo) break;
             }
         }
-        if (hasWeight && hasRecoil && hasErgo && hasEED && hasPrice) break;
+        if (hasWeight && hasRecoil && hasErgo && hasTrueErgo && hasPrice) break;
     }
-    const hasEvo = hasErgo && hasEED;
+    const hasEvo = hasErgo && hasTrueErgo;
 
     table.classList.toggle("hide-col-weight", !hasWeight);
     table.classList.toggle("hide-col-recoil", !hasRecoil);
@@ -2269,9 +2379,10 @@ function _updateComboColumnVisibility(items) {
     table.classList.toggle("hide-col-price",       !hasPrice);
     table.classList.toggle("hide-col-rub-recoil",  !(hasRecoil && hasPrice));
     table.classList.toggle("hide-col-balance",     !(hasRecoil && hasErgo));
-    // Heat/cooling/durability-burn and velocity modifier are per-item stats with no combo aggregation - always hidden here
+    // Heat/cooling/durability-burn, velocity and loudness are per-item stats with no combo aggregation - always hidden here
     table.classList.add("hide-col-heat");
     table.classList.add("hide-col-vel");
+    table.classList.add("hide-col-loud");
 }
 
 function _isComboInstalled(entry) {
@@ -2362,7 +2473,7 @@ function _buildComboRow(entry) {
     }
 
     const ergoCls   = entry.comboErgoDelta >= 0 ? "ergo-positive" : "ergo-negative";
-    const evoCls    = entry.comboEEDDelta  >= 0 ? "evo-positive" : "evo-negative";
+    const evoCls    = entry.comboTrueErgoDelta  >= 0 ? "evo-positive" : "evo-negative";
 
     const rrCellHtml = entry.comboRublePerRecoil !== null
         ? `<div class="att-price-wrap"><span>${_formatPrice(Math.round(entry.comboRublePerRecoil))}</span></div>`
@@ -2380,7 +2491,7 @@ function _buildComboRow(entry) {
         <td>${fmtSign(entry.comboRecoilPct)}%</td>
         <td class="acc-cell"></td>
         <td class="${ergoCls}">${entry.comboErgoDelta >= 0 ? "+" : ""}${formatStat(entry.comboErgoDelta)}</td>
-        <td class="${evoCls}">${fmtSign(entry.comboEEDDelta)}</td>
+        <td class="${evoCls}">${fmtSign(entry.comboTrueErgoDelta)}</td>
         <td class="${balanceCls}">${fmtSign(balanceScore)}</td>
     `;
 
@@ -2544,7 +2655,7 @@ function _buildComboRow(entry) {
         }
 
         let displayWeight = entry.simWeight;
-        let displayEED    = entry.simEED;
+        let displayTrueErgo    = entry.simTrueErgo;
         if (EFTForge.state.assumeFullMag) {
             // Find which magazine would be loaded after installing the combo
             let magCap = entry.parentEntry.item.magazine_capacity > 0
@@ -2566,10 +2677,9 @@ function _buildComboRow(entry) {
                 const ammoSelect = document.getElementById("ammo-select");
                 const ammoWeightPerRound = EFTForge.state.ammoWeightMap?.[ammoSelect?.value] ?? 0;
                 displayWeight += ammoWeightPerRound * magCap;
-                displayEED    -= 15 * ammoWeightPerRound * magCap;
             }
         }
-        _setExtraStats(displayWeight, displayEED);
+        _setExtraStats(displayWeight, displayTrueErgo);
     });
 
     row.addEventListener("mouseleave", () => {
@@ -2587,7 +2697,10 @@ function _buildComboRow(entry) {
             const { t } = EFTForge.lang;
             const conflictText = t(entry.conflict.reason_key) + (entry.conflict.reason_name ?? "");
             replaceToast("attachment-conflict", t("toast.attachmentConflict"), `${parentItem.name}\n${conflictText}`);
-            if (EFTForge.state.gridView) {
+            if (EFTForge.builder3d?.isActive()) {
+                // The workbench is hidden: flash the conflict on the 3D view instead.
+                EFTForge.builder3d.flashConflict(entry.conflict.conflicting_item_id, entry.conflict.conflicting_slot_id);
+            } else if (EFTForge.state.gridView) {
                 const conflictsWithGun = entry.conflict.conflicting_item_id === EFTForge.state.currentGun?.id;
                 if (conflictsWithGun) {
                     flashGunCellInGrid();

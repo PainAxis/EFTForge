@@ -24,13 +24,22 @@ window.EFTForge.config = {
     // until the user explicitly connects to EFTForge.com live services.
     COMMUNITY_DISABLED: !!(_desktop && _desktop.communityMode === "local"),
 
+    // The Kitbash! 3D viewer's embeddable page (an iframe, driven over postMessage).
+    // Null leaves the builder 2D only. Local dev serves the Kitbash! repo root on 8765,
+    // production loads it from the Kitbash! CDN. The desktop app only reaches the CDN in
+    // connected mode: fully local mode talks to no live service, so it stays 2D.
+    VIEWER_URL: _desktop
+        ? (_desktop.communityMode === "connected" ? "https://kitbash.eftforge.com/viewer/frame.html" : null)
+        : _isLocalDev ? "http://127.0.0.1:8765/viewer/frame.html"
+        : "https://kitbash.eftforge.com/viewer/frame.html",
+
     // Static announcements fetched as fallback when the backend is unreachable.
     // Edit frontend/offline/announcements.json and deploy - nginx serves it at the same path in production.
     // Format: [{id, message, level, expires_at, dismissible}] - use string IDs like "maint-2026-05-25".
     STATIC_ANNOUNCEMENTS_URL: "/offline/announcements.json",
 
-    APP_VERSION:    "Development Build",
-    APP_BUILD_DATE: "2026-09-16T04:29:10.977Z", // new Date().toISOString()
+    APP_VERSION:    "v2.0.1",
+    APP_BUILD_DATE: "2026-09-30T19:50:16.271Z", // new Date().toISOString()
 
     CALIBER_DISPLAY_MAP: {
         "Caliber20x1mm":      "20x1mm disk",

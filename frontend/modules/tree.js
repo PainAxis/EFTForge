@@ -59,8 +59,8 @@ async function renderFullTree(preserveScroll = true) {
                 ${t("tree.title")}
                 <span class="tree-swipe-hint">${t("tree.swipeHint")}</span>
                 <span class="tree-view-toggle">
-                    <button class="compare-toggle bp-imggen-toggle${_bpEnabled && !_bpGlobalDisabled ? ' active' : ''}${_bpGlobalDisabled ? ' bp-imggen-globally-disabled' : ''}" onclick="toggleImgGen()" ${_bpGlobalDisabled ? `data-tooltip="${_bpDisabledTip()}"` : ''} style="margin-right:6px;">
-                        ${t("ui.imgGen")}
+                    <button class="compare-toggle bp-imggen-toggle${_bpEnabled && !_bpGlobalDisabled ? ' active' : ''}${_bpGlobalDisabled ? ' bp-imggen-globally-disabled' : ''}" onclick="toggleImgGen()" ${_bpGlobalDisabled ? `data-tooltip="${_bpDisabledTip()}"` : ''} style="margin-right:6px;" aria-label="Kitbash! ${t("ui.imgGen")}">
+                        ${_bpToggleLogoHtml()}${t("ui.imgGen")}
                         <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
                     </button>
                     <button class="toggle-btn ag-export-img-btn" data-tooltip="${t("build.exportImg")}" onclick="exportBuildImage()" style="margin-right:4px;"><svg width="13" height="13" viewBox="0 0 13 13" fill="none" style="display:block"><polyline points="6.5,1 6.5,8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><polyline points="3.5,6 6.5,9 9.5,6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="1.5" y="10.5" width="10" height="1" rx="0.5" fill="currentColor"/></svg></button>
@@ -311,6 +311,9 @@ function updateSlotIcon(parentNode, slotId, item) {
 
 function flashSlot(parentNode, slotId, type = "install") {
 
+    // The 3D view sweeps the same slot's box.
+    EFTForge.builder3d?.flashSlot(parentNode, slotId, type);
+
     const slotElement = findSlotElement(parentNode, slotId);
     if (!slotElement) return;
 
@@ -460,6 +463,10 @@ async function installAttachment(parentNode, slotId, item) {
     if (childSlots.length > 0) {
         // Flash all newly revealed child slots with subtle grey
         const installedNode = parentNode.children[slotId];
+        // The 3D view sweeps the same new slot boxes.
+        if (installedNode) {
+            for (const cs of childSlots) EFTForge.builder3d?.flashSlot(installedNode, cs.id, "reveal");
+        }
         if (installedNode && installedNode._slotEls) {
             Object.values(installedNode._slotEls).forEach(el => {
                 el.classList.remove("slot-flash-reveal");
@@ -534,7 +541,7 @@ function removeAttachment(parentNode, slotId, keepTableOpen = false) {
 
     // If the table is still open (same slot with keepTableOpen, or a different slot
     // entirely), clear stale conflict states for instant feedback, then silently refetch
-    // stats in the background - simErgo/simRecoilV/simRecoilH/simWeight/simEED were
+    // stats in the background - simErgo/simRecoilV/simRecoilH/simWeight/simTrueErgo were
     // computed against the pre-removal installed-ids snapshot and are now stale after
     // *any* attachment removal (not just one that resolves a conflict), so the hover
     // delta bars need fresh numbers or they won't match what actually gets installed.

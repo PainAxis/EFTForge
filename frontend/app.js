@@ -437,6 +437,9 @@ function initPanelResizer() {
         cancelAnimationFrame(resizeAnimFrame);
         resizeAnimFrame = requestAnimationFrame(() => {
             if (container.classList.contains("no-gun")) return;
+            // The 3D view stretches the left panel over the whole build area, which would read
+            // as far too wide here and overwrite the saved 2D width.
+            if (EFTForge.builder3d?.isActive()) return;
             const maxWidth = container.offsetWidth - MIN_RIGHT - resizer.offsetWidth;
             const current  = leftPanel.offsetWidth;
             if (current <= maxWidth) return;
@@ -843,6 +846,72 @@ function _initSwipeObserver() {
    UI - ABOUT DIALOG
 =========================== */
 
+// Fill in the Kitbash! row with the commit (and codename) the server's Kitbash!
+// checkout is on and the game version its newest sprites were baked from. The row stays hidden
+// when the server has no Kitbash!, knows neither, or the request fails. Desktop in
+// connected mode gets the live server's Kitbash! through the community proxy. The status is shared with page load, so we only
+// show the loading line while that first request is still out.
+async function _loadAboutKitbashVersion() {
+    // Desktop local mode never asks the server, same as the Image Generation toggle,
+    // since its backend has no Kitbash! and blocks /build-image outright.
+    if (EFTForge.config?.COMMUNITY_DISABLED) return;
+    const cached = EFTForge.api.peekBuildImageStatus();
+    if (cached) {
+        _renderAboutKitbash(cached.kitbash);
+        return;
+    }
+    const loading = document.getElementById("about-kitbash-loading");
+    if (loading) loading.style.display = "flex";
+    const label = EFTForge.lang.t("about.kitbashLoading");
+    let dots = 1;
+    const dotsInterval = setInterval(() => {
+        dots = dots >= 3 ? 1 : dots + 1;
+        const el = document.getElementById("about-kitbash-loading-text");
+        if (el) el.textContent = label + ".".repeat(dots);
+    }, 500);
+    let kb = null;
+    try {
+        kb = (await EFTForge.api.fetchBuildImageStatus()).kitbash;
+    } catch (_) {}
+    clearInterval(dotsInterval);
+    // The dialog may have been closed and reopened while we waited, so look it up again.
+    const loadingNow = document.getElementById("about-kitbash-loading");
+    if (loadingNow) loadingNow.style.display = "none";
+    _renderAboutKitbash(kb);
+}
+
+function _renderAboutKitbash(kb) {
+    const section = document.getElementById("about-kitbash");
+    if (!section || !kb) return;
+    let shown = false;
+    if (typeof kb.commit === "string" && typeof kb.date === "string") {
+        const ver = document.getElementById("about-kitbash-version");
+        const codename = typeof kb.codename === "string" ? ` (${kb.codename})` : "";
+        ver.textContent = `${kb.commit.slice(0, 7)}${codename} - ${kb.date.slice(0, 10)}`;
+        // The release's own wordmark (assets/images/kitbash-wordmark-<codename>.png), else
+        // the plain one.
+        const mark = document.getElementById("about-kitbash-wordmark");
+        if (mark && typeof kb.codename === "string" && /^[a-z0-9-]+$/i.test(kb.codename)) {
+            mark.onerror = () => { mark.onerror = null; mark.src = "./assets/images/kitbash-for-eftforge-wordmark.png"; };
+            mark.src = `./assets/images/kitbash-wordmark-${kb.codename.toLowerCase()}.png`;
+            mark.alt = `Kitbash! ${kb.codename}`;
+        }
+        ver.style.display = "";
+        shown = true;
+    }
+    if (typeof kb.gameVersion === "string") {
+        const game = document.getElementById("about-kitbash-game");
+        game.textContent = `${EFTForge.lang.t("about.kitbashGameVersion")}${kb.gameVersion}`;
+        game.style.display = "";
+        shown = true;
+    }
+    if (!shown) return;
+    section.style.display = "flex";
+    // Name Kitbash! in the affiliation disclaimer only once its row is actually on screen.
+    const disclaimer = document.getElementById("about-disclaimer2");
+    if (disclaimer) disclaimer.innerHTML = EFTForge.lang.t("about.disclaimer2Kitbash");
+}
+
 function showAboutDialog() {
     if (document.getElementById("about-dialog")) return;
 
@@ -850,6 +919,9 @@ function showAboutDialog() {
     // settings modal (desktop-settings.js) - only show it here on the
     // website, which has no separate settings modal of its own anymore.
     const _showPerf = !(EFTForge.config && EFTForge.config.IS_DESKTOP);
+    // Show the installer download links only on the website, since the
+    // desktop app is already installed and updates itself.
+    const _showDesktopDl = _showPerf;
 
     const overlay = document.createElement("div");
     overlay.id = "about-dialog";
@@ -890,15 +962,47 @@ function showAboutDialog() {
                     </a>
                 </div>
 
+                ${_showDesktopDl ? `
+                <div class="about-desktop-dl">
+                    <span class="about-desktop-dl-label">${t("about.desktopDownload")}</span>
+                    <a href="https://github.com/SouthHorizons76/EFTForge/releases" target="_blank" rel="noopener noreferrer"
+                       class="about-desktop-dl-link" title="${t("about.desktopGithub")}" aria-label="${t("about.desktopGithub")}">
+                        <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+                    </a>
+                    <a href="https://gitee.com/morph1ne/eftforge-gitee-mirror/releases" target="_blank" rel="noopener noreferrer"
+                       class="about-desktop-dl-link" title="${t("about.desktopGitee")}" aria-label="${t("about.desktopGitee")}">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M11.984 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.016 0zm6.09 5.333c.328 0 .593.266.592.593v1.482a.594.594 0 0 1-.593.592H9.777c-.982 0-1.778.796-1.778 1.778v5.63c0 .327.266.592.593.592h5.63c.982 0 1.778-.796 1.778-1.778v-.296a.593.593 0 0 0-.592-.593h-4.15a.592.592 0 0 1-.592-.592v-1.482a.593.593 0 0 1 .593-.592h6.815c.327 0 .593.265.593.592v3.408a4 4 0 0 1-4 4H5.926a.593.593 0 0 1-.593-.593V9.778a4.444 4.444 0 0 1 4.445-4.444h8.296z"/></svg>
+                    </a>
+                </div>
+                ` : ""}
+
+                <div id="about-kitbash-loading" style="display:none; flex-direction:column; gap:16px;">
+                    <hr class="modal-divider" style="margin:0;" />
+                    <span id="about-kitbash-loading-text" style="font-size:13px; color:#555; letter-spacing:1px;">${t("about.kitbashLoading")}.</span>
+                </div>
+
+                <div id="about-kitbash" style="display:none; flex-direction:column; gap:16px;">
+                    <hr class="modal-divider" style="margin:0;" />
+                    <div style="display:flex; align-items:center; justify-content:space-between; user-select:none;">
+                        <img id="about-kitbash-wordmark" src="./assets/images/kitbash-for-eftforge-wordmark.png" alt="Kitbash! for EFTForge" draggable="false" style="height:46px; width:auto; object-fit:contain; flex-shrink:0; -webkit-user-drag:none;" />
+                        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:5px; font-size:13px; color:#555; letter-spacing:1px;">
+                            <span id="about-kitbash-version" style="display:none;"></span>
+                            <span id="about-kitbash-game" style="display:none;"></span>
+                        </div>
+                    </div>
+                </div>
+
                 <hr class="modal-divider" style="margin:0;" />
 
                 <div style="font-size:13px; color:#888; line-height:1.75;">
                     <p style="margin:0 0 10px 0;">${t("about.disclaimer1")}</p>
-                    <p style="margin:0 0 10px 0;">${t("about.disclaimer2")}</p>
+                    <p id="about-disclaimer2" style="margin:0 0 10px 0;">${t("about.disclaimer2")}</p>
                     <p style="margin:0;">
-                        ${t("about.dataSource")}
-                        <a href="https://tarkov.dev/api" target="_blank" rel="noopener noreferrer"
-                           style="color:#888; text-decoration:underline; text-underline-offset:3px;">tarkov.dev API</a>.
+                        ${t("about.dataSource")
+                            .replace("{tarkovdev}", `<a href="https://tarkov.dev/api" target="_blank" rel="noopener noreferrer"
+                           style="color:#888; text-decoration:underline; text-underline-offset:3px;">tarkov.dev API</a>`)
+                            .replace("{spt}", `<a href="https://github.com/SP-Tushonka" target="_blank" rel="noopener noreferrer"
+                           style="color:#888; text-decoration:underline; text-underline-offset:3px;">SP-Tushonka</a>`)}
                     </p>
                 </div>
 
@@ -942,6 +1046,7 @@ function showAboutDialog() {
 
     document.body.appendChild(overlay);
     if (_showPerf) EFTForge.perfMetrics.mount(document.getElementById("about-perf-body"), overlay);
+    _loadAboutKitbashVersion();
     document.getElementById("about-modal-close").addEventListener("click", () => overlay.remove());
     let _mdOnBackdrop = false;
     overlay.addEventListener("mousedown", e => { _mdOnBackdrop = e.target === overlay; });
@@ -1134,6 +1239,7 @@ function setupCustomSelect(selectId) {
     sel.addEventListener("input", syncTrigger);
 
     rebuild();
+    setupCustomScrollbar(list, { inset: 4 });
     return wrapper;
 }
 
@@ -1233,6 +1339,9 @@ async function switchLang(lang) {
 
     // Snapshot build state before teardown - item names in cached objects are language-specific
     const previousGunId = EFTForge.state.currentGun?.id ?? null;
+    // returnToGunSelection() below deactivates the open tab, so remember it and
+    // reactivate it afterwards instead of reloading the build with no tab attached.
+    const previousTabId = EFTForge.state.activeTabId ?? null;
     let snapshotCode = null;
     let snapshotBuildName = null;
     if (EFTForge.state.currentGun) {
@@ -1278,7 +1387,15 @@ async function switchLang(lang) {
 
     // Restore previously open weapon with its build state in the new language
     try {
-        if (previousGunId) {
+        if (previousTabId && EFTForge.state.tabs.some(tab => tab.id === previousTabId)) {
+            // The tab record already holds the build, its name and its undo history,
+            // and switching to it reloads everything in the new language.
+            await EFTForge.tabs.switchToTab(previousTabId);
+            if (snapshotCode) {
+                const { t: _t } = EFTForge.lang;
+                showToast(_t("toast.stateRestored"), _t("toast.stateRestoredMsg"), 3000, "#4CAF50");
+            }
+        } else if (previousGunId) {
             const gun = EFTForge.state.allGuns.find(g => g.id === previousGunId);
             if (gun) {
                 if (snapshotCode) {
@@ -1369,6 +1486,16 @@ async function switchLang(lang) {
         if (target === activeTarget) show(target, _lastX, _lastY);
     }
 
+    // A tooltip for something outside our page (the 3D viewer's frame reports its own),
+    // at page coordinates; null text hides it. The next hover of ours takes over as usual.
+    const EXTERNAL = { dataset: {} };
+    function showAt(text, cx, cy) {
+        if (!text) { if (activeTarget === EXTERNAL) hide(); return; }
+        if (activeTarget === EXTERNAL && EXTERNAL.dataset.tooltip === text) { position(cx, cy); return; }
+        EXTERNAL.dataset.tooltip = text;
+        show(EXTERNAL, cx, cy);
+    }
+
     document.addEventListener("mousemove", (e) => {
         _lastX = e.clientX;
         _lastY = e.clientY;
@@ -1400,7 +1527,7 @@ async function switchLang(lang) {
     // Hide when mouse leaves the document
     document.addEventListener("mouseleave", hide, true);
 
-    window.EFTForge.tooltip = { hide, refresh };
+    window.EFTForge.tooltip = { hide, refresh, showAt };
 })();
 
 /* ===========================
@@ -1433,12 +1560,6 @@ async function switchLang(lang) {
         // header is narrower, e.g. the desktop app's window-controls layout.
         const tarkovClock = document.getElementById("tarkov-clock");
         if (tarkovClock) tarkovClock.insertAdjacentElement("afterend", btn);
-
-        // Restore saved toolbar visibility
-        const toolbar = document.getElementById("ag-dev-toolbar");
-        if (toolbar && _loadSettings().gridToolbar === false) {
-            toolbar.style.display = "none";
-        }
 
         // Restore item ID overlay state
         window.EFTForge._dev = window.EFTForge._dev || {};
@@ -1819,8 +1940,8 @@ async function switchLang(lang) {
         overlay.id = "dev-modal-overlay";
         overlay.className = "modal-overlay";
 
-        const toolbar = document.getElementById("ag-dev-toolbar");
-        const toolbarVisible = toolbar ? toolbar.style.display !== "none" : false;
+        // The grid devtool injects its toolbar only once opted in, so existence is the visibility state
+        const toolbarVisible = !!document.getElementById("ag-dev-toolbar");
 
         overlay.innerHTML = `
             <div class="modal-window" style="max-width:480px; max-height:85vh; display:flex; flex-direction:column;">
@@ -1952,13 +2073,13 @@ async function switchLang(lang) {
         overlay.addEventListener("click", (e) => { if (e.target === overlay && _mdOnBackdrop) overlay.remove(); });
 
         document.getElementById("dev-grid-tool-toggle").addEventListener("click", function () {
-            const tb = document.getElementById("ag-dev-toolbar");
-            if (!tb) return;
-            const nowVisible = tb.style.display !== "none";
-            tb.style.display = nowVisible ? "none" : "";
+            const agDevTool = window._agDevTool;
+            if (!agDevTool) return;
+            const nowVisible = !!document.getElementById("ag-dev-toolbar");
+            if (nowVisible) agDevTool.hide();
+            else agDevTool.show();
             this.textContent = nowVisible ? "OFF" : "ON";
             this.classList.toggle("active", !nowVisible);
-            _saveSetting("gridToolbar", !nowVisible);
         });
 
         document.getElementById("dev-id-overlay-toggle").addEventListener("click", function () {
@@ -2078,22 +2199,52 @@ async function switchLang(lang) {
 =========================== */
 
 (function () {
+    const STRENGTH = 7;
+    const dots = document.getElementById("page-bg-dots");
+    const container = document.getElementById("main-container");
+    const listeners = new Set();
     let _rafPending = false;
     let _mouseX = 0, _mouseY = 0;
+    let _offset = [0, 0];
 
-    document.addEventListener("mousemove", e => {
-        _mouseX = e.clientX;
-        _mouseY = e.clientY;
+    // Only the dots' own layer moves (styles.css #page-bg-dots): a transform, so the
+    // compositor shifts it without a style recalc or a repaint.
+    function _apply() {
+        _rafPending = false;
+        const x = (_mouseX / window.innerWidth  - 0.5) * STRENGTH;
+        const y = (_mouseY / window.innerHeight - 0.5) * STRENGTH;
+        if (x === _offset[0] && y === _offset[1]) return;
+        _offset = [x, y];
+        dots.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+        listeners.forEach(fn => fn(x, y));
+    }
+
+    // Page coordinates. The 3D view's iframe keeps its mouse moves to itself, so
+    // builder-3d.js reports them here too.
+    function pointer(x, y) {
+        _mouseX = x;
+        _mouseY = y;
         if (_rafPending) return;
         _rafPending = true;
-        requestAnimationFrame(() => {
-            _rafPending = false;
-            const cx = _mouseX / window.innerWidth  - 0.5;
-            const cy = _mouseY / window.innerHeight - 0.5;
-            const strength = 7;
-            document.documentElement.style.setProperty("--dot-parallax-pos", `${cx * strength}px ${cy * strength}px`);
-        });
-    });
+        requestAnimationFrame(_apply);
+    }
+
+    // Start the tiles at the viewport's corner, wherever the build area sits.
+    function _align() {
+        const r = container.getBoundingClientRect();
+        dots.style.backgroundPosition = `${-r.left}px ${-r.top}px`;
+    }
+
+    document.addEventListener("mousemove", e => pointer(e.clientX, e.clientY), { passive: true });
+    new ResizeObserver(_align).observe(container);
+    _align();
+    window.EFTForge = window.EFTForge || {};
+    EFTForge.dotParallax = {
+        pointer,
+        // The current shift in CSS pixels, and a callback for every change.
+        get offset() { return _offset; },
+        onChange(fn) { listeners.add(fn); },
+    };
 }());
 
 function _checkUrlBuildParam() {

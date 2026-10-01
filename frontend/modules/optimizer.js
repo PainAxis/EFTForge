@@ -131,9 +131,10 @@ window.EFTForge.optimizer = (function () {
     let _ergoWeight = 33;
     let _recoilWeight = 34;
     let _priceWeight = 33;
-    let _useEvoErgo = false;
+    let _useTrueErgo = false;
     let _weightUiMode = 'triangle'; // 'triangle' | 'sliders'
     let _fleaAvailable = true;
+    let _allowUnpriced = true;
     let _preventOverswing = false;
     let _requireSuppressor = false;
 
@@ -378,16 +379,6 @@ window.EFTForge.optimizer = (function () {
         const placeholder = document.getElementById('attachment-placeholder');
         if (placeholder && !isMobileLayout()) {
             _ensureEdgeTab(placeholder);
-            // The static tab in index.html ships with optimizer-edge-tab-pulse-snap
-            // hardcoded (so a first-ever visitor gets the pre-expanded intro state
-            // from their very first paint - see pulse()'s comment). _ensureEdgeTab
-            // no-ops when that element already exists, so a returning user (whose
-            // localStorage already says they've seen it) needs it stripped
-            // explicitly here instead, or it'd render stuck expanded forever with
-            // nothing left to ever remove it. This runs synchronously before the
-            // browser's first paint (this script isn't deferred/async), so there's
-            // no visible flash either way.
-            if (_hasPulsed) document.getElementById('optimizer-edge-tab')?.classList.remove('optimizer-edge-tab-pulse-snap');
             new MutationObserver(() => {
                 if (!EFTForge.state.publishMode) _ensureEdgeTab(placeholder);
             }).observe(placeholder, { childList: true });
@@ -423,52 +414,10 @@ window.EFTForge.optimizer = (function () {
         if (document.getElementById('optimizer-edge-tab')) return;
         const tab = document.createElement('div');
         tab.id = 'optimizer-edge-tab';
-        // Only pre-expanded (see pulse()'s comment) if this user has never seen the
-        // intro (tracked in localStorage, not just this session). Without this
-        // check, a placeholder rebuild later on (e.g. _restoreNormalPlaceholder
-        // after the publish-confirm flow) would recreate the tab already-expanded
-        // again, but pulse() would never fire again to collapse it - leaving it
-        // stuck expanded for good.
-        tab.className = _hasPulsed ? 'optimizer-edge-tab' : 'optimizer-edge-tab optimizer-edge-tab-pulse-snap';
+        tab.className = 'optimizer-edge-tab';
         tab.addEventListener('click', showPanel);
         tab.innerHTML = _edgeTabInnerHtml();
         placeholder.appendChild(tab);
-    }
-
-    // Draws the eye to the optimizer rail the very first time this user ever opens a
-    // gun's build panel (called from selectGun in gun-list.js), by replaying the
-    // rail's own mouse-leave collapse - no bespoke pulse animation. The tab already ships
-    // with .optimizer-edge-tab-pulse-snap applied (index.html / _ensureEdgeTab above)
-    // so it's rendered fully expanded, transitions disabled, from its very first
-    // paint - there's nothing before that first paint for it to have collapsed FROM,
-    // so there's no collapsed-then-snapped-open flicker to begin with. Removing the
-    // class after a short hold is then just a normal style change back to rest,
-    // which the base rule's own transition (the collapse curve) picks up and
-    // animates - the only motion that ever plays is that one-time collapse.
-    // Deferred two frames before removing it because selectGun un-hides the right
-    // panel (removes .no-gun) in the same tick; we wait for that reveal to commit
-    // and re-query the current tab (the MutationObserver may have re-appended it as
-    // a fresh node) before touching it.
-    const PULSE_HOLD_MS = 555; // how long the rail stays expanded before collapsing
-
-    // Once-ever gate, persisted in localStorage (not sessionStorage/in-memory): once
-    // this user has seen the intro on any visit, it must never play again, on any
-    // future page load or refresh either.
-    const PULSE_SEEN_KEY = 'eftforge_optimizer_intro_pulsed';
-    let _hasPulsed = localStorage.getItem(PULSE_SEEN_KEY) === 'true';
-
-    function pulse() {
-        // Don't burn the once-ever "seen it" flag on a device that never gets
-        // the edge-tab in the first place - a mobile-first visitor should still
-        // get the intro pulse the first time they show up on desktop.
-        if (isMobileLayout() || _hasPulsed) return;
-        _hasPulsed = true;
-        localStorage.setItem(PULSE_SEEN_KEY, 'true');
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-            const tab = document.getElementById('optimizer-edge-tab');
-            if (!tab) return;
-            setTimeout(() => tab.classList.remove('optimizer-edge-tab-pulse-snap'), PULSE_HOLD_MS);
-        }));
     }
 
     /* ===========================
@@ -615,7 +564,7 @@ window.EFTForge.optimizer = (function () {
     }
 
     function _ergoAxisLabel() {
-        return _useEvoErgo ? _t('optimizer.evoErgoShort') : _t('optimizer.ergonomics');
+        return _useTrueErgo ? _t('optimizer.trueErgoShort') : _t('optimizer.ergonomics');
     }
 
     function _customPresetRowHtml() {
@@ -722,14 +671,19 @@ window.EFTForge.optimizer = (function () {
         _renderCustomPresetRow();
     }
 
+    function _filterTileContentHtml(item, status) {
+        const icon = item.icon_link || item.icon || '';
+        const name = item.short_name || item.name || item.id;
+        return `${icon ? `<img class="attachment-icon" src="${escapeHtml(icon)}" alt="" onerror="this.style.visibility='hidden'">` : ''}<span class="slot-shortname">${_escape(name)}</span><span class="optimizer-filter-preset-status" aria-hidden="true">${status === 'locked' ? _LOCK_SVG : _BAN_SVG}</span>`;
+    }
+
     function _filterPresetTooltipHtml(preset) {
         const tiles = (items, status) => items.map(saved => {
                 const compatible = _modFilterData?.mods.find(mod => mod.id === saved.id);
                 const item = compatible || saved;
-                const icon = item.icon_link || item.icon || '';
                 const name = item.short_name || item.name || item.id;
                 const label = `${name}: ${_t(`optimizer.filterPreset.${status}`)}${compatible ? '' : ` (${_t('optimizer.filterPreset.incompatible')})`}`;
-                return `<div class="mf-tile-icon-wrap attachment-icon-wrapper optimizer-filter-preset-${status}${compatible ? '' : ' incompatible'}" role="img" aria-label="${escapeHtml(label)}">${icon ? `<img class="attachment-icon" src="${escapeHtml(icon)}" alt="" onerror="this.style.visibility='hidden'">` : ''}<div class="slot-shortname">${_escape(name)}</div><span class="optimizer-filter-preset-status" aria-hidden="true">${status === 'locked' ? _LOCK_SVG : _BAN_SVG}</span></div>`;
+                return `<div class="mf-tile-icon-wrap attachment-icon-wrapper optimizer-filter-preset-${status}${compatible ? '' : ' incompatible'}" role="img" aria-label="${escapeHtml(label)}">${_filterTileContentHtml(item, status)}</div>`;
             }).join('');
         const count = preset.locked.length + preset.banned.length;
         return `<div class="optimizer-filter-preset-tooltip" style="grid-template-columns:repeat(${Math.min(count || 1, 5)},max-content)">${tiles(preset.locked, 'locked')}${tiles(preset.banned, 'banned')}${count ? '' : _t('optimizer.filterPreset.empty')}</div>`;
@@ -973,13 +927,13 @@ window.EFTForge.optimizer = (function () {
         _renderWeightWidget();
     }
 
-    function _setUseEvoErgo(value) {
-        _useEvoErgo = value;
+    function _setUseTrueErgo(value) {
+        _useTrueErgo = value;
         // Two toggles drive the same state: the weight section's (hidden while the
         // Explore tab is active) and the Explore controls' own copy - keep both in
         // sync regardless of which one is actually visible right now.
-        document.querySelectorAll('[data-evo-ergo-toggle]').forEach(el => el.classList.toggle('active', value));
-        document.querySelectorAll('[data-evo-ergo-warning]').forEach(el => el.toggleAttribute('hidden', !value));
+        document.querySelectorAll('[data-true-ergo-toggle]').forEach(el => el.classList.toggle('active', value));
+        document.querySelectorAll('[data-true-ergo-warning]').forEach(el => el.toggleAttribute('hidden', !value));
         _renderWeightWidget();
         _refreshExploreAxisOptions();
     }
@@ -987,6 +941,14 @@ window.EFTForge.optimizer = (function () {
     function _setFleaAvailable(value) {
         _fleaAvailable = value;
         document.getElementById('optimizer-flea-toggle')?.classList.toggle('active', value);
+        _refreshStatRanges();
+    }
+
+    // Unpriced parts widen the candidate pool, so the mag/MOA slider ranges
+    // need a fresh fetch the same way a Flea/Trader Access change does.
+    function _setAllowUnpriced(value) {
+        _allowUnpriced = value;
+        document.getElementById('optimizer-unpriced-toggle')?.classList.toggle('active', value);
         _refreshStatRanges();
     }
 
@@ -1074,9 +1036,11 @@ window.EFTForge.optimizer = (function () {
 
     function _filterTagsHtml(ids, lookup, cls) {
         return ids.map(id => {
-            const name = lookup.find(x => x.id === id)?.name || id;
-            const sign = cls === 'include' ? '+' : '-';
-            return `<span class="optimizer-filter-tag optimizer-filter-tag-${cls}" data-remove-id="${_escape(id)}">${sign} ${_escape(name)} &times;</span>`;
+            const item = lookup.find(x => x.id === id)
+                || _filterPresets.flatMap(p => [...p.locked, ...p.banned]).find(x => x.id === id) || { id };
+            const status = cls === 'include' ? 'locked' : 'banned';
+            const label = `${item.name || item.short_name || id}: ${_t(`optimizer.filterPreset.${status}`)}. ${_t('optimizer.removeFilter')}`;
+            return `<button type="button" class="mf-tile-icon-wrap attachment-icon-wrapper optimizer-filter-tag optimizer-filter-preset-${status}" data-remove-id="${escapeHtml(id)}" data-tooltip="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${_filterTileContentHtml(item, status)}</button>`;
         }).join('');
     }
 
@@ -1091,8 +1055,8 @@ window.EFTForge.optimizer = (function () {
                 <div class="mf-tile-icon-wrap attachment-icon-wrapper">
                     <img class="attachment-icon" src="${_escape(item.icon_link || item.icon || '')}" loading="lazy" decoding="async" data-tooltip="${_escape(item.name || '')}" onerror="this.style.visibility='hidden'">
                     <div class="slot-shortname">${_escape(item.short_name || '')}</div>
-                    <button type="button" class="mf-tile-btn mf-tile-require${isIncluded ? ' active' : ''}" data-require-id="${_escape(item.id)}">+</button>
-                    <button type="button" class="mf-tile-btn mf-tile-ban${isExcluded ? ' active' : ''}" data-ban-id="${_escape(item.id)}">-</button>
+                    <button type="button" class="mf-tile-btn mf-tile-require${isIncluded ? ' active' : ''}" data-require-id="${_escape(item.id)}" aria-label="${escapeHtml(_t('optimizer.lockItem'))}" aria-pressed="${isIncluded}">${_LOCK_SVG}</button>
+                    <button type="button" class="mf-tile-btn mf-tile-ban${isExcluded ? ' active' : ''}" data-ban-id="${_escape(item.id)}" aria-label="${escapeHtml(_t('optimizer.banItem'))}" aria-pressed="${isExcluded}">${_BAN_SVG}</button>
                 </div>
             </div>
         `;
@@ -1264,6 +1228,7 @@ window.EFTForge.optimizer = (function () {
         `;
 
         el.querySelectorAll('[data-remove-id]').forEach(tag => tag.addEventListener('click', () => {
+            window.EFTForge.tooltip?.hide();
             const id = tag.dataset.removeId;
             _includedModIds = _includedModIds.filter(m => m !== id);
             _excludedModIds = _excludedModIds.filter(m => m !== id);
@@ -1384,9 +1349,10 @@ window.EFTForge.optimizer = (function () {
             ergoWeight: _ergoWeight,
             recoilWeight: _recoilWeight,
             priceWeight: _priceWeight,
-            useEvoErgo: _useEvoErgo,
+            useTrueErgo: _useTrueErgo,
             weightUiMode: _weightUiMode,
             fleaAvailable: _fleaAvailable,
+            allowUnpriced: _allowUnpriced,
             preventOverswing: _preventOverswing,
             requireSuppressor: _requireSuppressor,
             useExactMoaFloor: _useExactMoaFloor,
@@ -1407,9 +1373,10 @@ window.EFTForge.optimizer = (function () {
         _ergoWeight = 33;
         _recoilWeight = 34;
         _priceWeight = 33;
-        _useEvoErgo = false;
+        _useTrueErgo = false;
         _weightUiMode = 'triangle';
         _fleaAvailable = true;
+        _allowUnpriced = true;
         _preventOverswing = false;
         _requireSuppressor = false;
         _useExactMoaFloor = true;
@@ -1424,9 +1391,12 @@ window.EFTForge.optimizer = (function () {
         if (typeof saved.ergoWeight === 'number') _ergoWeight = saved.ergoWeight;
         if (typeof saved.recoilWeight === 'number') _recoilWeight = saved.recoilWeight;
         if (typeof saved.priceWeight === 'number') _priceWeight = saved.priceWeight;
-        if (typeof saved.useEvoErgo === 'boolean') _useEvoErgo = saved.useEvoErgo;
+        // Settings saved before the TrueErgo rename carry the toggle as useEvoErgo.
+        const savedTrueErgo = typeof saved.useTrueErgo === 'boolean' ? saved.useTrueErgo : saved.useEvoErgo;
+        if (typeof savedTrueErgo === 'boolean') _useTrueErgo = savedTrueErgo;
         if (saved.weightUiMode === 'sliders' || saved.weightUiMode === 'triangle') _weightUiMode = saved.weightUiMode;
         if (typeof saved.fleaAvailable === 'boolean') _fleaAvailable = saved.fleaAvailable;
+        if (typeof saved.allowUnpriced === 'boolean') _allowUnpriced = saved.allowUnpriced;
         if (typeof saved.preventOverswing === 'boolean') _preventOverswing = saved.preventOverswing;
         if (typeof saved.requireSuppressor === 'boolean') _requireSuppressor = saved.requireSuppressor;
         if (typeof saved.useExactMoaFloor === 'boolean') _useExactMoaFloor = saved.useExactMoaFloor;
@@ -1476,6 +1446,7 @@ window.EFTForge.optimizer = (function () {
             weapon_id: weaponId,
             trader_levels: state.traderLevels || null,
             flea_available: _fleaAvailable,
+            allow_unpriced: _allowUnpriced,
             game_mode: state.priceMode || 'pvp',
         };
         _statRangesPromise = fetch(`${EFTForge.config.API_BASE}/build/stat-ranges`, {
@@ -1502,6 +1473,7 @@ window.EFTForge.optimizer = (function () {
             weapon_id: weaponId,
             trader_levels: state.traderLevels || null,
             flea_available: _fleaAvailable,
+            allow_unpriced: _allowUnpriced,
             game_mode: state.priceMode || 'pvp',
         };
         fetch(`${EFTForge.config.API_BASE}/build/moa-floor`, {
@@ -1575,11 +1547,11 @@ window.EFTForge.optimizer = (function () {
     }
 
     // Min Ergonomics only ever floors the plain Ergonomics stat (see
-    // OptimizeParams.min_ergonomics/max_ergonomics) - under the EvoErgo toggle
-    // that's a real gap, since neither bound ever touches EvoErgo/EED itself.
-    // Flag it right where the constraint is set, not on the EvoErgo toggle.
+    // OptimizeParams.min_ergonomics/max_ergonomics) - under the TrueErgo toggle
+    // that's a real gap, since neither bound ever touches TrueErgo itself.
+    // Flag it right where the constraint is set, not on the TrueErgo toggle.
     function _ergoRangeWarningHtml() {
-        return `<span class="eed-warning-icon" data-evo-ergo-warning data-tooltip="${_escape(_t('optimizer.evoErgoLowWarnTooltip'))}"${_useEvoErgo ? '' : ' hidden'}>&#9888;</span>`;
+        return `<span class="eed-warning-icon" data-true-ergo-warning data-tooltip="${_escape(_t('optimizer.trueErgoLowWarnTooltip'))}"${_useTrueErgo ? '' : ' hidden'}>&#9888;</span>`;
     }
 
     function _ergoRangeHtml() {
@@ -1966,8 +1938,8 @@ window.EFTForge.optimizer = (function () {
                     </div>
                     <div class="optimizer-preset-add-row" id="optimizer-preset-add-row"></div>
                     <div class="optimizer-toggle-row">
-                        <span class="stat-label">${_t('optimizer.useEvoErgo')}</span>
-                        <button type="button" class="compare-toggle${_useEvoErgo ? ' active' : ''}" id="optimizer-evo-ergo-toggle" data-evo-ergo-toggle>
+                        <span class="stat-label">${_t('optimizer.useTrueErgo')}</span>
+                        <button type="button" class="compare-toggle${_useTrueErgo ? ' active' : ''}" id="optimizer-true-ergo-toggle" data-true-ergo-toggle>
                             <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
                         </button>
                     </div>
@@ -2023,6 +1995,12 @@ window.EFTForge.optimizer = (function () {
                     <div class="optimizer-toggle-row">
                         <span class="stat-label">${_t('optimizer.fleaAvailable')}</span>
                         <button type="button" class="compare-toggle${_fleaAvailable ? ' active' : ''}" id="optimizer-flea-toggle">
+                            <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
+                        </button>
+                    </div>
+                    <div class="optimizer-toggle-row">
+                        <span class="stat-label" title="${_escape(_t('optimizer.allowUnpricedTooltip'))}">${_t('optimizer.allowUnpriced')} <span class="optimizer-help-icon">?</span></span>
+                        <button type="button" class="compare-toggle${_allowUnpriced ? ' active' : ''}" id="optimizer-unpriced-toggle">
                             <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
                         </button>
                     </div>
@@ -2084,7 +2062,7 @@ window.EFTForge.optimizer = (function () {
         document.getElementById('optimizer-preset-recoil-focus').addEventListener('click', () => _setWeights(20, 70, 10));
         document.getElementById('optimizer-preset-ergo-focus').addEventListener('click', () => _setWeights(70, 20, 10));
         _renderCustomPresetRow();
-        document.getElementById('optimizer-evo-ergo-toggle').addEventListener('click', () => _setUseEvoErgo(!_useEvoErgo));
+        document.getElementById('optimizer-true-ergo-toggle').addEventListener('click', () => _setUseTrueErgo(!_useTrueErgo));
         document.getElementById('optimizer-weight-ui-sliders-btn').addEventListener('click', () => _setWeightUiMode('sliders'));
         document.getElementById('optimizer-weight-ui-triangle-btn').addEventListener('click', () => _setWeightUiMode('triangle'));
         _renderWeightWidget();
@@ -2127,6 +2105,7 @@ window.EFTForge.optimizer = (function () {
         });
 
         document.getElementById('optimizer-flea-toggle').addEventListener('click', () => _setFleaAvailable(!_fleaAvailable));
+        document.getElementById('optimizer-unpriced-toggle').addEventListener('click', () => _setAllowUnpriced(!_allowUnpriced));
         document.getElementById('optimizer-price-mode-btns')?.addEventListener('click', (e) => {
             const btn = e.target.closest('.toggle-btn');
             if (!btn) return;
@@ -2137,6 +2116,7 @@ window.EFTForge.optimizer = (function () {
         });
         _wireSection('market', () => {
             _setFleaAvailable(true);
+            _setAllowUnpriced(true);
             _setGameMode('pvp');
             resetTraderLevels();
         });
@@ -2179,7 +2159,7 @@ window.EFTForge.optimizer = (function () {
         const ubglAmmoSelect = document.getElementById('ubgl-ammo-select');
         const body = {
             weapon_id: weaponId,
-            use_evo_ergo: _useEvoErgo,
+            use_true_ergo: _useTrueErgo,
             ergo_weight: _ergoWeight / 100,
             recoil_weight: _recoilWeight / 100,
             price_weight: _priceWeight / 100,
@@ -2193,13 +2173,14 @@ window.EFTForge.optimizer = (function () {
             include_items: _includedModIds.length ? _includedModIds : null,
             exclude_items: _excludedModIds.length ? _excludedModIds : null,
             flea_available: _fleaAvailable,
+            allow_unpriced: _allowUnpriced,
             trader_levels: state.traderLevels || null,
             game_mode: state.priceMode || 'pvp',
             strength_level: state.currentStrengthLevel ?? 10,
             equip_ergo_modifier: state.currentEquipErgoModifier ?? 0,
             // Fills the solved build's magazine(s) with whatever ammo is currently selected in
             // the main builder, same as the "assume full mag" toggle already does for the stats
-            // panel - so the results panel's weight/EED/overswing/arm_stamina are computed the
+            // panel - so the results panel's weight/TrueErgo/overswing/arm_stamina are computed the
             // same way the main builder would show them for this same set of parts.
             assume_full_mag: state.assumeFullMag ?? true,
             selected_ammo_id: ammoSelect ? ammoSelect.value : null,
@@ -2211,17 +2192,17 @@ window.EFTForge.optimizer = (function () {
     }
 
     // "price"/"recoil" tradeoffs plot Ergonomics against another stat - under
-    // the EvoErgo toggle that axis is true EED instead (see explore.py's
+    // the TrueErgo toggle that axis is TrueErgo instead (see explore.py's
     // solve()), so its label swaps too. "ergo" (Recoil vs. Price) never
-    // involves ergo/EED at all, so it's untouched either way.
-    function _exploreAxesLabel(tradeoff, useEvoErgo) {
-        const key = useEvoErgo && tradeoff !== 'ergo' ? `optimizer.exploreAxes.${tradeoff}Evo` : `optimizer.exploreAxes.${tradeoff}`;
+    // involves ergo/TrueErgo at all, so it's untouched either way.
+    function _exploreAxesLabel(tradeoff, useTrueErgo) {
+        const key = useTrueErgo && tradeoff !== 'ergo' ? `optimizer.exploreAxes.${tradeoff}TrueErgo` : `optimizer.exploreAxes.${tradeoff}`;
         return _t(key);
     }
 
     function _exploreAxisOptionsHtml() {
         return ['price', 'recoil', 'ergo']
-            .map(axis => `<option value="${axis}" ${axis === _exploreTradeoff ? 'selected' : ''}>${_exploreAxesLabel(axis, _useEvoErgo)}</option>`)
+            .map(axis => `<option value="${axis}" ${axis === _exploreTradeoff ? 'selected' : ''}>${_exploreAxesLabel(axis, _useTrueErgo)}</option>`)
             .join('');
     }
 
@@ -2257,8 +2238,8 @@ window.EFTForge.optimizer = (function () {
                 <input id="optimizer-explore-steps-number" class="optimizer-input" type="number" min="10" max="81" step="1" required value="${_exploreSteps}" aria-label="${_escape(_t('optimizer.exploreResolution'))}">
             </div>
             <div class="optimizer-toggle-row">
-                <span class="stat-label" data-tooltip="${_escape(_t('optimizer.evoErgoBetaTip'))}">${_t('optimizer.useEvoErgo')}<span class="beta-badge">${_t('optimizer.evoErgoBetaBadge')}</span></span>
-                <button type="button" class="compare-toggle${_useEvoErgo ? ' active' : ''}" id="optimizer-explore-evo-ergo-toggle" data-evo-ergo-toggle>
+                <span class="stat-label" data-tooltip="${_escape(_t('optimizer.trueErgoBetaTip'))}">${_t('optimizer.useTrueErgo')}<span class="beta-badge">${_t('optimizer.trueErgoBetaBadge')}</span></span>
+                <button type="button" class="compare-toggle${_useTrueErgo ? ' active' : ''}" id="optimizer-explore-true-ergo-toggle" data-true-ergo-toggle>
                     <span class="compare-toggle-track"><span class="compare-toggle-knob"></span></span>
                 </button>
             </div>
@@ -2282,7 +2263,7 @@ window.EFTForge.optimizer = (function () {
         };
         range.addEventListener('input', syncSteps);
         number.addEventListener('input', syncSteps);
-        document.getElementById('optimizer-explore-evo-ergo-toggle').addEventListener('click', () => _setUseEvoErgo(!_useEvoErgo));
+        document.getElementById('optimizer-explore-true-ergo-toggle').addEventListener('click', () => _setUseTrueErgo(!_useTrueErgo));
     }
 
     // Coalesces bursts of progress events (a trivial weapon can solve a step in
@@ -2298,7 +2279,7 @@ window.EFTForge.optimizer = (function () {
     }
 
     async function _solveExplore(body) {
-        // use_evo_ergo stays - see explore.py's solve(), it only ever changes how
+        // use_true_ergo stays - see explore.py's solve(), it only ever changes how
         // the "max ergo" boundary point is picked. The weight sliders themselves
         // don't apply to Explore's per-axis sweep, so those stay stripped.
         delete body.ergo_weight;
@@ -2308,7 +2289,7 @@ window.EFTForge.optimizer = (function () {
         _explore = null;
         _exploreSelected = 0;
         _solveProgress = {
-            phase: null, done: 0, total: _exploreSteps + 1, points: [], previewBuild: null, use_evo_ergo: body.use_evo_ergo,
+            phase: null, done: 0, total: _exploreSteps + 1, points: [], previewBuild: null, use_true_ergo: body.use_true_ergo,
         };
         const controller = new AbortController();
         _abortController = controller;
@@ -2341,7 +2322,7 @@ window.EFTForge.optimizer = (function () {
                             total: ev.total,
                             points: forChart ? [..._solveProgress.points, ev.point] : _solveProgress.points,
                             previewBuild: ev.point ? ev.point.build : _solveProgress.previewBuild,
-                            use_evo_ergo: body.use_evo_ergo,
+                            use_true_ergo: body.use_true_ergo,
                         };
                         _scheduleSolveRender();
                     }, () => {
@@ -2369,7 +2350,9 @@ window.EFTForge.optimizer = (function () {
                 _explore = { ...data, request: body };
                 _exploreJustSolved = true;
                 _result = data.points[0]?.build || null;
-                if (!_result) _error = _t(data.complete ? 'optimizer.infeasible' : 'optimizer.exploreNoPoints');
+                if (!_result) _error = data.reason_details || data.reason_key || data.reason
+                    ? _formatReason(data)
+                    : _t(data.complete ? 'optimizer.infeasible' : 'optimizer.exploreNoPoints');
                 break;
             }
         } catch (err) {
@@ -2391,9 +2374,9 @@ window.EFTForge.optimizer = (function () {
         }
     }
 
-    function _explorePointLabel(p, i, useEvoErgo) {
-        const ergoLabel = useEvoErgo ? _t('optimizer.evoErgoShort') : _t('optimizer.ergonomics');
-        const ergoValue = useEvoErgo ? p.eed : p.ergo;
+    function _explorePointLabel(p, i, useTrueErgo) {
+        const ergoLabel = useTrueErgo ? _t('optimizer.trueErgoShort') : _t('optimizer.ergonomics');
+        const ergoValue = useTrueErgo ? fmtTrueErgo(p.true_ergo_delta) : p.ergo;
         return `${i + 1} · ${ergoLabel} ${ergoValue} · ${_t('optimizer.recoil')} ${p.recoil_v} · ${_formatPrice(p.price)}`;
     }
 
@@ -2404,11 +2387,11 @@ window.EFTForge.optimizer = (function () {
     // tick/lerp frame would be wasteful and would tear down an open dropdown.
     function _buildExploreSvgMarkup() {
         const { points, tradeoff } = _explore;
-        const useEvoErgo = !!_explore.request?.use_evo_ergo && tradeoff !== 'ergo';
-        const xKey = tradeoff === 'ergo' ? 'recoil_v' : (useEvoErgo ? 'eed' : 'ergo');
+        const useTrueErgo = !!_explore.request?.use_true_ergo && tradeoff !== 'ergo';
+        const xKey = tradeoff === 'ergo' ? 'recoil_v' : (useTrueErgo ? 'true_ergo_delta' : 'ergo');
         const yKey = tradeoff === 'price' ? 'recoil_v' : 'price';
-        const xLabel = xKey === 'recoil_v' ? _t('optimizer.recoil') : _t(useEvoErgo ? 'optimizer.evoErgoShort' : 'optimizer.ergonomics');
-        const yLabel = _t(yKey === 'price' ? 'optimizer.price' : 'optimizer.recoil');
+        const xLabel = xKey === 'recoil_v' ? _t('optimizer.recoilAxis') : _t(useTrueErgo ? 'optimizer.trueErgoShort' : 'optimizer.ergonomics');
+        const yLabel = _t(yKey === 'price' ? 'optimizer.price' : 'optimizer.recoilAxis');
         const xs = points.map(p => p[xKey]), ys = points.map(p => p[yKey]);
         const minX = Math.min(...xs), minY = Math.min(...ys);
         const spanX = Math.max(...xs) - minX || 1, spanY = Math.max(...ys) - minY || 1;
@@ -2424,7 +2407,7 @@ window.EFTForge.optimizer = (function () {
         const px = p => mapX(p[xKey]);
         const py = p => mapY(p[yKey]);
         const fmt = (v, key) => key === 'price' ? _formatPrice(v) : String(Math.round(v));
-        const pointLabel = (p, i) => _explorePointLabel(p, i, useEvoErgo);
+        const pointLabel = (p, i) => _explorePointLabel(p, i, useTrueErgo);
         const pointTooltipHtml = p => {
             const s = p.build?.final_stats;
             if (!s) return null;
@@ -2439,7 +2422,7 @@ window.EFTForge.optimizer = (function () {
             const totalErgo = parseFloat(s.total_ergo ?? 0);
             const ergoText = Math.abs(totalErgo - Math.round(totalErgo)) < 0.001 ? Math.round(totalErgo) : totalErgo.toFixed(1);
             const rv = s.recoil_vertical, rh = s.recoil_horizontal, moa = s.accuracy_moa;
-            const eed = parseFloat(s.evo_ergo_delta ?? 0);
+            const trueErgo = parseFloat(s.true_ergo_delta ?? 0);
             const sighting = s.sighting_range;
             const html = `
                 <div class="optimizer-point-tooltip">
@@ -2451,7 +2434,7 @@ window.EFTForge.optimizer = (function () {
                     <div class="stat-subsection">
                     <div class="stat-subsection-cols">
                     <div class="stat-col">
-                        <div class="stat-row"><span class="stat-label">${_t('stats.eedLabelShort')}</span><span class="${eed >= 0 ? 'positive' : 'negative'}">${eed > 0 ? '+' : ''}${eed.toFixed(1)}</span></div>
+                        <div class="stat-row"><span class="stat-label">${_t('stats.trueErgoLabelShort')}</span><span class="${trueErgo >= 0 ? 'positive' : 'negative'}">${fmtTrueErgo(trueErgo)}</span></div>
                         <div class="stat-row"><span class="stat-label">${_t('stats.overswing')}</span><span class="${s.overswing ? 'negative' : 'positive'}">${s.overswing ? _t('stats.yes') : _t('stats.no')}</span></div>
                     </div>
                     <div class="stat-col">
@@ -2513,7 +2496,7 @@ window.EFTForge.optimizer = (function () {
                         </g>`;
                     }).join('')}`;
         const svg = `
-            <svg viewBox="0 0 610 300" role="group" aria-label="${_escape(_exploreAxesLabel(tradeoff, useEvoErgo))}">
+            <svg viewBox="0 0 610 300" role="group" aria-label="${_escape(_exploreAxesLabel(tradeoff, useTrueErgo))}">
                 <defs><clipPath id="optimizer-explore-clip"><rect x="${ML}" y="${MT}" width="${PW}" height="${PH}"/></clipPath></defs>
                 ${easterEgg ? '' : `${ticks}<text x="78" y="18">${_escape(yLabel)}</text><text x="323" y="293" text-anchor="middle">${_escape(xLabel)}</text>`}
                 <g${clipAttr}>
@@ -2572,13 +2555,13 @@ window.EFTForge.optimizer = (function () {
         if (_exploreZoomLerpRaf) { cancelAnimationFrame(_exploreZoomLerpRaf); _exploreZoomLerpRaf = null; }
 
         const { points, complete, tradeoff } = _explore;
-        const useEvoErgo = !!_explore.request?.use_evo_ergo && tradeoff !== 'ergo';
+        const useTrueErgo = !!_explore.request?.use_true_ergo && tradeoff !== 'ergo';
         const ctx = _buildExploreSvgMarkup();
         const chart = document.createElement('div');
         chart.className = 'optimizer-explore-chart';
         chart.innerHTML = `
             <div class="optimizer-section-title">${_t('optimizer.exploreChartTitle')}</div>
-            <p class="optimizer-explore-hint">${_t(useEvoErgo ? 'optimizer.exploreSelectHintEvo' : 'optimizer.exploreSelectHint')}</p>
+            <p class="optimizer-explore-hint">${_t(useTrueErgo ? 'optimizer.exploreSelectHintTrueErgo' : 'optimizer.exploreSelectHint')}</p>
             <p class="optimizer-explore-hint optimizer-explore-zoom-hint">${_t('graph.hintScroll')} · ${_t('graph.hintPan')} · ${_t('graph.hintBoxZoom')} · ${_t('graph.hintReset')}</p>
             ${!complete ? `<p class="optimizer-explore-partial">${_t('optimizer.explorePartial')}</p>` : ''}
             <div class="optimizer-explore-svg-wrap">${ctx.svg}</div>
@@ -3008,16 +2991,16 @@ window.EFTForge.optimizer = (function () {
         const mergedBody = container.querySelector('#optimizer-explore-merged-body');
         if (!mergedBody) return;
 
-        const useEvoErgo = !!_solveProgress?.use_evo_ergo && tradeoff !== 'ergo';
-        const xKey = tradeoff === 'ergo' ? 'recoil_v' : (useEvoErgo ? 'eed' : 'ergo');
+        const useTrueErgo = !!_solveProgress?.use_true_ergo && tradeoff !== 'ergo';
+        const xKey = tradeoff === 'ergo' ? 'recoil_v' : (useTrueErgo ? 'true_ergo_delta' : 'ergo');
         const yKey = tradeoff === 'price' ? 'recoil_v' : 'price';
         const targetDomain = _computeChartDomain(points, xKey, yKey);
 
         let chart = mergedBody.querySelector('.optimizer-explore-chart');
         if (!chart) {
-            const xLabel = xKey === 'recoil_v' ? _t('optimizer.recoil') : _t(useEvoErgo ? 'optimizer.evoErgoShort' : 'optimizer.ergonomics');
-            const yLabel = _t(yKey === 'price' ? 'optimizer.price' : 'optimizer.recoil');
-            chart = _buildLiveChartSkeleton(_exploreAxesLabel(tradeoff, useEvoErgo), xLabel, yLabel);
+            const xLabel = xKey === 'recoil_v' ? _t('optimizer.recoilAxis') : _t(useTrueErgo ? 'optimizer.trueErgoShort' : 'optimizer.ergonomics');
+            const yLabel = _t(yKey === 'price' ? 'optimizer.price' : 'optimizer.recoilAxis');
+            chart = _buildLiveChartSkeleton(_exploreAxesLabel(tradeoff, useTrueErgo), xLabel, yLabel);
             mergedBody.prepend(chart);
             // Snap straight to the first cluster - only domain changes *after*
             // this first paint animate.
@@ -3326,9 +3309,9 @@ window.EFTForge.optimizer = (function () {
         const accText = moa != null ? moa.toFixed(2) + ' MOA' : '-';
         const accTarget = moa != null ? Math.min(moa / 10, 1) * 100 : 0;
 
-        const eed = parseFloat(s.evo_ergo_delta ?? 0);
-        const eedText = `${eed > 0 ? '+' : ''}${eed.toFixed(1)}`;
-        const eedClass = eed >= 0 ? 'positive' : 'negative';
+        const trueErgo = parseFloat(s.true_ergo_delta ?? 0);
+        const trueErgoText = fmtTrueErgo(trueErgo);
+        const trueErgoClass = trueErgo >= 0 ? 'positive' : 'negative';
         const overswingClass = s.overswing ? 'negative' : 'positive';
         const overswingText = s.overswing ? _t('stats.yes') : _t('stats.no');
 
@@ -3364,7 +3347,7 @@ window.EFTForge.optimizer = (function () {
             <div class="optimizer-results-substats stat-subsection">
                 <div class="stat-subsection-cols">
                 <div class="stat-col">
-                <div class="stat-row"><span class="stat-label">${_t('stats.eedLabelShort')}</span><span class="${eedClass}">${eedText}</span></div>
+                <div class="stat-row"><span class="stat-label">${_t('stats.trueErgoLabelShort')}</span><span class="${trueErgoClass}">${trueErgoText}</span></div>
                 <div class="stat-row"><span class="stat-label">${_t('stats.overswing')}</span><span class="${overswingClass}">${overswingText}</span></div>
                 </div>
                 <div class="stat-col">
@@ -3376,6 +3359,7 @@ window.EFTForge.optimizer = (function () {
         const gunImgHtml = `
             <div class="bp-gun-img-wrap" id="optimizer-result-gun-img-wrap">
                 <img id="optimizer-result-gun-img" class="optimizer-result-gun-img" alt="" onerror="this.style.visibility='hidden'">
+                ${_bpWorkingLogoHtml()}
             </div>`;
         const costRowHtml = `
             <div class="cost-total-row">
@@ -3428,30 +3412,24 @@ window.EFTForge.optimizer = (function () {
 
     // The solved build's full gun image, driven by the exact same rules as the main
     // placeholder / tab-preview gun image (build-preview.js): a server-generated
-    // composite of the actual build when the image-gen toggle is on, and the static
+    // composite of the actual build when the Kitbash! Image Generation toggle is on, and the static
     // factory-preset asset when it's off (or when the admin/local kill-switch is set).
     // Scoped to this <img> and its own abort/generation counter so it never touches the
     // shared _bp* state that manages the main build image.
     let _resultImgAbort = null;
     let _resultImgGen = 0;
 
-    // Queue overlay for the result image, mirroring _bpSetQueued (build-preview.js)
-    // and _tpSetQueued (tab-manager.js) - same icon/tooltip, scoped to this panel's
-    // own wrapper instead of touching the shared placeholder/tooltip containers.
-    function _setResultQueued(isQueued) {
-        const wrap = document.getElementById('optimizer-result-gun-img-wrap');
-        if (!wrap) return;
-        let ov = wrap.querySelector('.bp-queue-overlay');
-        if (isQueued && !ov) {
-            ov = document.createElement('img');
-            ov.className = 'bp-queue-overlay';
-            ov.src = './assets/images/queue.png';
-            ov.alt = '';
-            ov.title = _t('toast.imgGenQueuedMsg');
-            wrap.appendChild(ov);
-        } else if (!isQueued && ov) {
-            ov.remove();
-        }
+    function _kitbashOn() {
+        return !!window._bpIsEnabled?.() && !window._bpIsGloballyDisabled?.();
+    }
+
+    // Resolves once imgEl has finished loading its current src (or failed to).
+    function _imgSettled(imgEl) {
+        if (imgEl.complete) return Promise.resolve();
+        return new Promise(resolve => {
+            imgEl.addEventListener('load', resolve, { once: true });
+            imgEl.addEventListener('error', resolve, { once: true });
+        });
     }
 
     async function _loadResultGunImage() {
@@ -3466,73 +3444,83 @@ window.EFTForge.optimizer = (function () {
         const pairs = (_result.slot_pairs || []).map(pair => pair.slice());
         const key = pairs.map(p => p.join(':')).sort().join(',');
 
-        // Static default (toggle off, factory config, or kill-switch): the preset
-        // composite, same fallback the placeholder resets to. Bare receiver when the
-        // build somehow has no attachments.
+        // Static default (toggle off, factory config, kill-switch, or a failed
+        // drawing): the preset composite, same fallback the placeholder resets to.
+        // Bare receiver when the build somehow has no attachments.
         const staticSrc = key === ''
             ? (gun.bare_image_512_link || gun.image_512_link || gun.icon_link || '')
             : (gun.image_512_link || gun.icon_link || '');
+        const wrap = document.getElementById('optimizer-result-gun-img-wrap');
+        const setWorking = working => wrap?.classList.toggle('kb-working', working);
+        setWorking(false);
+        const showStatic = () => {
+            imgEl.dataset.kitbash = '';
+            imgEl.style.opacity = '';
+            imgEl.style.filter = '';
+            imgEl.style.visibility = '';
+            imgEl.src = staticSrc;
+        };
         imgEl.referrerPolicy = '';
-        imgEl.style.opacity = '';
-        imgEl.style.filter = '';
-        imgEl.style.visibility = '';
-        imgEl.src = staticSrc;
 
-        // Toggle off, admin/local kill-switch, or a build that maps to a static asset
-        // (bare receiver / untouched factory preset) - keep the static image, no request.
-        if (!window._bpIsEnabled?.() || window._bpIsGloballyDisabled?.()) return;
-        if (key === '' || key === EFTForge.state.factoryPairsKey) return;
+        // Toggle off or admin/local kill-switch - show the static image, no request.
+        if (!_kitbashOn()) { showStatic(); return; }
+
+        // Kitbash! will draw this build: dim the previous Kitbash! drawing while it
+        // works, or stay blank when there is none, rather than flashing the
+        // tarkov.dev image for the moment the render takes.
+        if (imgEl.dataset.kitbash === '1') {
+            imgEl.style.opacity = '0.35';
+            imgEl.style.filter = 'brightness(0.85)';
+        } else {
+            imgEl.style.visibility = 'hidden';
+        }
+        setWorking(true);
+        let settled = false;
 
         // Warm slotCache for any parts _bpBuildSptItemsForPairs needs to resolve slot
         // names (same warm-up the tab preview does before generating an arbitrary build).
         const uncached = [...new Set(pairs.map(([, iid]) => iid).filter(iid => !EFTForge.state.slotCache[iid]))];
-        if (uncached.length) {
-            try {
+        const signal = (_resultImgAbort = new AbortController()).signal;
+        try {
+            if (uncached.length) {
                 const batch = await fetchItemSlotsBatch(uncached);
                 for (const [iid, slots] of Object.entries(batch)) cacheSet(EFTForge.state.slotCache, iid, slots);
-            } catch (_) { return; }
-        }
-        if (gen !== _resultImgGen || !window._bpIsEnabled?.() || window._bpIsGloballyDisabled?.()) return;
+            }
+            if (gen !== _resultImgGen || !_kitbashOn()) return;
 
-        const sptData = _bpBuildSptItemsForPairs(gun, pairs);
-        if (!sptData) return;
-
-        imgEl.style.opacity = '0.35';
-        imgEl.style.filter = 'brightness(0.85)';
-        _resultImgAbort?.abort();
-        _resultImgAbort = new AbortController();
-        const signal = _resultImgAbort.signal;
-        try {
-            // Queue status check, same as build-preview.js/_bpGenerate and
-            // tab-manager.js/_tpLoadImage - best-effort, a failed check just
-            // means no overlay rather than blocking the generation itself.
-            try {
-                const busyResp = await fetch(`${EFTForge.config.API_BASE}/build-image/busy`, { signal });
-                if (busyResp.ok) {
-                    const busyData = await busyResp.json();
-                    if (gen === _resultImgGen && busyData.busy) _setResultQueued(true);
-                }
-            } catch (_) {}
-            if (gen !== _resultImgGen || signal.aborted || !window._bpIsEnabled?.()
-                || window._bpIsGloballyDisabled?.()) return;
+            const sptData = _bpBuildSptItemsForPairs(gun, pairs);
+            if (!sptData) return;
+            // Loaded with the builder's rounds, as the solve was; the factory icon has
+            // empty magazines and chamber, so a loaded factory build is rendered too.
+            const ammo = window._bpAmmo?.() || null;
+            if (key !== '' && key === EFTForge.state.factoryPairsKey && !ammo) return;
 
             const resp = await fetch(`${EFTForge.config.API_BASE}/build-image`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...sptData, source: "optimizer" }),
+                body: JSON.stringify({ ...sptData, ...ammo, source: "optimizer" }),
                 signal,
             });
             if (!resp.ok) return;
             const data = await resp.json();
-            if (data.image_url && gen === _resultImgGen && !signal.aborted
-                && window._bpIsEnabled?.() && !window._bpIsGloballyDisabled?.()) imgEl.src = data.image_url;
+            if (!data.image_url || gen !== _resultImgGen || signal.aborted || !_kitbashOn()) return;
+            imgEl.src = data.image_url;
+            await _imgSettled(imgEl);
+            // A drawing that failed to load falls back to the static image too.
+            if (gen !== _resultImgGen || !imgEl.naturalWidth) return;
+            settled = true;
+            imgEl.dataset.kitbash = '1';
+            imgEl.style.opacity = '';
+            imgEl.style.filter = '';
+            imgEl.style.visibility = '';
         } catch (_) {
-            // Network failure or aborted - leave the static preset image showing.
+            // Network failure or aborted - the static image goes up below.
         } finally {
+            // Anything short of a finished drawing (a static build, a failure, the
+            // toggle flipped off mid-render) shows the static image instead.
             if (gen === _resultImgGen) {
-                imgEl.style.opacity = '';
-                imgEl.style.filter = '';
-                _setResultQueued(false);
+                setWorking(false);
+                if (!settled) showStatic();
             }
             if (_resultImgAbort?.signal === signal) _resultImgAbort = null;
         }
@@ -3678,10 +3666,11 @@ window.EFTForge.optimizer = (function () {
                     <th>${_t('th.recoil')}</th>
                     <th>${_t('th.accuracy')}</th>
                     <th>${_t('th.ergo')}</th>
-                    <th>${_t('th.evoErgo')}</th>
+                    <th>${_t('th.trueErgo')}</th>
                     <th>${_t('th.balance')}</th>
                     <th>${_t('th.heatCoolBurn')}</th>
                     <th>${_t('th.muzzleVelocity')}</th>
+                    <th>${_t('th.loudness')}</th>
                 </tr>
             </thead>
         `;
@@ -3692,7 +3681,7 @@ window.EFTForge.optimizer = (function () {
     // The two differences the results panel wants: the favorite star is replaced by a
     // lock/ban pair, and the like/dislike rating block is dropped.
     function _manifestRowHtml(item) {
-        const evo = (_result.evo_contributions && _result.evo_contributions[item.id]) || 0;
+        const evo = (_result.true_ergo_contributions && _result.true_ergo_contributions[item.id]) || 0;
         const recoilPercent = parseFloat(item.recoil_modifier ?? 0) * 100;
         const ergoModifier = parseFloat(item.ergonomics_modifier ?? 0);
 
@@ -3739,6 +3728,7 @@ window.EFTForge.optimizer = (function () {
                 <td class="col-combo-only"></td>
                 ${_heatCoolBurnCellHtml(item)}
                 ${_velCellHtml(item)}
+                ${_loudCellHtml(item)}
             </tr>
         `;
     }
@@ -3822,7 +3812,7 @@ window.EFTForge.optimizer = (function () {
             recoil_vertical: null,
             recoil_horizontal: null,
             accuracy_moa: null,
-            evo_ergo_delta: 0,
+            true_ergo_delta: 0,
             overswing: false,
             total_weight: 0,
             sighting_range: null,
@@ -3884,9 +3874,12 @@ window.EFTForge.optimizer = (function () {
         if (!imgEl || !gun) return;
         const pairs = build?.slot_pairs || [];
         const key = pairs.map(p => p.join(':')).sort().join(',');
+        imgEl.dataset.kitbash = '';
         imgEl.style.opacity = '';
         imgEl.style.filter = '';
-        imgEl.style.visibility = '';
+        // Kitbash! draws the finished result, so leave the gun blank while solving
+        // instead of showing a tarkov.dev image that gets swapped out at the end.
+        imgEl.style.visibility = _kitbashOn() ? 'hidden' : '';
         imgEl.src = key === ''
             ? (gun.bare_image_512_link || gun.image_512_link || gun.icon_link || '')
             : (gun.image_512_link || gun.icon_link || '');
@@ -4039,7 +4032,19 @@ window.EFTForge.optimizer = (function () {
             const button = document.getElementById(id);
             if (button) button.disabled = _solving;
         }
-        document.querySelector('.optimizer-config-pane')?.toggleAttribute('inert', _solving);
+        const configPane = document.querySelector('.optimizer-config-pane');
+        if (configPane) {
+            configPane.toggleAttribute('inert', _solving);
+            let overlay = configPane.querySelector(':scope > .optimizer-config-pane-overlay');
+            if (_solving && !overlay) {
+                overlay = document.createElement('div');
+                overlay.className = 'optimizer-config-pane-overlay';
+                overlay.innerHTML = `<div class="optimizer-spinner optimizer-spinner-lg"></div><div>${_t('optimizer.solveInProgress')}</div>`;
+                configPane.appendChild(overlay);
+            } else if (!_solving && overlay) {
+                overlay.remove();
+            }
+        }
     }
 
     function _renderBuildResult() {
@@ -4106,10 +4111,10 @@ window.EFTForge.optimizer = (function () {
                 <span class="optimizer-manifest-title">${_t('optimizer.buildManifest')}</span>
             </div>
             <div class="optimizer-manifest-table-wrap">
-                <table class="attachment-table hide-col-rub-recoil hide-col-balance hide-col-acc hide-col-heat hide-col-vel optimizer-manifest-table">
+                <table class="attachment-table hide-col-rub-recoil hide-col-balance hide-col-acc hide-col-heat hide-col-vel hide-col-loud optimizer-manifest-table">
                     ${_manifestTheadHtml()}
                     <tbody id="optimizer-manifest-body">
-                        <tr><td colspan="11" class="optimizer-manifest-loading">${_t('optimizer.loadingItems')}</td></tr>
+                        <tr><td colspan="12" class="optimizer-manifest-loading">${_t('optimizer.loadingItems')}</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -4197,7 +4202,7 @@ window.EFTForge.optimizer = (function () {
         if (!body) return;
         const manifestItems = resolved.filter(i => !retainedIds.has(i.id));
         if (!manifestItems.length) {
-            body.innerHTML = `<tr><td colspan="11" class="optimizer-manifest-loading">${_t('optimizer.noItems')}</td></tr>`;
+            body.innerHTML = `<tr><td colspan="12" class="optimizer-manifest-loading">${_t('optimizer.noItems')}</td></tr>`;
             return;
         }
         body.innerHTML = manifestItems.map(_manifestRowHtml).join('');
@@ -4279,6 +4284,6 @@ window.EFTForge.optimizer = (function () {
     // Scripts are loaded at the end of <body> so DOM is ready; init immediately.
     init();
 
-    return { showPanel, hidePanel, onBuildLeave, onLangChange, onTraderLevelsChange, pulse };
+    return { showPanel, hidePanel, onBuildLeave, onLangChange, onTraderLevelsChange };
 
 }());
