@@ -210,7 +210,7 @@ def test_projected_offers_preserve_access_filters_and_price_selection(
     }
 
 
-def test_pruning_preserves_legacy_multi_parent_slot_constraints(db):
+def test_absent_shared_owner_does_not_conflict_with_other_placements(db):
     setup_graph(
         db,
         {
@@ -221,9 +221,9 @@ def test_pruning_preserves_legacy_multi_parent_slot_constraints(db):
     )
     result = optimize_weapon(db, "gun", OptimizeParams(exclude_items=["unavailable"]))
     assert result["status"] == "optimal"
-    # The existing item-level MILP imposes a mutex on the shared slot even
-    # when its owner is absent. PR2 must not silently change that formulation.
-    assert len(result["selected_items"]) == 1
+    # Keep each item in its own root slot; the absent shared owner adds no mutex.
+    assert set(result["selected_items"]) == {"a", "b"}
+    assert {tuple(pair) for pair in result["slot_pairs"]} == {("left", "a"), ("right", "b")}
 
 
 def test_fixed_weapon_conflicts_still_cover_slots_of_removed_owners(db):
