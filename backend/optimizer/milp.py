@@ -10,7 +10,7 @@ from collections import deque
 from types import SimpleNamespace
 
 import numpy as np
-from scipy.optimize import milp, LinearConstraint, Bounds
+from scipy.optimize import milp, LinearConstraint, Bounds, linear_sum_assignment
 from scipy.sparse import csc_array
 
 from optimizer.local_price import improve_price
@@ -204,36 +204,53 @@ class ConstraintBuilder:
         return self._compiled
 
 
-def _order_pairs_parent_first(selected_ids, item_to_valid_slots, weapon_id, selected_set, placement=None):
-    """EFTForge's build importer (build-manager.js loadBuildFromPayload) installs
-    slot_pairs with a single BFS pass and looks up each pair's parent node by
-    slot id - so a child pair arriving before its parent silently gets dropped.
-    I pick one concrete slot per selected item (same "first owner that's
-    actually in the build" rule the plain selected-order version used), then
-    emit pairs in a real BFS from the weapon outward so every parent is
-    guaranteed to precede its children.
-    """
+def _order_pairs_parent_first(
+    selected_ids, item_to_valid_slots, weapon_id, selected_set, required_slots=(), *, placement=None
+):
     if placement is not None:
         return placement.match(selected_ids)
+    # Match each selected item to one distinct slot before ordering its parents.
+    # Prefer required slots so a shared attachment cannot leave one empty.
+    if not selected_ids:
+        return []
+    options = {
+        iid: [
+            (sid, owner)
+            for sid, owner in item_to_valid_slots.get(iid, ())
+            if owner == weapon_id or owner in selected_set
+        ]
+        for iid in selected_ids
+    }
+    slot_ids = sorted({sid for slots in options.values() for sid, _ in slots})
+    if len(slot_ids) < len(selected_ids):
+        return []
+    slot_idx = {sid: j for j, sid in enumerate(slot_ids)}
+    costs = np.full((len(selected_ids), len(slot_ids)), np.inf)
+    for row, iid in enumerate(selected_ids):
+        for sid, _ in options[iid]:
+            costs[row, slot_idx[sid]] = -1 if sid in required_slots else 0
+    try:
+        rows, columns = linear_sum_assignment(costs)
+    except ValueError:
+        return []
     chosen = {}
-    for item_id in selected_ids:
-        for slot_id, owner in sorted(item_to_valid_slots.get(item_id, [])):
-            if owner == weapon_id or owner in selected_set:
-                chosen[item_id] = (slot_id, owner)
-                break
-
+    for row, column in zip(rows, columns):
+        iid = selected_ids[row]
+        sid = slot_ids[column]
+        chosen[iid] = next((slot, owner) for slot, owner in options[iid] if slot == sid)
     children_of = {}
-    for item_id, (_, owner) in chosen.items():
-        children_of.setdefault(owner, []).append(item_id)
-
+    for iid, (_, owner) in chosen.items():
+        children_of.setdefault(owner, []).append(iid)
     pairs = []
     queue = deque(children_of.get(weapon_id, []))
+    visited = set()
     while queue:
-        item_id = queue.popleft()
-        slot_id, _ = chosen[item_id]
-        pairs.append([slot_id, item_id])
-        queue.extend(children_of.get(item_id, []))
-
+        iid = queue.popleft()
+        if iid in visited:
+            continue
+        visited.add(iid)
+        pairs.append([chosen[iid][0], iid])
+        queue.extend(children_of.get(iid, []))
     return pairs
 
 
@@ -770,7 +787,7 @@ def _solve_relaxation_once(
     selected_ids = [item_ids[i] for i in range(n) if res.x[i] > 0.5]
     selected_set = set(selected_ids)
     slot_pairs = _order_pairs_parent_first(
-        selected_ids, item_to_valid_slots, weapon_id, selected_set, getattr(cb, "placement", None)
+        selected_ids, item_to_valid_slots, weapon_id, selected_set, placement=getattr(cb, "placement", None)
     )
     if slot_pairs is None:
         result = _empty_result("error", "Selected items have no legal slot assignment.", metadata, metrics)
@@ -1442,7 +1459,7 @@ def build_and_solve(
                         item_to_valid_slots,
                         weapon.id,
                         set(result["selected_items"]),
-                        cb.placement,
+                        placement=cb.placement,
                     )
         elif params.prevent_overswing:
             result = _solve_avoiding_overswing(
@@ -1485,7 +1502,7 @@ def build_and_solve(
                         item_to_valid_slots,
                         weapon.id,
                         set(result["selected_items"]),
-                        cb.placement,
+                        placement=cb.placement,
                     )
         solve_metrics = (
             result["metrics"] if "solve_count" in result["metrics"] else _aggregate_attempt_metrics([result])
@@ -1618,7 +1635,11 @@ def build_and_solve(
         )
         if best["status"] in ("optimal", "feasible"):
             best["slot_pairs"] = _order_pairs_parent_first(
-                best["selected_items"], item_to_valid_slots, weapon.id, set(best["selected_items"]), cb.placement
+                best["selected_items"],
+                item_to_valid_slots,
+                weapon.id,
+                set(best["selected_items"]),
+                placement=cb.placement,
             )
     best["metrics"] = {
         **model_metrics,

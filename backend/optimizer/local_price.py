@@ -72,7 +72,7 @@ def improve_price(
         for owner in owners[child]:
             children.setdefault(owner, set()).add(child)
     bits = {i: 1 << j for j, i in enumerate(selected)}
-    blocked = [0] * (n + 1)
+    blocked = [0] * cb.n
     for coeffs, _lower, upper in cb.rows:
         if upper != 1 or any(value != 1 for value in coeffs.values()):
             continue
